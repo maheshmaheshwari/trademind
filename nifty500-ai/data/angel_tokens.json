@@ -1,0 +1,2996 @@
+{
+  "360ONE": {
+    "token": "13061",
+    "trading_symbol": "360ONE-EQ",
+    "name": "360 ONE WAM Ltd.",
+    "sector": "Financial Services"
+  },
+  "3MINDIA": {
+    "token": "474",
+    "trading_symbol": "3MINDIA-EQ",
+    "name": "3M India Ltd.",
+    "sector": "Diversified"
+  },
+  "ABB": {
+    "token": "13",
+    "trading_symbol": "ABB-EQ",
+    "name": "ABB India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "ACC": {
+    "token": "22",
+    "trading_symbol": "ACC-EQ",
+    "name": "ACC Ltd.",
+    "sector": "Construction Materials"
+  },
+  "ACMESOLAR": {
+    "token": "27061",
+    "trading_symbol": "ACMESOLAR-EQ",
+    "name": "ACME Solar Holdings Ltd.",
+    "sector": "Power"
+  },
+  "AIAENG": {
+    "token": "13086",
+    "trading_symbol": "AIAENG-EQ",
+    "name": "AIA Engineering Ltd.",
+    "sector": "Capital Goods"
+  },
+  "APLAPOLLO": {
+    "token": "25780",
+    "trading_symbol": "APLAPOLLO-EQ",
+    "name": "APL Apollo Tubes Ltd.",
+    "sector": "Capital Goods"
+  },
+  "AUBANK": {
+    "token": "21238",
+    "trading_symbol": "AUBANK-EQ",
+    "name": "AU Small Finance Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "AWL": {
+    "token": "8110",
+    "trading_symbol": "AWL-EQ",
+    "name": "AWL Agri Business Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "AADHARHFC": {
+    "token": "23729",
+    "trading_symbol": "AADHARHFC-EQ",
+    "name": "Aadhar Housing Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "AARTIIND": {
+    "token": "7",
+    "trading_symbol": "AARTIIND-EQ",
+    "name": "Aarti Industries Ltd.",
+    "sector": "Chemicals"
+  },
+  "AAVAS": {
+    "token": "5385",
+    "trading_symbol": "AAVAS-EQ",
+    "name": "Aavas Financiers Ltd.",
+    "sector": "Financial Services"
+  },
+  "ABBOTINDIA": {
+    "token": "17903",
+    "trading_symbol": "ABBOTINDIA-EQ",
+    "name": "Abbott India Ltd.",
+    "sector": "Healthcare"
+  },
+  "ACE": {
+    "token": "13587",
+    "trading_symbol": "ACE-EQ",
+    "name": "Action Construction Equipment Ltd.",
+    "sector": "Capital Goods"
+  },
+  "ADANIENSOL": {
+    "token": "10217",
+    "trading_symbol": "ADANIENSOL-EQ",
+    "name": "Adani Energy Solutions Ltd.",
+    "sector": "Power"
+  },
+  "ADANIENT": {
+    "token": "25",
+    "trading_symbol": "ADANIENT-EQ",
+    "name": "Adani Enterprises Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "ADANIGREEN": {
+    "token": "3563",
+    "trading_symbol": "ADANIGREEN-EQ",
+    "name": "Adani Green Energy Ltd.",
+    "sector": "Power"
+  },
+  "ADANIPORTS": {
+    "token": "15083",
+    "trading_symbol": "ADANIPORTS-EQ",
+    "name": "Adani Ports and Special Economic Zone Ltd.",
+    "sector": "Services"
+  },
+  "ADANIPOWER": {
+    "token": "17388",
+    "trading_symbol": "ADANIPOWER-EQ",
+    "name": "Adani Power Ltd.",
+    "sector": "Power"
+  },
+  "ATGL": {
+    "token": "6066",
+    "trading_symbol": "ATGL-EQ",
+    "name": "Adani Total Gas Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "ABCAPITAL": {
+    "token": "21614",
+    "trading_symbol": "ABCAPITAL-EQ",
+    "name": "Aditya Birla Capital Ltd.",
+    "sector": "Financial Services"
+  },
+  "ABFRL": {
+    "token": "30108",
+    "trading_symbol": "ABFRL-EQ",
+    "name": "Aditya Birla Fashion and Retail Ltd.",
+    "sector": "Consumer Services"
+  },
+  "ABLBL": {
+    "token": "756843",
+    "trading_symbol": "ABLBL-EQ",
+    "name": "Aditya Birla Lifestyle Brands Ltd.",
+    "sector": "Consumer Services"
+  },
+  "ABREL": {
+    "token": "625",
+    "trading_symbol": "ABREL-EQ",
+    "name": "Aditya Birla Real Estate Ltd.",
+    "sector": "Forest Materials"
+  },
+  "ABSLAMC": {
+    "token": "6018",
+    "trading_symbol": "ABSLAMC-EQ",
+    "name": "Aditya Birla Sun Life AMC Ltd.",
+    "sector": "Financial Services"
+  },
+  "AEGISLOG": {
+    "token": "40",
+    "trading_symbol": "AEGISLOG-EQ",
+    "name": "Aegis Logistics Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "AEGISVOPAK": {
+    "token": "757336",
+    "trading_symbol": "AEGISVOPAK-EQ",
+    "name": "Aegis Vopak Terminals Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "AFCONS": {
+    "token": "25977",
+    "trading_symbol": "AFCONS-EQ",
+    "name": "Afcons Infrastructure Ltd.",
+    "sector": "Construction"
+  },
+  "AFFLE": {
+    "token": "11343",
+    "trading_symbol": "AFFLE-EQ",
+    "name": "Affle 3i Ltd.",
+    "sector": "Information Technology"
+  },
+  "AJANTPHARM": {
+    "token": "8124",
+    "trading_symbol": "AJANTPHARM-EQ",
+    "name": "Ajanta Pharmaceuticals Ltd.",
+    "sector": "Healthcare"
+  },
+  "AKUMS": {
+    "token": "24715",
+    "trading_symbol": "AKUMS-EQ",
+    "name": "Akums Drugs and Pharmaceuticals Ltd.",
+    "sector": "Healthcare"
+  },
+  "AKZOINDIA": {
+    "token": "1467",
+    "trading_symbol": "AKZOINDIA-EQ",
+    "name": "Akzo Nobel India Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "APLLTD": {
+    "token": "25328",
+    "trading_symbol": "APLLTD-EQ",
+    "name": "Alembic Pharmaceuticals Ltd.",
+    "sector": "Healthcare"
+  },
+  "ALKEM": {
+    "token": "11703",
+    "trading_symbol": "ALKEM-EQ",
+    "name": "Alkem Laboratories Ltd.",
+    "sector": "Healthcare"
+  },
+  "ALKYLAMINE": {
+    "token": "4487",
+    "trading_symbol": "ALKYLAMINE-EQ",
+    "name": "Alkyl Amines Chemicals Ltd.",
+    "sector": "Chemicals"
+  },
+  "ALOKINDS": {
+    "token": "17675",
+    "trading_symbol": "ALOKINDS-EQ",
+    "name": "Alok Industries Ltd.",
+    "sector": "Textiles"
+  },
+  "ARE&M": {
+    "token": "100",
+    "trading_symbol": "ARE&M-EQ",
+    "name": "Amara Raja Energy & Mobility Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "AMBER": {
+    "token": "1185",
+    "trading_symbol": "AMBER-EQ",
+    "name": "Amber Enterprises India Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "AMBUJACEM": {
+    "token": "1270",
+    "trading_symbol": "AMBUJACEM-EQ",
+    "name": "Ambuja Cements Ltd.",
+    "sector": "Construction Materials"
+  },
+  "ANANDRATHI": {
+    "token": "7145",
+    "trading_symbol": "ANANDRATHI-EQ",
+    "name": "Anand Rathi Wealth Ltd.",
+    "sector": "Financial Services"
+  },
+  "ANANTRAJ": {
+    "token": "13620",
+    "trading_symbol": "ANANTRAJ-EQ",
+    "name": "Anant Raj Ltd.",
+    "sector": "Realty"
+  },
+  "ANGELONE": {
+    "token": "324",
+    "trading_symbol": "ANGELONE-EQ",
+    "name": "Angel One Ltd.",
+    "sector": "Financial Services"
+  },
+  "APARINDS": {
+    "token": "11491",
+    "trading_symbol": "APARINDS-EQ",
+    "name": "Apar Industries Ltd.",
+    "sector": "Capital Goods"
+  },
+  "APOLLOHOSP": {
+    "token": "157",
+    "trading_symbol": "APOLLOHOSP-EQ",
+    "name": "Apollo Hospitals Enterprise Ltd.",
+    "sector": "Healthcare"
+  },
+  "APOLLOTYRE": {
+    "token": "163",
+    "trading_symbol": "APOLLOTYRE-EQ",
+    "name": "Apollo Tyres Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "APTUS": {
+    "token": "5435",
+    "trading_symbol": "APTUS-EQ",
+    "name": "Aptus Value Housing Finance India Ltd.",
+    "sector": "Financial Services"
+  },
+  "ASAHIINDIA": {
+    "token": "5378",
+    "trading_symbol": "ASAHIINDIA-EQ",
+    "name": "Asahi India Glass Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "ASHOKLEY": {
+    "token": "212",
+    "trading_symbol": "ASHOKLEY-EQ",
+    "name": "Ashok Leyland Ltd.",
+    "sector": "Capital Goods"
+  },
+  "ASIANPAINT": {
+    "token": "236",
+    "trading_symbol": "ASIANPAINT-EQ",
+    "name": "Asian Paints Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "ASTERDM": {
+    "token": "1508",
+    "trading_symbol": "ASTERDM-EQ",
+    "name": "Aster DM Healthcare Ltd.",
+    "sector": "Healthcare"
+  },
+  "ASTRAZEN": {
+    "token": "5610",
+    "trading_symbol": "ASTRAZEN-EQ",
+    "name": "AstraZenca Pharma India Ltd.",
+    "sector": "Healthcare"
+  },
+  "ASTRAL": {
+    "token": "14418",
+    "trading_symbol": "ASTRAL-EQ",
+    "name": "Astral Ltd.",
+    "sector": "Capital Goods"
+  },
+  "ATHERENERG": {
+    "token": "757645",
+    "trading_symbol": "ATHERENERG-EQ",
+    "name": "Ather Energy Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "ATUL": {
+    "token": "263",
+    "trading_symbol": "ATUL-EQ",
+    "name": "Atul Ltd.",
+    "sector": "Chemicals"
+  },
+  "AUROPHARMA": {
+    "token": "275",
+    "trading_symbol": "AUROPHARMA-EQ",
+    "name": "Aurobindo Pharma Ltd.",
+    "sector": "Healthcare"
+  },
+  "AIIL": {
+    "token": "23553",
+    "trading_symbol": "AIIL-EQ",
+    "name": "Authum Investment & Infrastructure Ltd.",
+    "sector": "Financial Services"
+  },
+  "DMART": {
+    "token": "19913",
+    "trading_symbol": "DMART-EQ",
+    "name": "Avenue Supermarts Ltd.",
+    "sector": "Consumer Services"
+  },
+  "AXISBANK": {
+    "token": "5900",
+    "trading_symbol": "AXISBANK-EQ",
+    "name": "Axis Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "BASF": {
+    "token": "368",
+    "trading_symbol": "BASF-EQ",
+    "name": "BASF India Ltd.",
+    "sector": "Chemicals"
+  },
+  "BEML": {
+    "token": "395",
+    "trading_symbol": "BEML-EQ",
+    "name": "BEML Ltd.",
+    "sector": "Capital Goods"
+  },
+  "BLS": {
+    "token": "17279",
+    "trading_symbol": "BLS-EQ",
+    "name": "BLS International Services Ltd.",
+    "sector": "Consumer Services"
+  },
+  "BSE": {
+    "token": "19585",
+    "trading_symbol": "BSE-EQ",
+    "name": "BSE Ltd.",
+    "sector": "Financial Services"
+  },
+  "BAJAJ-AUTO": {
+    "token": "16669",
+    "trading_symbol": "BAJAJ-AUTO-EQ",
+    "name": "Bajaj Auto Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "BAJFINANCE": {
+    "token": "317",
+    "trading_symbol": "BAJFINANCE-EQ",
+    "name": "Bajaj Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "BAJAJFINSV": {
+    "token": "16675",
+    "trading_symbol": "BAJAJFINSV-EQ",
+    "name": "Bajaj Finserv Ltd.",
+    "sector": "Financial Services"
+  },
+  "BAJAJHLDNG": {
+    "token": "305",
+    "trading_symbol": "BAJAJHLDNG-EQ",
+    "name": "Bajaj Holdings & Investment Ltd.",
+    "sector": "Financial Services"
+  },
+  "BAJAJHFL": {
+    "token": "25270",
+    "trading_symbol": "BAJAJHFL-EQ",
+    "name": "Bajaj Housing Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "BALKRISIND": {
+    "token": "335",
+    "trading_symbol": "BALKRISIND-EQ",
+    "name": "Balkrishna Industries Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "BALRAMCHIN": {
+    "token": "341",
+    "trading_symbol": "BALRAMCHIN-EQ",
+    "name": "Balrampur Chini Mills Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "BANDHANBNK": {
+    "token": "2263",
+    "trading_symbol": "BANDHANBNK-EQ",
+    "name": "Bandhan Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "BANKBARODA": {
+    "token": "4668",
+    "trading_symbol": "BANKBARODA-EQ",
+    "name": "Bank of Baroda",
+    "sector": "Financial Services"
+  },
+  "BANKINDIA": {
+    "token": "4745",
+    "trading_symbol": "BANKINDIA-EQ",
+    "name": "Bank of India",
+    "sector": "Financial Services"
+  },
+  "MAHABANK": {
+    "token": "11377",
+    "trading_symbol": "MAHABANK-EQ",
+    "name": "Bank of Maharashtra",
+    "sector": "Financial Services"
+  },
+  "BATAINDIA": {
+    "token": "371",
+    "trading_symbol": "BATAINDIA-EQ",
+    "name": "Bata India Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "BAYERCROP": {
+    "token": "17927",
+    "trading_symbol": "BAYERCROP-EQ",
+    "name": "Bayer Cropscience Ltd.",
+    "sector": "Chemicals"
+  },
+  "BERGEPAINT": {
+    "token": "404",
+    "trading_symbol": "BERGEPAINT-EQ",
+    "name": "Berger Paints India Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "BDL": {
+    "token": "2144",
+    "trading_symbol": "BDL-EQ",
+    "name": "Bharat Dynamics Ltd.",
+    "sector": "Capital Goods"
+  },
+  "BEL": {
+    "token": "383",
+    "trading_symbol": "BEL-EQ",
+    "name": "Bharat Electronics Ltd.",
+    "sector": "Capital Goods"
+  },
+  "BHARATFORG": {
+    "token": "422",
+    "trading_symbol": "BHARATFORG-EQ",
+    "name": "Bharat Forge Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "BHEL": {
+    "token": "438",
+    "trading_symbol": "BHEL-EQ",
+    "name": "Bharat Heavy Electricals Ltd.",
+    "sector": "Capital Goods"
+  },
+  "BPCL": {
+    "token": "526",
+    "trading_symbol": "BPCL-EQ",
+    "name": "Bharat Petroleum Corporation Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "BHARTIARTL": {
+    "token": "10604",
+    "trading_symbol": "BHARTIARTL-EQ",
+    "name": "Bharti Airtel Ltd.",
+    "sector": "Telecommunication"
+  },
+  "BHARTIHEXA": {
+    "token": "23489",
+    "trading_symbol": "BHARTIHEXA-EQ",
+    "name": "Bharti Hexacom Ltd.",
+    "sector": "Telecommunication"
+  },
+  "BIKAJI": {
+    "token": "11966",
+    "trading_symbol": "BIKAJI-EQ",
+    "name": "Bikaji Foods International Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "BIOCON": {
+    "token": "11373",
+    "trading_symbol": "BIOCON-EQ",
+    "name": "Biocon Ltd.",
+    "sector": "Healthcare"
+  },
+  "BSOFT": {
+    "token": "6994",
+    "trading_symbol": "BSOFT-EQ",
+    "name": "Birlasoft Ltd.",
+    "sector": "Information Technology"
+  },
+  "BLUEDART": {
+    "token": "495",
+    "trading_symbol": "BLUEDART-EQ",
+    "name": "Blue Dart Express Ltd.",
+    "sector": "Services"
+  },
+  "BLUEJET": {
+    "token": "19686",
+    "trading_symbol": "BLUEJET-EQ",
+    "name": "Blue Jet Healthcare Ltd.",
+    "sector": "Healthcare"
+  },
+  "BLUESTARCO": {
+    "token": "8311",
+    "trading_symbol": "BLUESTARCO-EQ",
+    "name": "Blue Star Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "BBTC": {
+    "token": "380",
+    "trading_symbol": "BBTC-EQ",
+    "name": "Bombay Burmah Trading Corporation Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "BOSCHLTD": {
+    "token": "2181",
+    "trading_symbol": "BOSCHLTD-EQ",
+    "name": "Bosch Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "FIRSTCRY": {
+    "token": "24814",
+    "trading_symbol": "FIRSTCRY-EQ",
+    "name": "Brainbees Solutions Ltd.",
+    "sector": "Consumer Services"
+  },
+  "BRIGADE": {
+    "token": "15184",
+    "trading_symbol": "BRIGADE-EQ",
+    "name": "Brigade Enterprises Ltd.",
+    "sector": "Realty"
+  },
+  "BRITANNIA": {
+    "token": "547",
+    "trading_symbol": "BRITANNIA-EQ",
+    "name": "Britannia Industries Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "MAPMYINDIA": {
+    "token": "7227",
+    "trading_symbol": "MAPMYINDIA-EQ",
+    "name": "C.E. Info Systems Ltd.",
+    "sector": "Information Technology"
+  },
+  "CCL": {
+    "token": "11452",
+    "trading_symbol": "CCL-EQ",
+    "name": "CCL Products (I) Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "CESC": {
+    "token": "628",
+    "trading_symbol": "CESC-EQ",
+    "name": "CESC Ltd.",
+    "sector": "Power"
+  },
+  "CGPOWER": {
+    "token": "760",
+    "trading_symbol": "CGPOWER-EQ",
+    "name": "CG Power and Industrial Solutions Ltd.",
+    "sector": "Capital Goods"
+  },
+  "CRISIL": {
+    "token": "757",
+    "trading_symbol": "CRISIL-EQ",
+    "name": "CRISIL Ltd.",
+    "sector": "Financial Services"
+  },
+  "CAMPUS": {
+    "token": "9362",
+    "trading_symbol": "CAMPUS-EQ",
+    "name": "Campus Activewear Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "CANFINHOME": {
+    "token": "583",
+    "trading_symbol": "CANFINHOME-EQ",
+    "name": "Can Fin Homes Ltd.",
+    "sector": "Financial Services"
+  },
+  "CANBK": {
+    "token": "10794",
+    "trading_symbol": "CANBK-EQ",
+    "name": "Canara Bank",
+    "sector": "Financial Services"
+  },
+  "CAPLIPOINT": {
+    "token": "3906",
+    "trading_symbol": "CAPLIPOINT-EQ",
+    "name": "Caplin Point Laboratories Ltd.",
+    "sector": "Healthcare"
+  },
+  "CGCL": {
+    "token": "20329",
+    "trading_symbol": "CGCL-EQ",
+    "name": "Capri Global Capital Ltd.",
+    "sector": "Financial Services"
+  },
+  "CARBORUNIV": {
+    "token": "595",
+    "trading_symbol": "CARBORUNIV-EQ",
+    "name": "Carborundum Universal Ltd.",
+    "sector": "Capital Goods"
+  },
+  "CASTROLIND": {
+    "token": "1250",
+    "trading_symbol": "CASTROLIND-EQ",
+    "name": "Castrol India Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "CEATLTD": {
+    "token": "15254",
+    "trading_symbol": "CEATLTD-EQ",
+    "name": "Ceat Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "CENTRALBK": {
+    "token": "14894",
+    "trading_symbol": "CENTRALBK-EQ",
+    "name": "Central Bank of India",
+    "sector": "Financial Services"
+  },
+  "CDSL": {
+    "token": "21174",
+    "trading_symbol": "CDSL-EQ",
+    "name": "Central Depository Services (India) Ltd.",
+    "sector": "Financial Services"
+  },
+  "CENTURYPLY": {
+    "token": "13305",
+    "trading_symbol": "CENTURYPLY-EQ",
+    "name": "Century Plyboards (India) Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "CERA": {
+    "token": "15039",
+    "trading_symbol": "CERA-EQ",
+    "name": "Cera Sanitaryware Ltd",
+    "sector": "Consumer Durables"
+  },
+  "CHALET": {
+    "token": "8546",
+    "trading_symbol": "CHALET-EQ",
+    "name": "Chalet Hotels Ltd.",
+    "sector": "Consumer Services"
+  },
+  "CHAMBLFERT": {
+    "token": "637",
+    "trading_symbol": "CHAMBLFERT-EQ",
+    "name": "Chambal Fertilizers & Chemicals Ltd.",
+    "sector": "Chemicals"
+  },
+  "CHENNPETRO": {
+    "token": "2049",
+    "trading_symbol": "CHENNPETRO-EQ",
+    "name": "Chennai Petroleum Corporation Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "CHOICEIN": {
+    "token": "8866",
+    "trading_symbol": "CHOICEIN-EQ",
+    "name": "Choice International Ltd.",
+    "sector": "Financial Services"
+  },
+  "CHOLAHLDNG": {
+    "token": "21740",
+    "trading_symbol": "CHOLAHLDNG-EQ",
+    "name": "Cholamandalam Financial Holdings Ltd.",
+    "sector": "Financial Services"
+  },
+  "CHOLAFIN": {
+    "token": "685",
+    "trading_symbol": "CHOLAFIN-EQ",
+    "name": "Cholamandalam Investment and Finance Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "CIPLA": {
+    "token": "694",
+    "trading_symbol": "CIPLA-EQ",
+    "name": "Cipla Ltd.",
+    "sector": "Healthcare"
+  },
+  "CUB": {
+    "token": "5701",
+    "trading_symbol": "CUB-EQ",
+    "name": "City Union Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "CLEAN": {
+    "token": "5049",
+    "trading_symbol": "CLEAN-EQ",
+    "name": "Clean Science and Technology Ltd.",
+    "sector": "Chemicals"
+  },
+  "COALINDIA": {
+    "token": "20374",
+    "trading_symbol": "COALINDIA-EQ",
+    "name": "Coal India Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "COCHINSHIP": {
+    "token": "21508",
+    "trading_symbol": "COCHINSHIP-EQ",
+    "name": "Cochin Shipyard Ltd.",
+    "sector": "Capital Goods"
+  },
+  "COFORGE": {
+    "token": "11543",
+    "trading_symbol": "COFORGE-EQ",
+    "name": "Coforge Ltd.",
+    "sector": "Information Technology"
+  },
+  "COHANCE": {
+    "token": "17945",
+    "trading_symbol": "COHANCE-EQ",
+    "name": "Cohance Lifesciences Ltd.",
+    "sector": "Healthcare"
+  },
+  "COLPAL": {
+    "token": "15141",
+    "trading_symbol": "COLPAL-EQ",
+    "name": "Colgate Palmolive (India) Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "CAMS": {
+    "token": "342",
+    "trading_symbol": "CAMS-EQ",
+    "name": "Computer Age Management Services Ltd.",
+    "sector": "Financial Services"
+  },
+  "CONCORDBIO": {
+    "token": "18060",
+    "trading_symbol": "CONCORDBIO-EQ",
+    "name": "Concord Biotech Ltd.",
+    "sector": "Healthcare"
+  },
+  "CONCOR": {
+    "token": "4749",
+    "trading_symbol": "CONCOR-EQ",
+    "name": "Container Corporation of India Ltd.",
+    "sector": "Services"
+  },
+  "COROMANDEL": {
+    "token": "739",
+    "trading_symbol": "COROMANDEL-EQ",
+    "name": "Coromandel International Ltd.",
+    "sector": "Chemicals"
+  },
+  "CRAFTSMAN": {
+    "token": "2854",
+    "trading_symbol": "CRAFTSMAN-EQ",
+    "name": "Craftsman Automation Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "CREDITACC": {
+    "token": "4421",
+    "trading_symbol": "CREDITACC-EQ",
+    "name": "CreditAccess Grameen Ltd.",
+    "sector": "Financial Services"
+  },
+  "CROMPTON": {
+    "token": "17094",
+    "trading_symbol": "CROMPTON-EQ",
+    "name": "Crompton Greaves Consumer Electricals Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "CUMMINSIND": {
+    "token": "1901",
+    "trading_symbol": "CUMMINSIND-EQ",
+    "name": "Cummins India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "CYIENT": {
+    "token": "5748",
+    "trading_symbol": "CYIENT-EQ",
+    "name": "Cyient Ltd.",
+    "sector": "Information Technology"
+  },
+  "DCMSHRIRAM": {
+    "token": "811",
+    "trading_symbol": "DCMSHRIRAM-EQ",
+    "name": "DCM Shriram Ltd.",
+    "sector": "Diversified"
+  },
+  "DLF": {
+    "token": "14732",
+    "trading_symbol": "DLF-EQ",
+    "name": "DLF Ltd.",
+    "sector": "Realty"
+  },
+  "DOMS": {
+    "token": "20551",
+    "trading_symbol": "DOMS-EQ",
+    "name": "DOMS Industries Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "DABUR": {
+    "token": "772",
+    "trading_symbol": "DABUR-EQ",
+    "name": "Dabur India Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "DALBHARAT": {
+    "token": "8075",
+    "trading_symbol": "DALBHARAT-EQ",
+    "name": "Dalmia Bharat Ltd.",
+    "sector": "Construction Materials"
+  },
+  "DATAPATTNS": {
+    "token": "7358",
+    "trading_symbol": "DATAPATTNS-EQ",
+    "name": "Data Patterns (India) Ltd.",
+    "sector": "Capital Goods"
+  },
+  "DEEPAKFERT": {
+    "token": "827",
+    "trading_symbol": "DEEPAKFERT-EQ",
+    "name": "Deepak Fertilisers & Petrochemicals Corp. Ltd.",
+    "sector": "Chemicals"
+  },
+  "DEEPAKNTR": {
+    "token": "19943",
+    "trading_symbol": "DEEPAKNTR-EQ",
+    "name": "Deepak Nitrite Ltd.",
+    "sector": "Chemicals"
+  },
+  "DELHIVERY": {
+    "token": "9599",
+    "trading_symbol": "DELHIVERY-EQ",
+    "name": "Delhivery Ltd.",
+    "sector": "Services"
+  },
+  "DEVYANI": {
+    "token": "5373",
+    "trading_symbol": "DEVYANI-EQ",
+    "name": "Devyani International Ltd.",
+    "sector": "Consumer Services"
+  },
+  "DIVISLAB": {
+    "token": "10940",
+    "trading_symbol": "DIVISLAB-EQ",
+    "name": "Divi's Laboratories Ltd.",
+    "sector": "Healthcare"
+  },
+  "DIXON": {
+    "token": "21690",
+    "trading_symbol": "DIXON-EQ",
+    "name": "Dixon Technologies (India) Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "AGARWALEYE": {
+    "token": "29452",
+    "trading_symbol": "AGARWALEYE-EQ",
+    "name": "Dr. Agarwal's Health Care Ltd.",
+    "sector": "Healthcare"
+  },
+  "LALPATHLAB": {
+    "token": "11654",
+    "trading_symbol": "LALPATHLAB-EQ",
+    "name": "Dr. Lal Path Labs Ltd.",
+    "sector": "Healthcare"
+  },
+  "DRREDDY": {
+    "token": "881",
+    "trading_symbol": "DRREDDY-EQ",
+    "name": "Dr. Reddy's Laboratories Ltd.",
+    "sector": "Healthcare"
+  },
+  "EIDPARRY": {
+    "token": "916",
+    "trading_symbol": "EIDPARRY-EQ",
+    "name": "E.I.D. Parry (India) Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "EIHOTEL": {
+    "token": "919",
+    "trading_symbol": "EIHOTEL-EQ",
+    "name": "EIH Ltd.",
+    "sector": "Consumer Services"
+  },
+  "EICHERMOT": {
+    "token": "910",
+    "trading_symbol": "EICHERMOT-EQ",
+    "name": "Eicher Motors Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "ELECON": {
+    "token": "13643",
+    "trading_symbol": "ELECON-EQ",
+    "name": "Elecon Engineering Co. Ltd.",
+    "sector": "Capital Goods"
+  },
+  "ELGIEQUIP": {
+    "token": "937",
+    "trading_symbol": "ELGIEQUIP-EQ",
+    "name": "Elgi Equipments Ltd.",
+    "sector": "Capital Goods"
+  },
+  "EMAMILTD": {
+    "token": "13517",
+    "trading_symbol": "EMAMILTD-EQ",
+    "name": "Emami Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "EMCURE": {
+    "token": "24398",
+    "trading_symbol": "EMCURE-EQ",
+    "name": "Emcure Pharmaceuticals Ltd.",
+    "sector": "Healthcare"
+  },
+  "ENDURANCE": {
+    "token": "18822",
+    "trading_symbol": "ENDURANCE-EQ",
+    "name": "Endurance Technologies Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "ENGINERSIN": {
+    "token": "4907",
+    "trading_symbol": "ENGINERSIN-EQ",
+    "name": "Engineers India Ltd.",
+    "sector": "Construction"
+  },
+  "ERIS": {
+    "token": "21154",
+    "trading_symbol": "ERIS-EQ",
+    "name": "Eris Lifesciences Ltd.",
+    "sector": "Healthcare"
+  },
+  "ESCORTS": {
+    "token": "958",
+    "trading_symbol": "ESCORTS-EQ",
+    "name": "Escorts Kubota Ltd.",
+    "sector": "Capital Goods"
+  },
+  "ETERNAL": {
+    "token": "5097",
+    "trading_symbol": "ETERNAL-EQ",
+    "name": "Eternal Ltd.",
+    "sector": "Consumer Services"
+  },
+  "EXIDEIND": {
+    "token": "676",
+    "trading_symbol": "EXIDEIND-EQ",
+    "name": "Exide Industries Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "NYKAA": {
+    "token": "6545",
+    "trading_symbol": "NYKAA-EQ",
+    "name": "FSN E-Commerce Ventures Ltd.",
+    "sector": "Consumer Services"
+  },
+  "FEDERALBNK": {
+    "token": "1023",
+    "trading_symbol": "FEDERALBNK-EQ",
+    "name": "Federal Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "FACT": {
+    "token": "1008",
+    "trading_symbol": "FACT-EQ",
+    "name": "Fertilisers and Chemicals Travancore Ltd.",
+    "sector": "Chemicals"
+  },
+  "FINCABLES": {
+    "token": "1038",
+    "trading_symbol": "FINCABLES-EQ",
+    "name": "Finolex Cables Ltd.",
+    "sector": "Capital Goods"
+  },
+  "FINPIPE": {
+    "token": "1041",
+    "trading_symbol": "FINPIPE-EQ",
+    "name": "Finolex Industries Ltd.",
+    "sector": "Capital Goods"
+  },
+  "FSL": {
+    "token": "14304",
+    "trading_symbol": "FSL-EQ",
+    "name": "Firstsource Solutions Ltd.",
+    "sector": "Services"
+  },
+  "FIVESTAR": {
+    "token": "12032",
+    "trading_symbol": "FIVESTAR-EQ",
+    "name": "Five-Star Business Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "FORCEMOT": {
+    "token": "11573",
+    "trading_symbol": "FORCEMOT-EQ",
+    "name": "Force Motors Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "FORTIS": {
+    "token": "14592",
+    "trading_symbol": "FORTIS-EQ",
+    "name": "Fortis Healthcare Ltd.",
+    "sector": "Healthcare"
+  },
+  "GAIL": {
+    "token": "4717",
+    "trading_symbol": "GAIL-EQ",
+    "name": "GAIL (India) Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "GVT&D": {
+    "token": "16783",
+    "trading_symbol": "GVT&D-EQ",
+    "name": "GE Vernova T&D India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "GMRAIRPORT": {
+    "token": "13528",
+    "trading_symbol": "GMRAIRPORT-EQ",
+    "name": "GMR Airports Ltd.",
+    "sector": "Services"
+  },
+  "GRSE": {
+    "token": "5475",
+    "trading_symbol": "GRSE-EQ",
+    "name": "Garden Reach Shipbuilders & Engineers Ltd.",
+    "sector": "Capital Goods"
+  },
+  "GICRE": {
+    "token": "277",
+    "trading_symbol": "GICRE-EQ",
+    "name": "General Insurance Corporation of India",
+    "sector": "Financial Services"
+  },
+  "GILLETTE": {
+    "token": "1576",
+    "trading_symbol": "GILLETTE-EQ",
+    "name": "Gillette India Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "GLAND": {
+    "token": "1186",
+    "trading_symbol": "GLAND-EQ",
+    "name": "Gland Pharma Ltd.",
+    "sector": "Healthcare"
+  },
+  "GLAXO": {
+    "token": "1153",
+    "trading_symbol": "GLAXO-EQ",
+    "name": "Glaxosmithkline Pharmaceuticals Ltd.",
+    "sector": "Healthcare"
+  },
+  "GLENMARK": {
+    "token": "7406",
+    "trading_symbol": "GLENMARK-EQ",
+    "name": "Glenmark Pharmaceuticals Ltd.",
+    "sector": "Healthcare"
+  },
+  "MEDANTA": {
+    "token": "11956",
+    "trading_symbol": "MEDANTA-EQ",
+    "name": "Global Health Ltd.",
+    "sector": "Healthcare"
+  },
+  "GODIGIT": {
+    "token": "23799",
+    "trading_symbol": "GODIGIT-EQ",
+    "name": "Go Digit General Insurance Ltd.",
+    "sector": "Financial Services"
+  },
+  "GPIL": {
+    "token": "13409",
+    "trading_symbol": "GPIL-EQ",
+    "name": "Godawari Power & Ispat Ltd.",
+    "sector": "Capital Goods"
+  },
+  "GODFRYPHLP": {
+    "token": "1181",
+    "trading_symbol": "GODFRYPHLP-EQ",
+    "name": "Godfrey Phillips India Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "GODREJAGRO": {
+    "token": "144",
+    "trading_symbol": "GODREJAGRO-EQ",
+    "name": "Godrej Agrovet Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "GODREJCP": {
+    "token": "10099",
+    "trading_symbol": "GODREJCP-EQ",
+    "name": "Godrej Consumer Products Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "GODREJIND": {
+    "token": "10925",
+    "trading_symbol": "GODREJIND-EQ",
+    "name": "Godrej Industries Ltd.",
+    "sector": "Diversified"
+  },
+  "GODREJPROP": {
+    "token": "17875",
+    "trading_symbol": "GODREJPROP-EQ",
+    "name": "Godrej Properties Ltd.",
+    "sector": "Realty"
+  },
+  "GRANULES": {
+    "token": "11872",
+    "trading_symbol": "GRANULES-EQ",
+    "name": "Granules India Ltd.",
+    "sector": "Healthcare"
+  },
+  "GRAPHITE": {
+    "token": "592",
+    "trading_symbol": "GRAPHITE-EQ",
+    "name": "Graphite India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "GRASIM": {
+    "token": "1232",
+    "trading_symbol": "GRASIM-EQ",
+    "name": "Grasim Industries Ltd.",
+    "sector": "Construction Materials"
+  },
+  "GRAVITA": {
+    "token": "20534",
+    "trading_symbol": "GRAVITA-EQ",
+    "name": "Gravita India Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "GESHIP": {
+    "token": "13776",
+    "trading_symbol": "GESHIP-EQ",
+    "name": "Great Eastern Shipping Co. Ltd.",
+    "sector": "Services"
+  },
+  "FLUOROCHEM": {
+    "token": "13750",
+    "trading_symbol": "FLUOROCHEM-EQ",
+    "name": "Gujarat Fluorochemicals Ltd.",
+    "sector": "Chemicals"
+  },
+  "GUJGASLTD": {
+    "token": "10599",
+    "trading_symbol": "GUJGASLTD-EQ",
+    "name": "Gujarat Gas Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "GMDCLTD": {
+    "token": "5204",
+    "trading_symbol": "GMDCLTD-EQ",
+    "name": "Gujarat Mineral Development Corporation Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "GSPL": {
+    "token": "13197",
+    "trading_symbol": "GSPL-EQ",
+    "name": "Gujarat State Petronet Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "HEG": {
+    "token": "1336",
+    "trading_symbol": "HEG-EQ",
+    "name": "H.E.G. Ltd.",
+    "sector": "Capital Goods"
+  },
+  "HBLENGINE": {
+    "token": "13966",
+    "trading_symbol": "HBLENGINE-EQ",
+    "name": "HBL Engineering Ltd.",
+    "sector": "Capital Goods"
+  },
+  "HCLTECH": {
+    "token": "7229",
+    "trading_symbol": "HCLTECH-EQ",
+    "name": "HCL Technologies Ltd.",
+    "sector": "Information Technology"
+  },
+  "HDFCAMC": {
+    "token": "4244",
+    "trading_symbol": "HDFCAMC-EQ",
+    "name": "HDFC Asset Management Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "HDFCBANK": {
+    "token": "1333",
+    "trading_symbol": "HDFCBANK-EQ",
+    "name": "HDFC Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "HDFCLIFE": {
+    "token": "467",
+    "trading_symbol": "HDFCLIFE-EQ",
+    "name": "HDFC Life Insurance Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "HFCL": {
+    "token": "21951",
+    "trading_symbol": "HFCL-EQ",
+    "name": "HFCL Ltd.",
+    "sector": "Telecommunication"
+  },
+  "HAPPSTMNDS": {
+    "token": "48",
+    "trading_symbol": "HAPPSTMNDS-EQ",
+    "name": "Happiest Minds Technologies Ltd.",
+    "sector": "Information Technology"
+  },
+  "HAVELLS": {
+    "token": "9819",
+    "trading_symbol": "HAVELLS-EQ",
+    "name": "Havells India Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "HEROMOTOCO": {
+    "token": "1348",
+    "trading_symbol": "HEROMOTOCO-EQ",
+    "name": "Hero MotoCorp Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "HEXT": {
+    "token": "29666",
+    "trading_symbol": "HEXT-EQ",
+    "name": "Hexaware Technologies Ltd.",
+    "sector": "Information Technology"
+  },
+  "HSCL": {
+    "token": "14334",
+    "trading_symbol": "HSCL-EQ",
+    "name": "Himadri Speciality Chemical Ltd.",
+    "sector": "Chemicals"
+  },
+  "HINDALCO": {
+    "token": "1363",
+    "trading_symbol": "HINDALCO-EQ",
+    "name": "Hindalco Industries Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "HAL": {
+    "token": "2303",
+    "trading_symbol": "HAL-EQ",
+    "name": "Hindustan Aeronautics Ltd.",
+    "sector": "Capital Goods"
+  },
+  "HINDCOPPER": {
+    "token": "17939",
+    "trading_symbol": "HINDCOPPER-EQ",
+    "name": "Hindustan Copper Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "HINDPETRO": {
+    "token": "1406",
+    "trading_symbol": "HINDPETRO-EQ",
+    "name": "Hindustan Petroleum Corporation Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "HINDUNILVR": {
+    "token": "1394",
+    "trading_symbol": "HINDUNILVR-EQ",
+    "name": "Hindustan Unilever Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "HINDZINC": {
+    "token": "1424",
+    "trading_symbol": "HINDZINC-EQ",
+    "name": "Hindustan Zinc Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "POWERINDIA": {
+    "token": "18457",
+    "trading_symbol": "POWERINDIA-EQ",
+    "name": "Hitachi Energy India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "HOMEFIRST": {
+    "token": "2056",
+    "trading_symbol": "HOMEFIRST-EQ",
+    "name": "Home First Finance Company India Ltd.",
+    "sector": "Financial Services"
+  },
+  "HONASA": {
+    "token": "19813",
+    "trading_symbol": "HONASA-EQ",
+    "name": "Honasa Consumer Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "HONAUT": {
+    "token": "3417",
+    "trading_symbol": "HONAUT-EQ",
+    "name": "Honeywell Automation India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "HUDCO": {
+    "token": "20825",
+    "trading_symbol": "HUDCO-EQ",
+    "name": "Housing & Urban Development Corporation Ltd.",
+    "sector": "Financial Services"
+  },
+  "HYUNDAI": {
+    "token": "25844",
+    "trading_symbol": "HYUNDAI-EQ",
+    "name": "Hyundai Motor India Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "ICICIBANK": {
+    "token": "4963",
+    "trading_symbol": "ICICIBANK-EQ",
+    "name": "ICICI Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "ICICIGI": {
+    "token": "21770",
+    "trading_symbol": "ICICIGI-EQ",
+    "name": "ICICI Lombard General Insurance Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "ICICIPRULI": {
+    "token": "18652",
+    "trading_symbol": "ICICIPRULI-EQ",
+    "name": "ICICI Prudential Life Insurance Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "IDBI": {
+    "token": "1476",
+    "trading_symbol": "IDBI-EQ",
+    "name": "IDBI Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "IDFCFIRSTB": {
+    "token": "11184",
+    "trading_symbol": "IDFCFIRSTB-EQ",
+    "name": "IDFC First Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "IFCI": {
+    "token": "1491",
+    "trading_symbol": "IFCI-EQ",
+    "name": "IFCI Ltd.",
+    "sector": "Financial Services"
+  },
+  "IIFL": {
+    "token": "11809",
+    "trading_symbol": "IIFL-EQ",
+    "name": "IIFL Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "INOXINDIA": {
+    "token": "20607",
+    "trading_symbol": "INOXINDIA-EQ",
+    "name": "INOX India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "IRB": {
+    "token": "15313",
+    "trading_symbol": "IRB-EQ",
+    "name": "IRB Infrastructure Developers Ltd.",
+    "sector": "Construction"
+  },
+  "IRCON": {
+    "token": "4986",
+    "trading_symbol": "IRCON-EQ",
+    "name": "IRCON International Ltd.",
+    "sector": "Construction"
+  },
+  "ITCHOTELS": {
+    "token": "29251",
+    "trading_symbol": "ITCHOTELS-EQ",
+    "name": "ITC Hotels Ltd.",
+    "sector": "Consumer Services"
+  },
+  "ITC": {
+    "token": "1660",
+    "trading_symbol": "ITC-EQ",
+    "name": "ITC Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "ITI": {
+    "token": "1675",
+    "trading_symbol": "ITI-EQ",
+    "name": "ITI Ltd.",
+    "sector": "Telecommunication"
+  },
+  "INDGN": {
+    "token": "23693",
+    "trading_symbol": "INDGN-EQ",
+    "name": "Indegene Ltd.",
+    "sector": "Healthcare"
+  },
+  "INDIACEM": {
+    "token": "1515",
+    "trading_symbol": "INDIACEM-EQ",
+    "name": "India Cements Ltd.",
+    "sector": "Construction Materials"
+  },
+  "INDIAMART": {
+    "token": "10726",
+    "trading_symbol": "INDIAMART-EQ",
+    "name": "Indiamart Intermesh Ltd.",
+    "sector": "Consumer Services"
+  },
+  "INDIANB": {
+    "token": "14309",
+    "trading_symbol": "INDIANB-EQ",
+    "name": "Indian Bank",
+    "sector": "Financial Services"
+  },
+  "IEX": {
+    "token": "220",
+    "trading_symbol": "IEX-EQ",
+    "name": "Indian Energy Exchange Ltd.",
+    "sector": "Financial Services"
+  },
+  "INDHOTEL": {
+    "token": "1512",
+    "trading_symbol": "INDHOTEL-EQ",
+    "name": "Indian Hotels Co. Ltd.",
+    "sector": "Consumer Services"
+  },
+  "IOC": {
+    "token": "1624",
+    "trading_symbol": "IOC-EQ",
+    "name": "Indian Oil Corporation Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "IOB": {
+    "token": "9348",
+    "trading_symbol": "IOB-EQ",
+    "name": "Indian Overseas Bank",
+    "sector": "Financial Services"
+  },
+  "IRCTC": {
+    "token": "13611",
+    "trading_symbol": "IRCTC-EQ",
+    "name": "Indian Railway Catering And Tourism Corporation Ltd.",
+    "sector": "Consumer Services"
+  },
+  "IRFC": {
+    "token": "2029",
+    "trading_symbol": "IRFC-EQ",
+    "name": "Indian Railway Finance Corporation Ltd.",
+    "sector": "Financial Services"
+  },
+  "IREDA": {
+    "token": "20261",
+    "trading_symbol": "IREDA-EQ",
+    "name": "Indian Renewable Energy Development Agency Ltd.",
+    "sector": "Financial Services"
+  },
+  "IGL": {
+    "token": "11262",
+    "trading_symbol": "IGL-EQ",
+    "name": "Indraprastha Gas Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "INDUSTOWER": {
+    "token": "29135",
+    "trading_symbol": "INDUSTOWER-EQ",
+    "name": "Indus Towers Ltd.",
+    "sector": "Telecommunication"
+  },
+  "INDUSINDBK": {
+    "token": "5258",
+    "trading_symbol": "INDUSINDBK-EQ",
+    "name": "IndusInd Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "NAUKRI": {
+    "token": "13751",
+    "trading_symbol": "NAUKRI-EQ",
+    "name": "Info Edge (India) Ltd.",
+    "sector": "Consumer Services"
+  },
+  "INFY": {
+    "token": "1594",
+    "trading_symbol": "INFY-EQ",
+    "name": "Infosys Ltd.",
+    "sector": "Information Technology"
+  },
+  "INOXWIND": {
+    "token": "7852",
+    "trading_symbol": "INOXWIND-EQ",
+    "name": "Inox Wind Ltd.",
+    "sector": "Capital Goods"
+  },
+  "INTELLECT": {
+    "token": "5926",
+    "trading_symbol": "INTELLECT-EQ",
+    "name": "Intellect Design Arena Ltd.",
+    "sector": "Information Technology"
+  },
+  "INDIGO": {
+    "token": "11195",
+    "trading_symbol": "INDIGO-EQ",
+    "name": "InterGlobe Aviation Ltd.",
+    "sector": "Services"
+  },
+  "IGIL": {
+    "token": "28378",
+    "trading_symbol": "IGIL-EQ",
+    "name": "International Gemmological Institute (India) Ltd.",
+    "sector": "Services"
+  },
+  "IKS": {
+    "token": "28125",
+    "trading_symbol": "IKS-EQ",
+    "name": "Inventurus Knowledge Solutions Ltd.",
+    "sector": "Information Technology"
+  },
+  "IPCALAB": {
+    "token": "1633",
+    "trading_symbol": "IPCALAB-EQ",
+    "name": "Ipca Laboratories Ltd.",
+    "sector": "Healthcare"
+  },
+  "JBCHEPHARM": {
+    "token": "1726",
+    "trading_symbol": "JBCHEPHARM-EQ",
+    "name": "J.B. Chemicals & Pharmaceuticals Ltd.",
+    "sector": "Healthcare"
+  },
+  "JKCEMENT": {
+    "token": "13270",
+    "trading_symbol": "JKCEMENT-EQ",
+    "name": "J.K. Cement Ltd.",
+    "sector": "Construction Materials"
+  },
+  "JBMA": {
+    "token": "11655",
+    "trading_symbol": "JBMA-EQ",
+    "name": "JBM Auto Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "JKTYRE": {
+    "token": "14435",
+    "trading_symbol": "JKTYRE-EQ",
+    "name": "JK Tyre & Industries Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "JMFINANCIL": {
+    "token": "13637",
+    "trading_symbol": "JMFINANCIL-EQ",
+    "name": "JM Financial Ltd.",
+    "sector": "Financial Services"
+  },
+  "JSWCEMENT": {
+    "token": "758460",
+    "trading_symbol": "JSWCEMENT-EQ",
+    "name": "JSW Cement Ltd.",
+    "sector": "Construction Materials"
+  },
+  "JSWENERGY": {
+    "token": "17869",
+    "trading_symbol": "JSWENERGY-EQ",
+    "name": "JSW Energy Ltd.",
+    "sector": "Power"
+  },
+  "JSWINFRA": {
+    "token": "19020",
+    "trading_symbol": "JSWINFRA-EQ",
+    "name": "JSW Infrastructure Ltd.",
+    "sector": "Services"
+  },
+  "JSWSTEEL": {
+    "token": "11723",
+    "trading_symbol": "JSWSTEEL-EQ",
+    "name": "JSW Steel Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "JPPOWER": {
+    "token": "11763",
+    "trading_symbol": "JPPOWER-EQ",
+    "name": "Jaiprakash Power Ventures Ltd.",
+    "sector": "Power"
+  },
+  "J&KBANK": {
+    "token": "5633",
+    "trading_symbol": "J&KBANK-EQ",
+    "name": "Jammu & Kashmir Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "JINDALSAW": {
+    "token": "3024",
+    "trading_symbol": "JINDALSAW-EQ",
+    "name": "Jindal Saw Ltd.",
+    "sector": "Capital Goods"
+  },
+  "JSL": {
+    "token": "11236",
+    "trading_symbol": "JSL-EQ",
+    "name": "Jindal Stainless Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "JINDALSTEL": {
+    "token": "6733",
+    "trading_symbol": "JINDALSTEL-EQ",
+    "name": "Jindal Steel Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "JIOFIN": {
+    "token": "18143",
+    "trading_symbol": "JIOFIN-EQ",
+    "name": "Jio Financial Services Ltd.",
+    "sector": "Financial Services"
+  },
+  "JUBLFOOD": {
+    "token": "18096",
+    "trading_symbol": "JUBLFOOD-EQ",
+    "name": "Jubilant Foodworks Ltd.",
+    "sector": "Consumer Services"
+  },
+  "JUBLINGREA": {
+    "token": "2783",
+    "trading_symbol": "JUBLINGREA-EQ",
+    "name": "Jubilant Ingrevia Ltd.",
+    "sector": "Chemicals"
+  },
+  "JUBLPHARMA": {
+    "token": "3637",
+    "trading_symbol": "JUBLPHARMA-EQ",
+    "name": "Jubilant Pharmova Ltd.",
+    "sector": "Healthcare"
+  },
+  "JWL": {
+    "token": "20224",
+    "trading_symbol": "JWL-EQ",
+    "name": "Jupiter Wagons Ltd.",
+    "sector": "Capital Goods"
+  },
+  "JYOTHYLAB": {
+    "token": "15146",
+    "trading_symbol": "JYOTHYLAB-EQ",
+    "name": "Jyothy Labs Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "JYOTICNC": {
+    "token": "21334",
+    "trading_symbol": "JYOTICNC-EQ",
+    "name": "Jyoti CNC Automation Ltd.",
+    "sector": "Capital Goods"
+  },
+  "KPRMILL": {
+    "token": "14912",
+    "trading_symbol": "KPRMILL-EQ",
+    "name": "K.P.R. Mill Ltd.",
+    "sector": "Textiles"
+  },
+  "KEI": {
+    "token": "13310",
+    "trading_symbol": "KEI-EQ",
+    "name": "KEI Industries Ltd.",
+    "sector": "Capital Goods"
+  },
+  "KPITTECH": {
+    "token": "9683",
+    "trading_symbol": "KPITTECH-EQ",
+    "name": "KPIT Technologies Ltd.",
+    "sector": "Information Technology"
+  },
+  "KSB": {
+    "token": "1949",
+    "trading_symbol": "KSB-EQ",
+    "name": "KSB Ltd.",
+    "sector": "Capital Goods"
+  },
+  "KAJARIACER": {
+    "token": "1808",
+    "trading_symbol": "KAJARIACER-EQ",
+    "name": "Kajaria Ceramics Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "KPIL": {
+    "token": "1814",
+    "trading_symbol": "KPIL-EQ",
+    "name": "Kalpataru Projects International Ltd.",
+    "sector": "Construction"
+  },
+  "KALYANKJIL": {
+    "token": "2955",
+    "trading_symbol": "KALYANKJIL-EQ",
+    "name": "Kalyan Jewellers India Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "KARURVYSYA": {
+    "token": "1838",
+    "trading_symbol": "KARURVYSYA-EQ",
+    "name": "Karur Vysya Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "KAYNES": {
+    "token": "12092",
+    "trading_symbol": "KAYNES-EQ",
+    "name": "Kaynes Technology India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "KEC": {
+    "token": "13260",
+    "trading_symbol": "KEC-EQ",
+    "name": "Kec International Ltd.",
+    "sector": "Construction"
+  },
+  "KFINTECH": {
+    "token": "13359",
+    "trading_symbol": "KFINTECH-EQ",
+    "name": "Kfin Technologies Ltd.",
+    "sector": "Financial Services"
+  },
+  "KIRLOSBROS": {
+    "token": "18581",
+    "trading_symbol": "KIRLOSBROS-EQ",
+    "name": "Kirloskar Brothers Ltd.",
+    "sector": "Capital Goods"
+  },
+  "KIRLOSENG": {
+    "token": "20936",
+    "trading_symbol": "KIRLOSENG-EQ",
+    "name": "Kirloskar Oil Eng Ltd.",
+    "sector": "Capital Goods"
+  },
+  "KOTAKBANK": {
+    "token": "1922",
+    "trading_symbol": "KOTAKBANK-EQ",
+    "name": "Kotak Mahindra Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "KIMS": {
+    "token": "4847",
+    "trading_symbol": "KIMS-EQ",
+    "name": "Krishna Institute of Medical Sciences Ltd.",
+    "sector": "Healthcare"
+  },
+  "LTF": {
+    "token": "24948",
+    "trading_symbol": "LTF-EQ",
+    "name": "L&T Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "LTTS": {
+    "token": "18564",
+    "trading_symbol": "LTTS-EQ",
+    "name": "L&T Technology Services Ltd.",
+    "sector": "Information Technology"
+  },
+  "LICHSGFIN": {
+    "token": "1997",
+    "trading_symbol": "LICHSGFIN-EQ",
+    "name": "LIC Housing Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "LTFOODS": {
+    "token": "13816",
+    "trading_symbol": "LTFOODS-EQ",
+    "name": "LT Foods Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "LTIM": {
+    "token": "17818",
+    "trading_symbol": "LTIM-EQ",
+    "name": "LTIMindtree Ltd.",
+    "sector": "Information Technology"
+  },
+  "LT": {
+    "token": "11483",
+    "trading_symbol": "LT-EQ",
+    "name": "Larsen & Toubro Ltd.",
+    "sector": "Construction"
+  },
+  "LATENTVIEW": {
+    "token": "6818",
+    "trading_symbol": "LATENTVIEW-EQ",
+    "name": "Latent View Analytics Ltd.",
+    "sector": "Information Technology"
+  },
+  "LAURUSLABS": {
+    "token": "19234",
+    "trading_symbol": "LAURUSLABS-EQ",
+    "name": "Laurus Labs Ltd.",
+    "sector": "Healthcare"
+  },
+  "THELEELA": {
+    "token": "757014",
+    "trading_symbol": "THELEELA-EQ",
+    "name": "Leela Palaces Hotels & Resorts Ltd.",
+    "sector": "Consumer Services"
+  },
+  "LEMONTREE": {
+    "token": "2606",
+    "trading_symbol": "LEMONTREE-EQ",
+    "name": "Lemon Tree Hotels Ltd.",
+    "sector": "Consumer Services"
+  },
+  "LICI": {
+    "token": "9480",
+    "trading_symbol": "LICI-EQ",
+    "name": "Life Insurance Corporation of India",
+    "sector": "Financial Services"
+  },
+  "LINDEINDIA": {
+    "token": "1627",
+    "trading_symbol": "LINDEINDIA-EQ",
+    "name": "Linde India Ltd.",
+    "sector": "Chemicals"
+  },
+  "LLOYDSME": {
+    "token": "17313",
+    "trading_symbol": "LLOYDSME-EQ",
+    "name": "Lloyds Metals And Energy Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "LODHA": {
+    "token": "3220",
+    "trading_symbol": "LODHA-EQ",
+    "name": "Lodha Developers Ltd.",
+    "sector": "Realty"
+  },
+  "LUPIN": {
+    "token": "10440",
+    "trading_symbol": "LUPIN-EQ",
+    "name": "Lupin Ltd.",
+    "sector": "Healthcare"
+  },
+  "MMTC": {
+    "token": "17957",
+    "trading_symbol": "MMTC-EQ",
+    "name": "MMTC Ltd.",
+    "sector": "Services"
+  },
+  "MRF": {
+    "token": "2277",
+    "trading_symbol": "MRF-EQ",
+    "name": "MRF Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "MGL": {
+    "token": "17534",
+    "trading_symbol": "MGL-EQ",
+    "name": "Mahanagar Gas Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "MAHSCOOTER": {
+    "token": "2085",
+    "trading_symbol": "MAHSCOOTER-EQ",
+    "name": "Maharashtra Scooters Ltd.",
+    "sector": "Financial Services"
+  },
+  "MAHSEAMLES": {
+    "token": "2088",
+    "trading_symbol": "MAHSEAMLES-EQ",
+    "name": "Maharashtra Seamless Ltd.",
+    "sector": "Capital Goods"
+  },
+  "M&MFIN": {
+    "token": "13285",
+    "trading_symbol": "M&MFIN-EQ",
+    "name": "Mahindra & Mahindra Financial Services Ltd.",
+    "sector": "Financial Services"
+  },
+  "M&M": {
+    "token": "2031",
+    "trading_symbol": "M&M-EQ",
+    "name": "Mahindra & Mahindra Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "MANAPPURAM": {
+    "token": "19061",
+    "trading_symbol": "MANAPPURAM-EQ",
+    "name": "Manappuram Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "MRPL": {
+    "token": "2283",
+    "trading_symbol": "MRPL-EQ",
+    "name": "Mangalore Refinery & Petrochemicals Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "MANKIND": {
+    "token": "15380",
+    "trading_symbol": "MANKIND-EQ",
+    "name": "Mankind Pharma Ltd.",
+    "sector": "Healthcare"
+  },
+  "MARICO": {
+    "token": "4067",
+    "trading_symbol": "MARICO-EQ",
+    "name": "Marico Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "MARUTI": {
+    "token": "10999",
+    "trading_symbol": "MARUTI-EQ",
+    "name": "Maruti Suzuki India Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "MFSL": {
+    "token": "2142",
+    "trading_symbol": "MFSL-EQ",
+    "name": "Max Financial Services Ltd.",
+    "sector": "Financial Services"
+  },
+  "MAXHEALTH": {
+    "token": "22377",
+    "trading_symbol": "MAXHEALTH-EQ",
+    "name": "Max Healthcare Institute Ltd.",
+    "sector": "Healthcare"
+  },
+  "MAZDOCK": {
+    "token": "509",
+    "trading_symbol": "MAZDOCK-EQ",
+    "name": "Mazagoan Dock Shipbuilders Ltd.",
+    "sector": "Capital Goods"
+  },
+  "METROPOLIS": {
+    "token": "9581",
+    "trading_symbol": "METROPOLIS-EQ",
+    "name": "Metropolis Healthcare Ltd.",
+    "sector": "Healthcare"
+  },
+  "MINDACORP": {
+    "token": "25897",
+    "trading_symbol": "MINDACORP-EQ",
+    "name": "Minda Corporation Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "MSUMI": {
+    "token": "8596",
+    "trading_symbol": "MSUMI-EQ",
+    "name": "Motherson Sumi Wiring India Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "MOTILALOFS": {
+    "token": "14947",
+    "trading_symbol": "MOTILALOFS-EQ",
+    "name": "Motilal Oswal Financial Services Ltd.",
+    "sector": "Financial Services"
+  },
+  "MPHASIS": {
+    "token": "4503",
+    "trading_symbol": "MPHASIS-EQ",
+    "name": "MphasiS Ltd.",
+    "sector": "Information Technology"
+  },
+  "MCX": {
+    "token": "31181",
+    "trading_symbol": "MCX-EQ",
+    "name": "Multi Commodity Exchange of India Ltd.",
+    "sector": "Financial Services"
+  },
+  "MUTHOOTFIN": {
+    "token": "23650",
+    "trading_symbol": "MUTHOOTFIN-EQ",
+    "name": "Muthoot Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "NATCOPHARM": {
+    "token": "3918",
+    "trading_symbol": "NATCOPHARM-EQ",
+    "name": "NATCO Pharma Ltd.",
+    "sector": "Healthcare"
+  },
+  "NBCC": {
+    "token": "31415",
+    "trading_symbol": "NBCC-EQ",
+    "name": "NBCC (India) Ltd.",
+    "sector": "Construction"
+  },
+  "NCC": {
+    "token": "2319",
+    "trading_symbol": "NCC-EQ",
+    "name": "NCC Ltd.",
+    "sector": "Construction"
+  },
+  "NHPC": {
+    "token": "17400",
+    "trading_symbol": "NHPC-EQ",
+    "name": "NHPC Ltd.",
+    "sector": "Power"
+  },
+  "NLCINDIA": {
+    "token": "8585",
+    "trading_symbol": "NLCINDIA-EQ",
+    "name": "NLC India Ltd.",
+    "sector": "Power"
+  },
+  "NMDC": {
+    "token": "15332",
+    "trading_symbol": "NMDC-EQ",
+    "name": "NMDC Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "NSLNISP": {
+    "token": "14180",
+    "trading_symbol": "NSLNISP-EQ",
+    "name": "NMDC Steel Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "NTPCGREEN": {
+    "token": "27176",
+    "trading_symbol": "NTPCGREEN-EQ",
+    "name": "NTPC Green Energy Ltd.",
+    "sector": "Power"
+  },
+  "NTPC": {
+    "token": "11630",
+    "trading_symbol": "NTPC-EQ",
+    "name": "NTPC Ltd.",
+    "sector": "Power"
+  },
+  "NH": {
+    "token": "11840",
+    "trading_symbol": "NH-EQ",
+    "name": "Narayana Hrudayalaya Ltd.",
+    "sector": "Healthcare"
+  },
+  "NATIONALUM": {
+    "token": "6364",
+    "trading_symbol": "NATIONALUM-EQ",
+    "name": "National Aluminium Co. Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "NAVA": {
+    "token": "4014",
+    "trading_symbol": "NAVA-EQ",
+    "name": "Nava Ltd.",
+    "sector": "Power"
+  },
+  "NAVINFLUOR": {
+    "token": "14672",
+    "trading_symbol": "NAVINFLUOR-EQ",
+    "name": "Navin Fluorine International Ltd.",
+    "sector": "Chemicals"
+  },
+  "NESTLEIND": {
+    "token": "17963",
+    "trading_symbol": "NESTLEIND-EQ",
+    "name": "Nestle India Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "NETWEB": {
+    "token": "17433",
+    "trading_symbol": "NETWEB-EQ",
+    "name": "Netweb Technologies India Ltd.",
+    "sector": "Information Technology"
+  },
+  "NEULANDLAB": {
+    "token": "2406",
+    "trading_symbol": "NEULANDLAB-EQ",
+    "name": "Neuland Laboratories Ltd.",
+    "sector": "Healthcare"
+  },
+  "NEWGEN": {
+    "token": "1164",
+    "trading_symbol": "NEWGEN-EQ",
+    "name": "Newgen Software Technologies Ltd.",
+    "sector": "Information Technology"
+  },
+  "NAM-INDIA": {
+    "token": "357",
+    "trading_symbol": "NAM-INDIA-EQ",
+    "name": "Nippon Life India Asset Management Ltd.",
+    "sector": "Financial Services"
+  },
+  "NIVABUPA": {
+    "token": "27097",
+    "trading_symbol": "NIVABUPA-EQ",
+    "name": "Niva Bupa Health Insurance Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "NUVAMA": {
+    "token": "18721",
+    "trading_symbol": "NUVAMA-EQ",
+    "name": "Nuvama Wealth Management Ltd.",
+    "sector": "Financial Services"
+  },
+  "NUVOCO": {
+    "token": "5426",
+    "trading_symbol": "NUVOCO-EQ",
+    "name": "Nuvoco Vistas Corporation Ltd.",
+    "sector": "Construction Materials"
+  },
+  "OBEROIRLTY": {
+    "token": "20242",
+    "trading_symbol": "OBEROIRLTY-EQ",
+    "name": "Oberoi Realty Ltd.",
+    "sector": "Realty"
+  },
+  "ONGC": {
+    "token": "2475",
+    "trading_symbol": "ONGC-EQ",
+    "name": "Oil & Natural Gas Corporation Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "OIL": {
+    "token": "17438",
+    "trading_symbol": "OIL-EQ",
+    "name": "Oil India Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "OLAELEC": {
+    "token": "24777",
+    "trading_symbol": "OLAELEC-EQ",
+    "name": "Ola Electric Mobility Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "OLECTRA": {
+    "token": "10637",
+    "trading_symbol": "OLECTRA-EQ",
+    "name": "Olectra Greentech Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "PAYTM": {
+    "token": "6705",
+    "trading_symbol": "PAYTM-EQ",
+    "name": "One 97 Communications Ltd.",
+    "sector": "Financial Services"
+  },
+  "ONESOURCE": {
+    "token": "29224",
+    "trading_symbol": "ONESOURCE-EQ",
+    "name": "Onesource Specialty Pharma Ltd.",
+    "sector": "Healthcare"
+  },
+  "OFSS": {
+    "token": "10738",
+    "trading_symbol": "OFSS-EQ",
+    "name": "Oracle Financial Services Software Ltd.",
+    "sector": "Information Technology"
+  },
+  "POLICYBZR": {
+    "token": "6656",
+    "trading_symbol": "POLICYBZR-EQ",
+    "name": "PB Fintech Ltd.",
+    "sector": "Financial Services"
+  },
+  "PCBL": {
+    "token": "2649",
+    "trading_symbol": "PCBL-EQ",
+    "name": "PCBL Chemical Ltd.",
+    "sector": "Chemicals"
+  },
+  "PGEL": {
+    "token": "25358",
+    "trading_symbol": "PGEL-EQ",
+    "name": "PG Electroplast Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "PIIND": {
+    "token": "24184",
+    "trading_symbol": "PIIND-EQ",
+    "name": "PI Industries Ltd.",
+    "sector": "Chemicals"
+  },
+  "PNBHOUSING": {
+    "token": "18908",
+    "trading_symbol": "PNBHOUSING-EQ",
+    "name": "PNB Housing Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "PTCIL": {
+    "token": "16682",
+    "trading_symbol": "PTCIL-EQ",
+    "name": "PTC Industries Ltd.",
+    "sector": "Capital Goods"
+  },
+  "PVRINOX": {
+    "token": "13147",
+    "trading_symbol": "PVRINOX-EQ",
+    "name": "PVR INOX Ltd.",
+    "sector": "Media Entertainment & Publication"
+  },
+  "PAGEIND": {
+    "token": "14413",
+    "trading_symbol": "PAGEIND-EQ",
+    "name": "Page Industries Ltd.",
+    "sector": "Textiles"
+  },
+  "PATANJALI": {
+    "token": "17029",
+    "trading_symbol": "PATANJALI-EQ",
+    "name": "Patanjali Foods Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "PERSISTENT": {
+    "token": "18365",
+    "trading_symbol": "PERSISTENT-EQ",
+    "name": "Persistent Systems Ltd.",
+    "sector": "Information Technology"
+  },
+  "PETRONET": {
+    "token": "11351",
+    "trading_symbol": "PETRONET-EQ",
+    "name": "Petronet LNG Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "PFIZER": {
+    "token": "2643",
+    "trading_symbol": "PFIZER-EQ",
+    "name": "Pfizer Ltd.",
+    "sector": "Healthcare"
+  },
+  "PHOENIXLTD": {
+    "token": "14552",
+    "trading_symbol": "PHOENIXLTD-EQ",
+    "name": "Phoenix Mills Ltd.",
+    "sector": "Realty"
+  },
+  "PIDILITIND": {
+    "token": "2664",
+    "trading_symbol": "PIDILITIND-EQ",
+    "name": "Pidilite Industries Ltd.",
+    "sector": "Chemicals"
+  },
+  "PPLPHARMA": {
+    "token": "11571",
+    "trading_symbol": "PPLPHARMA-EQ",
+    "name": "Piramal Pharma Ltd.",
+    "sector": "Healthcare"
+  },
+  "POLYMED": {
+    "token": "25718",
+    "trading_symbol": "POLYMED-EQ",
+    "name": "Poly Medicure Ltd.",
+    "sector": "Healthcare"
+  },
+  "POLYCAB": {
+    "token": "9590",
+    "trading_symbol": "POLYCAB-EQ",
+    "name": "Polycab India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "POONAWALLA": {
+    "token": "11403",
+    "trading_symbol": "POONAWALLA-EQ",
+    "name": "Poonawalla Fincorp Ltd.",
+    "sector": "Financial Services"
+  },
+  "PFC": {
+    "token": "14299",
+    "trading_symbol": "PFC-EQ",
+    "name": "Power Finance Corporation Ltd.",
+    "sector": "Financial Services"
+  },
+  "POWERGRID": {
+    "token": "14977",
+    "trading_symbol": "POWERGRID-EQ",
+    "name": "Power Grid Corporation of India Ltd.",
+    "sector": "Power"
+  },
+  "PRAJIND": {
+    "token": "2705",
+    "trading_symbol": "PRAJIND-EQ",
+    "name": "Praj Industries Ltd.",
+    "sector": "Capital Goods"
+  },
+  "PREMIERENE": {
+    "token": "25049",
+    "trading_symbol": "PREMIERENE-EQ",
+    "name": "Premier Energies Ltd.",
+    "sector": "Capital Goods"
+  },
+  "PRESTIGE": {
+    "token": "20302",
+    "trading_symbol": "PRESTIGE-EQ",
+    "name": "Prestige Estates Projects Ltd.",
+    "sector": "Realty"
+  },
+  "PGHH": {
+    "token": "2535",
+    "trading_symbol": "PGHH-EQ",
+    "name": "Procter & Gamble Hygiene & Health Care Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "PNB": {
+    "token": "10666",
+    "trading_symbol": "PNB-EQ",
+    "name": "Punjab National Bank",
+    "sector": "Financial Services"
+  },
+  "RRKABEL": {
+    "token": "18566",
+    "trading_symbol": "RRKABEL-EQ",
+    "name": "R R Kabel Ltd.",
+    "sector": "Capital Goods"
+  },
+  "RBLBANK": {
+    "token": "18391",
+    "trading_symbol": "RBLBANK-EQ",
+    "name": "RBL Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "RECLTD": {
+    "token": "15355",
+    "trading_symbol": "RECLTD-EQ",
+    "name": "REC Ltd.",
+    "sector": "Financial Services"
+  },
+  "RHIM": {
+    "token": "31163",
+    "trading_symbol": "RHIM-EQ",
+    "name": "RHI MAGNESITA INDIA LTD.",
+    "sector": "Capital Goods"
+  },
+  "RITES": {
+    "token": "3761",
+    "trading_symbol": "RITES-EQ",
+    "name": "RITES Ltd.",
+    "sector": "Construction"
+  },
+  "RADICO": {
+    "token": "10990",
+    "trading_symbol": "RADICO-EQ",
+    "name": "Radico Khaitan Ltd",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "RVNL": {
+    "token": "9552",
+    "trading_symbol": "RVNL-EQ",
+    "name": "Rail Vikas Nigam Ltd.",
+    "sector": "Construction"
+  },
+  "RAILTEL": {
+    "token": "2431",
+    "trading_symbol": "RAILTEL-EQ",
+    "name": "Railtel Corporation Of India Ltd.",
+    "sector": "Telecommunication"
+  },
+  "RAINBOW": {
+    "token": "9408",
+    "trading_symbol": "RAINBOW-EQ",
+    "name": "Rainbow Childrens Medicare Ltd.",
+    "sector": "Healthcare"
+  },
+  "RKFORGE": {
+    "token": "11411",
+    "trading_symbol": "RKFORGE-EQ",
+    "name": "Ramkrishna Forgings Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "RCF": {
+    "token": "2866",
+    "trading_symbol": "RCF-EQ",
+    "name": "Rashtriya Chemicals & Fertilizers Ltd.",
+    "sector": "Chemicals"
+  },
+  "REDINGTON": {
+    "token": "14255",
+    "trading_symbol": "REDINGTON-EQ",
+    "name": "Redington Ltd.",
+    "sector": "Services"
+  },
+  "RELIANCE": {
+    "token": "2885",
+    "trading_symbol": "RELIANCE-EQ",
+    "name": "Reliance Industries Ltd.",
+    "sector": "Oil Gas & Consumable Fuels"
+  },
+  "RPOWER": {
+    "token": "15259",
+    "trading_symbol": "RPOWER-EQ",
+    "name": "Reliance Power Ltd.",
+    "sector": "Power"
+  },
+  "SBFC": {
+    "token": "18026",
+    "trading_symbol": "SBFC-EQ",
+    "name": "SBFC Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "SBICARD": {
+    "token": "17971",
+    "trading_symbol": "SBICARD-EQ",
+    "name": "SBI Cards and Payment Services Ltd.",
+    "sector": "Financial Services"
+  },
+  "SBILIFE": {
+    "token": "21808",
+    "trading_symbol": "SBILIFE-EQ",
+    "name": "SBI Life Insurance Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "SJVN": {
+    "token": "18883",
+    "trading_symbol": "SJVN-EQ",
+    "name": "SJVN Ltd.",
+    "sector": "Power"
+  },
+  "SRF": {
+    "token": "3273",
+    "trading_symbol": "SRF-EQ",
+    "name": "SRF Ltd.",
+    "sector": "Chemicals"
+  },
+  "SAGILITY": {
+    "token": "27052",
+    "trading_symbol": "SAGILITY-EQ",
+    "name": "Sagility Ltd.",
+    "sector": "Information Technology"
+  },
+  "SAILIFE": {
+    "token": "27839",
+    "trading_symbol": "SAILIFE-EQ",
+    "name": "Sai Life Sciences Ltd.",
+    "sector": "Healthcare"
+  },
+  "SAMMAANCAP": {
+    "token": "30125",
+    "trading_symbol": "SAMMAANCAP-EQ",
+    "name": "Sammaan Capital Ltd.",
+    "sector": "Financial Services"
+  },
+  "MOTHERSON": {
+    "token": "4204",
+    "trading_symbol": "MOTHERSON-EQ",
+    "name": "Samvardhana Motherson International Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "SAPPHIRE": {
+    "token": "6718",
+    "trading_symbol": "SAPPHIRE-EQ",
+    "name": "Sapphire Foods India Ltd.",
+    "sector": "Consumer Services"
+  },
+  "SARDAEN": {
+    "token": "17758",
+    "trading_symbol": "SARDAEN-EQ",
+    "name": "Sarda Energy and Minerals Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "SAREGAMA": {
+    "token": "4892",
+    "trading_symbol": "SAREGAMA-EQ",
+    "name": "Saregama India Ltd",
+    "sector": "Media Entertainment & Publication"
+  },
+  "SCHAEFFLER": {
+    "token": "1011",
+    "trading_symbol": "SCHAEFFLER-EQ",
+    "name": "Schaeffler India Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "SCHNEIDER": {
+    "token": "31234",
+    "trading_symbol": "SCHNEIDER-EQ",
+    "name": "Schneider Electric Infrastructure Ltd.",
+    "sector": "Capital Goods"
+  },
+  "SCI": {
+    "token": "3048",
+    "trading_symbol": "SCI-EQ",
+    "name": "Shipping Corporation of India Ltd.",
+    "sector": "Services"
+  },
+  "SHREECEM": {
+    "token": "3103",
+    "trading_symbol": "SHREECEM-EQ",
+    "name": "Shree Cement Ltd.",
+    "sector": "Construction Materials"
+  },
+  "SHRIRAMFIN": {
+    "token": "4306",
+    "trading_symbol": "SHRIRAMFIN-EQ",
+    "name": "Shriram Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "SHYAMMETL": {
+    "token": "4693",
+    "trading_symbol": "SHYAMMETL-EQ",
+    "name": "Shyam Metalics and Energy Ltd.",
+    "sector": "Capital Goods"
+  },
+  "ENRIN": {
+    "token": "756871",
+    "trading_symbol": "ENRIN-EQ",
+    "name": "Siemens Energy India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "SIEMENS": {
+    "token": "3150",
+    "trading_symbol": "SIEMENS-EQ",
+    "name": "Siemens Ltd.",
+    "sector": "Capital Goods"
+  },
+  "SIGNATURE": {
+    "token": "18743",
+    "trading_symbol": "SIGNATURE-EQ",
+    "name": "Signatureglobal (India) Ltd.",
+    "sector": "Realty"
+  },
+  "SOBHA": {
+    "token": "13826",
+    "trading_symbol": "SOBHA-EQ",
+    "name": "Sobha Ltd.",
+    "sector": "Realty"
+  },
+  "SOLARINDS": {
+    "token": "13332",
+    "trading_symbol": "SOLARINDS-EQ",
+    "name": "Solar Industries India Ltd.",
+    "sector": "Chemicals"
+  },
+  "SONACOMS": {
+    "token": "4684",
+    "trading_symbol": "SONACOMS-EQ",
+    "name": "Sona BLW Precision Forgings Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "SONATSOFTW": {
+    "token": "6596",
+    "trading_symbol": "SONATSOFTW-EQ",
+    "name": "Sonata Software Ltd.",
+    "sector": "Information Technology"
+  },
+  "STARHEALTH": {
+    "token": "7083",
+    "trading_symbol": "STARHEALTH-EQ",
+    "name": "Star Health and Allied Insurance Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "SBIN": {
+    "token": "3045",
+    "trading_symbol": "SBIN-EQ",
+    "name": "State Bank of India",
+    "sector": "Financial Services"
+  },
+  "SAIL": {
+    "token": "2963",
+    "trading_symbol": "SAIL-EQ",
+    "name": "Steel Authority of India Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "SUMICHEM": {
+    "token": "17105",
+    "trading_symbol": "SUMICHEM-EQ",
+    "name": "Sumitomo Chemical India Ltd.",
+    "sector": "Chemicals"
+  },
+  "SUNPHARMA": {
+    "token": "3351",
+    "trading_symbol": "SUNPHARMA-EQ",
+    "name": "Sun Pharmaceutical Industries Ltd.",
+    "sector": "Healthcare"
+  },
+  "SUNTV": {
+    "token": "13404",
+    "trading_symbol": "SUNTV-EQ",
+    "name": "Sun TV Network Ltd.",
+    "sector": "Media Entertainment & Publication"
+  },
+  "SUNDARMFIN": {
+    "token": "3339",
+    "trading_symbol": "SUNDARMFIN-EQ",
+    "name": "Sundaram Finance Ltd.",
+    "sector": "Financial Services"
+  },
+  "SUNDRMFAST": {
+    "token": "3345",
+    "trading_symbol": "SUNDRMFAST-EQ",
+    "name": "Sundram Fasteners Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "SUPREMEIND": {
+    "token": "3363",
+    "trading_symbol": "SUPREMEIND-EQ",
+    "name": "Supreme Industries Ltd.",
+    "sector": "Capital Goods"
+  },
+  "SUZLON": {
+    "token": "12018",
+    "trading_symbol": "SUZLON-EQ",
+    "name": "Suzlon Energy Ltd.",
+    "sector": "Capital Goods"
+  },
+  "SWANCORP": {
+    "token": "27095",
+    "trading_symbol": "SWANCORP-EQ",
+    "name": "Swan Corp Ltd.",
+    "sector": "Chemicals"
+  },
+  "SWIGGY": {
+    "token": "27066",
+    "trading_symbol": "SWIGGY-EQ",
+    "name": "Swiggy Ltd.",
+    "sector": "Consumer Services"
+  },
+  "SYNGENE": {
+    "token": "10243",
+    "trading_symbol": "SYNGENE-EQ",
+    "name": "Syngene International Ltd.",
+    "sector": "Healthcare"
+  },
+  "SYRMA": {
+    "token": "10793",
+    "trading_symbol": "SYRMA-EQ",
+    "name": "Syrma SGS Technology Ltd.",
+    "sector": "Capital Goods"
+  },
+  "TBOTEK": {
+    "token": "23740",
+    "trading_symbol": "TBOTEK-EQ",
+    "name": "TBO Tek Ltd.",
+    "sector": "Consumer Services"
+  },
+  "TVSMOTOR": {
+    "token": "8479",
+    "trading_symbol": "TVSMOTOR-EQ",
+    "name": "TVS Motor Company Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "TATACHEM": {
+    "token": "3405",
+    "trading_symbol": "TATACHEM-EQ",
+    "name": "Tata Chemicals Ltd.",
+    "sector": "Chemicals"
+  },
+  "TATACOMM": {
+    "token": "3721",
+    "trading_symbol": "TATACOMM-EQ",
+    "name": "Tata Communications Ltd.",
+    "sector": "Telecommunication"
+  },
+  "TCS": {
+    "token": "11536",
+    "trading_symbol": "TCS-EQ",
+    "name": "Tata Consultancy Services Ltd.",
+    "sector": "Information Technology"
+  },
+  "TATACONSUM": {
+    "token": "3432",
+    "trading_symbol": "TATACONSUM-EQ",
+    "name": "Tata Consumer Products Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "TATAELXSI": {
+    "token": "3411",
+    "trading_symbol": "TATAELXSI-EQ",
+    "name": "Tata Elxsi Ltd.",
+    "sector": "Information Technology"
+  },
+  "TATAINVEST": {
+    "token": "1621",
+    "trading_symbol": "TATAINVEST-EQ",
+    "name": "Tata Investment Corporation Ltd.",
+    "sector": "Financial Services"
+  },
+  "TMPV": {
+    "token": "3456",
+    "trading_symbol": "TMPV-EQ",
+    "name": "Tata Motors Passenger Vehicles Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "TATAPOWER": {
+    "token": "3426",
+    "trading_symbol": "TATAPOWER-EQ",
+    "name": "Tata Power Co. Ltd.",
+    "sector": "Power"
+  },
+  "TATASTEEL": {
+    "token": "3499",
+    "trading_symbol": "TATASTEEL-EQ",
+    "name": "Tata Steel Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "TATATECH": {
+    "token": "20293",
+    "trading_symbol": "TATATECH-EQ",
+    "name": "Tata Technologies Ltd.",
+    "sector": "Information Technology"
+  },
+  "TTML": {
+    "token": "8954",
+    "trading_symbol": "TTML-EQ",
+    "name": "Tata Teleservices (Maharashtra) Ltd.",
+    "sector": "Telecommunication"
+  },
+  "TECHM": {
+    "token": "13538",
+    "trading_symbol": "TECHM-EQ",
+    "name": "Tech Mahindra Ltd.",
+    "sector": "Information Technology"
+  },
+  "TECHNOE": {
+    "token": "6445",
+    "trading_symbol": "TECHNOE-EQ",
+    "name": "Techno Electric & Engineering Company Ltd.",
+    "sector": "Construction"
+  },
+  "TEJASNET": {
+    "token": "21131",
+    "trading_symbol": "TEJASNET-EQ",
+    "name": "Tejas Networks Ltd.",
+    "sector": "Telecommunication"
+  },
+  "NIACL": {
+    "token": "399",
+    "trading_symbol": "NIACL-EQ",
+    "name": "The New India Assurance Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "RAMCOCEM": {
+    "token": "2043",
+    "trading_symbol": "RAMCOCEM-EQ",
+    "name": "The Ramco Cements Ltd.",
+    "sector": "Construction Materials"
+  },
+  "THERMAX": {
+    "token": "3475",
+    "trading_symbol": "THERMAX-EQ",
+    "name": "Thermax Ltd.",
+    "sector": "Capital Goods"
+  },
+  "TIMKEN": {
+    "token": "14198",
+    "trading_symbol": "TIMKEN-EQ",
+    "name": "Timken India Ltd.",
+    "sector": "Capital Goods"
+  },
+  "TITAGARH": {
+    "token": "15414",
+    "trading_symbol": "TITAGARH-EQ",
+    "name": "Titagarh Rail Systems Ltd.",
+    "sector": "Capital Goods"
+  },
+  "TITAN": {
+    "token": "3506",
+    "trading_symbol": "TITAN-EQ",
+    "name": "Titan Company Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "TORNTPHARM": {
+    "token": "3518",
+    "trading_symbol": "TORNTPHARM-EQ",
+    "name": "Torrent Pharmaceuticals Ltd.",
+    "sector": "Healthcare"
+  },
+  "TORNTPOWER": {
+    "token": "13786",
+    "trading_symbol": "TORNTPOWER-EQ",
+    "name": "Torrent Power Ltd.",
+    "sector": "Power"
+  },
+  "TARIL": {
+    "token": "15174",
+    "trading_symbol": "TARIL-EQ",
+    "name": "Transformers And Rectifiers (India) Ltd.",
+    "sector": "Capital Goods"
+  },
+  "TRENT": {
+    "token": "1964",
+    "trading_symbol": "TRENT-EQ",
+    "name": "Trent Ltd.",
+    "sector": "Consumer Services"
+  },
+  "TRIDENT": {
+    "token": "9685",
+    "trading_symbol": "TRIDENT-EQ",
+    "name": "Trident Ltd.",
+    "sector": "Textiles"
+  },
+  "TRIVENI": {
+    "token": "13081",
+    "trading_symbol": "TRIVENI-EQ",
+    "name": "Triveni Engineering & Industries Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "TRITURBINE": {
+    "token": "25584",
+    "trading_symbol": "TRITURBINE-EQ",
+    "name": "Triveni Turbine Ltd.",
+    "sector": "Capital Goods"
+  },
+  "TIINDIA": {
+    "token": "312",
+    "trading_symbol": "TIINDIA-EQ",
+    "name": "Tube Investments of India Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "UCOBANK": {
+    "token": "11223",
+    "trading_symbol": "UCOBANK-EQ",
+    "name": "UCO Bank",
+    "sector": "Financial Services"
+  },
+  "UNOMINDA": {
+    "token": "14154",
+    "trading_symbol": "UNOMINDA-EQ",
+    "name": "UNO Minda Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "UPL": {
+    "token": "11287",
+    "trading_symbol": "UPL-EQ",
+    "name": "UPL Ltd.",
+    "sector": "Chemicals"
+  },
+  "UTIAMC": {
+    "token": "527",
+    "trading_symbol": "UTIAMC-EQ",
+    "name": "UTI Asset Management Company Ltd.",
+    "sector": "Financial Services"
+  },
+  "ULTRACEMCO": {
+    "token": "11532",
+    "trading_symbol": "ULTRACEMCO-EQ",
+    "name": "UltraTech Cement Ltd.",
+    "sector": "Construction Materials"
+  },
+  "UNIONBANK": {
+    "token": "10753",
+    "trading_symbol": "UNIONBANK-EQ",
+    "name": "Union Bank of India",
+    "sector": "Financial Services"
+  },
+  "UBL": {
+    "token": "16713",
+    "trading_symbol": "UBL-EQ",
+    "name": "United Breweries Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "UNITDSPR": {
+    "token": "10447",
+    "trading_symbol": "UNITDSPR-EQ",
+    "name": "United Spirits Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "USHAMART": {
+    "token": "8840",
+    "trading_symbol": "USHAMART-EQ",
+    "name": "Usha Martin Ltd.",
+    "sector": "Capital Goods"
+  },
+  "VGUARD": {
+    "token": "15362",
+    "trading_symbol": "VGUARD-EQ",
+    "name": "V-Guard Industries Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "DBREALTY": {
+    "token": "18124",
+    "trading_symbol": "DBREALTY-EQ",
+    "name": "Valor Estate Ltd.",
+    "sector": "Consumer Services"
+  },
+  "VTL": {
+    "token": "2073",
+    "trading_symbol": "VTL-EQ",
+    "name": "Vardhman Textiles Ltd.",
+    "sector": "Textiles"
+  },
+  "VBL": {
+    "token": "18921",
+    "trading_symbol": "VBL-EQ",
+    "name": "Varun Beverages Ltd.",
+    "sector": "Fast Moving Consumer Goods"
+  },
+  "MANYAVAR": {
+    "token": "8167",
+    "trading_symbol": "MANYAVAR-EQ",
+    "name": "Vedant Fashions Ltd.",
+    "sector": "Consumer Services"
+  },
+  "VEDL": {
+    "token": "3063",
+    "trading_symbol": "VEDL-EQ",
+    "name": "Vedanta Ltd.",
+    "sector": "Metals & Mining"
+  },
+  "VENTIVE": {
+    "token": "28847",
+    "trading_symbol": "VENTIVE-EQ",
+    "name": "Ventive Hospitality Ltd.",
+    "sector": "Consumer Services"
+  },
+  "VIJAYA": {
+    "token": "5585",
+    "trading_symbol": "VIJAYA-EQ",
+    "name": "Vijaya Diagnostic Centre Ltd.",
+    "sector": "Healthcare"
+  },
+  "VMM": {
+    "token": "27969",
+    "trading_symbol": "VMM-EQ",
+    "name": "Vishal Mega Mart Ltd.",
+    "sector": "Consumer Services"
+  },
+  "IDEA": {
+    "token": "14366",
+    "trading_symbol": "IDEA-EQ",
+    "name": "Vodafone Idea Ltd.",
+    "sector": "Telecommunication"
+  },
+  "VOLTAS": {
+    "token": "3718",
+    "trading_symbol": "VOLTAS-EQ",
+    "name": "Voltas Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "WAAREEENER": {
+    "token": "25907",
+    "trading_symbol": "WAAREEENER-EQ",
+    "name": "Waaree Energies Ltd.",
+    "sector": "Capital Goods"
+  },
+  "WELCORP": {
+    "token": "11821",
+    "trading_symbol": "WELCORP-EQ",
+    "name": "Welspun Corp Ltd.",
+    "sector": "Capital Goods"
+  },
+  "WELSPUNLIV": {
+    "token": "11253",
+    "trading_symbol": "WELSPUNLIV-EQ",
+    "name": "Welspun Living Ltd.",
+    "sector": "Textiles"
+  },
+  "WHIRLPOOL": {
+    "token": "18011",
+    "trading_symbol": "WHIRLPOOL-EQ",
+    "name": "Whirlpool of India Ltd.",
+    "sector": "Consumer Durables"
+  },
+  "WIPRO": {
+    "token": "3787",
+    "trading_symbol": "WIPRO-EQ",
+    "name": "Wipro Ltd.",
+    "sector": "Information Technology"
+  },
+  "WOCKPHARMA": {
+    "token": "7506",
+    "trading_symbol": "WOCKPHARMA-EQ",
+    "name": "Wockhardt Ltd.",
+    "sector": "Healthcare"
+  },
+  "YESBANK": {
+    "token": "11915",
+    "trading_symbol": "YESBANK-EQ",
+    "name": "Yes Bank Ltd.",
+    "sector": "Financial Services"
+  },
+  "ZFCVINDIA": {
+    "token": "16915",
+    "trading_symbol": "ZFCVINDIA-EQ",
+    "name": "ZF Commercial Vehicle Control Systems India Ltd.",
+    "sector": "Automobile and Auto Components"
+  },
+  "ZEEL": {
+    "token": "3812",
+    "trading_symbol": "ZEEL-EQ",
+    "name": "Zee Entertainment Enterprises Ltd.",
+    "sector": "Media Entertainment & Publication"
+  },
+  "ZENTEC": {
+    "token": "7508",
+    "trading_symbol": "ZENTEC-EQ",
+    "name": "Zen Technologies Ltd.",
+    "sector": "Capital Goods"
+  },
+  "ZENSARTECH": {
+    "token": "1076",
+    "trading_symbol": "ZENSARTECH-EQ",
+    "name": "Zensar Technolgies Ltd.",
+    "sector": "Information Technology"
+  },
+  "ZYDUSLIFE": {
+    "token": "7929",
+    "trading_symbol": "ZYDUSLIFE-EQ",
+    "name": "Zydus Lifesciences Ltd.",
+    "sector": "Healthcare"
+  },
+  "ECLERX": {
+    "token": "15179",
+    "trading_symbol": "ECLERX-EQ",
+    "name": "eClerx Services Ltd.",
+    "sector": "Services"
+  }
+}

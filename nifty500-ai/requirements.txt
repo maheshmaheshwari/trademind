@@ -1,0 +1,50 @@
+# ==========================================
+# Nifty 500 AI Trading Data Pipeline
+# Requirements
+# ==========================================
+
+# Data Collection
+yfinance==0.2.48
+requests==2.32.3
+beautifulsoup4==4.12.3
+lxml==5.3.0
+aiohttp==3.11.11
+smartapi-python==1.5.5
+pyotp==2.9.0
+
+# Data Processing
+pandas==2.2.3
+numpy==2.1.2
+
+# Technical Indicators
+ta==0.11.0
+
+# AI/ML - News Sentiment (FinBERT)
+transformers==4.47.1
+torch==2.5.1
+
+# Database
+libsql-experimental==0.0.55
+
+# Cache
+redis==5.2.1
+
+# API Backend
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# Scheduling
+apscheduler==3.10.4
+
+# Environment
+python-dotenv==1.0.1
+
+# Progress Bar
+tqdm==4.67.1
+
+# Logging (built-in, no package needed)
+
+# Development
+black==24.10.0
+isort==5.13.2

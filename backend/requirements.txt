@@ -21,7 +21,7 @@ ta==0.11.0
 
 # AI/ML - News Sentiment (FinBERT)
 transformers==4.47.1
-torch==2.5.1
+torch>=2.2.0
 
 # Database
 libsql-experimental==0.0.55

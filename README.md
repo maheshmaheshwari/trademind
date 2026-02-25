@@ -15,10 +15,10 @@ and generates BUY/SELL signals for Nifty 500 stocks.
 - Python 3.11 or higher
 - pip (Python package manager)
 
-### 1. Clone & Install
+### 1. Backend Setup
 
 ```bash
-cd nifty500-ai
+cd backend
 python -m venv venv
 source venv/bin/activate   # macOS/Linux
 # venv\Scripts\activate    # Windows
@@ -118,30 +118,31 @@ Interactive docs: http://localhost:8000/docs
 ## 📁 Project Structure
 
 ```
-nifty500-ai/
-├── main.py                 ← CLI entry point
-├── requirements.txt        ← All Python packages
-├── .env                    ← Your API keys (local only)
-├── nifty500.db             ← SQLite database (created on setup)
-├── database/
-│   ├── db.py               ← Database connection + CRUD helpers
-│   └── models.py           ← SQL table definitions
-├── collectors/
-│   ├── price_collector.py  ← yfinance data downloader
-│   ├── news_collector.py   ← NewsAPI + Economic Times scraper
-│   └── fii_collector.py    ← FII/DII institutional flows
-├── analysis/
-│   ├── indicators.py       ← Technical indicators (RSI, MACD, etc)
-│   ├── signals.py          ← BUY/SELL signal generator
-│   └── sentiment.py        ← FinBERT news sentiment scorer
-├── api/
-│   ├── server.py           ← FastAPI application
-│   └── routes/             ← API route handlers
-├── scheduler/
-│   └── jobs.py             ← APScheduler automated tasks
-└── data/
-    ├── stocks_list.py      ← Nifty 50 stock symbols
-    └── backups/            ← CSV data backups
+trademind/
+├── frontend/               ← React application
+└── backend/                ← Python FastAPI application
+    ├── main.py             ← CLI entry point
+    ├── requirements.txt    ← All Python packages
+    ├── .env                ← Your API keys (local only)
+    ├── nifty500.db         ← SQLite database (created on setup)
+    ├── database/
+    │   ├── db.py           ← Database connection + CRUD helpers
+    │   └── models.py       ← SQL table definitions
+    ├── collectors/
+    │   ├── price_collector.py
+    │   ├── news_collector.py
+    │   └── fii_collector.py
+    ├── analysis/
+    │   ├── indicators.py   ← Technical indicators
+    │   ├── signals.py      ← Signal generator
+    │   └── sentiment.py    ← FinBERT news sentiment
+    ├── api/
+    │   ├── server.py       ← FastAPI application
+    │   └── routes/         ← API route handlers
+    ├── scheduler/
+    │   └── jobs.py         ← APScheduler automated tasks
+    └── data/
+        └── stocks_list.py  ← Nifty 50 stock symbols
 ```
 
 ---

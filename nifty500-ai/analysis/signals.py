@@ -27,7 +27,7 @@ Usage:
 import json
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from tqdm import tqdm
@@ -41,193 +41,148 @@ from database.db import (
     insert_ai_signal,
     insert_indicators,
 )
+import joblib
+import os
 
 logger = logging.getLogger(__name__)
 
 
-def generate_signal(df: pd.DataFrame) -> Tuple[str, float, List[str]]:
+def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str]]:
     """
     Analyze a DataFrame of OHLCV + indicators and generate a trading signal.
-
-    Args:
-        df: DataFrame with calculated technical indicators
-            (must have been processed by calculate_all() first)
-
-    Returns:
-        Tuple of (signal, strength, reasons):
-            - signal: "STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"
-            - strength: 0 to 100 (higher = more confident)
-            - reasons: List of human-readable reason strings
-
-    Example:
-        df = calculate_all(price_dataframe)
-        signal, strength, reasons = generate_signal(df)
-        print(f"{signal} — confidence {strength}%")
+    Uses the trained XGBoost model if available, otherwise falls back to rules.
     """
     if df.empty or len(df) < 14:
         return "HOLD", 0.0, ["Insufficient data for analysis"]
 
-    # Get the latest row (most recent data point)
-    latest = df.iloc[-1]
+    # 1. Attempt to load the trained model for the specific symbol
+    model_path = f"models/best_{symbol}_v2.pkl"
+    if not os.path.exists(model_path):
+        model_path = f"models/xgb_{symbol}_v2.pkl" # fallback to older filename
 
-    # Scoring system: +1 for bullish, -1 for bearish
+    if os.path.exists(model_path):
+        try:
+            model = joblib.load(model_path)
+            
+            # 2. Engineer the exact features the model expects for the LATEST row
+            # Note: We must replicate the feature engineering from model_training.py exactly
+            df_feat = df.copy()
+            
+            # Fetch rolling sentiment from DB (since it's not in standard indicators)
+            conn = get_connection(sync_on_connect=False)
+            news_query = """
+            SELECT date(published_at) as date, sentiment, confidence
+            FROM news_sentiment
+            WHERE symbol = ? OR symbol IS NULL
+            ORDER BY published_at DESC LIMIT 10
+            """
+            news_df = pd.read_sql_query(news_query, conn, params=(symbol,))
+            conn.close()
+            
+            sentiment_rolling_3d = 0.0
+            if not news_df.empty:
+                sentiment_map = {'positive': 1, 'negative': -1, 'neutral': 0}
+                news_df['sentiment_score'] = news_df['sentiment'].map(sentiment_map).fillna(0) * pd.to_numeric(news_df['confidence'], errors='coerce').fillna(0)
+                # Just take a crude average of recent news for the live inference point
+                sentiment_rolling_3d = float(news_df['sentiment_score'].mean())
+                
+            # Compute advanced technicals for the latest subset
+            # Distance from MA
+            df_feat['dist_sma_20'] = (df_feat['close'] / df_feat['sma_20'] - 1).fillna(0)
+            df_feat['dist_sma_50'] = (df_feat['close'] / df_feat['sma_50'] - 1).fillna(0)
+            df_feat['dist_sma_200'] = (df_feat['close'] / df_feat['sma_200'] - 1).fillna(0)
+            
+            # BB Position
+            bb_range = df_feat['bb_upper'] - df_feat['bb_lower']
+            df_feat['bb_position'] = np.where(bb_range > 0, (df_feat['close'] - df_feat['bb_lower']) / bb_range, 0.5)
+            
+            # Slopes
+            df_feat['rsi_slope'] = df_feat['rsi_14'].diff(3).fillna(0)
+            df_feat['macd_hist_slope'] = df_feat['macd_hist'].diff(2).fillna(0)
+            
+            # Returns
+            df_feat['return_3d'] = df_feat['close'].pct_change(3).fillna(0)
+            df_feat['return_5d'] = df_feat['close'].pct_change(5).fillna(0)
+            
+            # Add Sentiment
+            df_feat['sentiment_rolling_3d'] = sentiment_rolling_3d
+            
+            # Extract the features expected by the model in the correct order
+            # The model was trained on these columns:
+            expected_features = [
+                'volume', 'rsi_14', 'macd', 'macd_signal', 'macd_hist', 'atr_14', 'adx_14', 
+                'stoch_k', 'stoch_d', 'india_vix', 'fii_net', 'dii_net', 
+                'sentiment_rolling_3d', 'dist_sma_20', 'dist_sma_50', 'dist_sma_200', 
+                'bb_position', 'rsi_slope', 'macd_hist_slope', 'return_3d', 'return_5d'
+            ]
+            
+            # Get the very last row for prediction
+            latest_feat = df_feat.iloc[-1:].copy()
+            
+            # Fill missing market context if not fetched directly in this simple pass
+            for col in ['india_vix', 'fii_net', 'dii_net']:
+                if col not in latest_feat.columns:
+                    latest_feat[col] = 0.0 # Will be populated natively in a full pipeline
+                    
+            X_live = latest_feat[expected_features]
+            
+            # 3. Model Inference
+            prob_buy = float(model.predict_proba(X_live)[0][1])
+            
+            high_precision_threshold = 0.60
+            
+            reasons = [
+                f"XGBoost ML Model Prediction Probability: {prob_buy*100:.1f}%",
+                f"Current RSI: {float(latest_feat['rsi_14'].iloc[-1]):.1f}",
+                f"MACD Histogram: {float(latest_feat['macd_hist'].iloc[-1]):.2f}",
+                f"3-Day Rolling Sentiment: {sentiment_rolling_3d:.2f}"
+            ]
+            
+            if prob_buy >= high_precision_threshold:
+                return "STRONG BUY", prob_buy * 100.0, reasons
+            elif prob_buy >= 0.50:
+                return "BUY", prob_buy * 100.0, reasons
+            elif prob_buy <= 0.30:
+                return "STRONG SELL", (1 - prob_buy) * 100.0, reasons
+            elif prob_buy <= 0.45:
+                return "SELL", (1 - prob_buy) * 100.0, reasons
+            else:
+                return "HOLD", prob_buy * 100.0, reasons
+                
+        except Exception as e:
+            logger.error(f"Failed to run ML model for {symbol}: {e}")
+            # Fall back to rules below if it fails
+
+    # ==========================================
+    # FALLBACK RULES-BASED SYSTEM (Legacy)
+    # ==========================================
+    latest = df.iloc[-1]
     bullish_points = 0
     bearish_points = 0
-    reasons = []
+    reasons = ["⚠️ ML Model not found; using legacy rules-based fallback."]
 
-    # ==========================================
-    # 1. RSI Analysis
-    # ==========================================
     rsi = latest.get("rsi_14")
     if rsi is not None and not pd.isna(rsi):
-        if rsi < 30:
-            bullish_points += 2
-            reasons.append(f"RSI oversold at {rsi:.1f} (below 30 — strong buy zone)")
-        elif rsi < 40:
-            bullish_points += 1
-            reasons.append(f"RSI near oversold at {rsi:.1f} (bullish)")
-        elif rsi > 70:
-            bearish_points += 2
-            reasons.append(f"RSI overbought at {rsi:.1f} (above 70 — sell zone)")
-        elif rsi > 60:
-            bearish_points += 1
-            reasons.append(f"RSI elevated at {rsi:.1f} (bearish caution)")
-        else:
-            reasons.append(f"RSI neutral at {rsi:.1f}")
+        if rsi < 30: bullish_points += 2
+        elif rsi > 70: bearish_points += 2
 
-    # ==========================================
-    # 2. MACD Analysis
-    # ==========================================
     macd_val = latest.get("macd")
     macd_signal = latest.get("macd_signal")
-    macd_hist = latest.get("macd_hist")
-
     if macd_val is not None and macd_signal is not None and not pd.isna(macd_val):
-        if macd_val > macd_signal:
-            bullish_points += 1
-            reasons.append("MACD above signal line (bullish crossover)")
-        else:
-            bearish_points += 1
-            reasons.append("MACD below signal line (bearish crossover)")
+        if macd_val > macd_signal: bullish_points += 1
+        else: bearish_points += 1
 
-        # Check histogram momentum
-        if macd_hist is not None and not pd.isna(macd_hist):
-            if len(df) >= 2:
-                prev_hist = df.iloc[-2].get("macd_hist")
-                if prev_hist is not None and not pd.isna(prev_hist):
-                    if macd_hist > prev_hist and macd_hist > 0:
-                        bullish_points += 1
-                        reasons.append("MACD histogram increasing (growing bullish momentum)")
-                    elif macd_hist < prev_hist and macd_hist < 0:
-                        bearish_points += 1
-                        reasons.append("MACD histogram decreasing (growing bearish momentum)")
-
-    # ==========================================
-    # 3. Moving Average Analysis (SMA)
-    # ==========================================
-    close = latest.get("close")
-    sma_50 = latest.get("sma_50")
-    sma_200 = latest.get("sma_200")
-
-    if close is not None and sma_200 is not None and not pd.isna(sma_200):
-        if close > sma_200:
-            bullish_points += 1
-            reasons.append(f"Price ({close:.2f}) above 200-day SMA ({sma_200:.2f}) — long-term uptrend")
-        else:
-            bearish_points += 1
-            reasons.append(f"Price ({close:.2f}) below 200-day SMA ({sma_200:.2f}) — long-term downtrend")
-
-    if sma_50 is not None and sma_200 is not None and not pd.isna(sma_50):
-        if sma_50 > sma_200:
-            bullish_points += 1
-            reasons.append("Golden Cross: 50-day SMA above 200-day SMA (bullish)")
-        else:
-            bearish_points += 1
-            reasons.append("Death Cross: 50-day SMA below 200-day SMA (bearish)")
-
-    # ==========================================
-    # 4. Bollinger Band Analysis
-    # ==========================================
-    bb_lower = latest.get("bb_lower")
-    bb_upper = latest.get("bb_upper")
-
-    if close is not None and bb_lower is not None and not pd.isna(bb_lower):
-        if close <= bb_lower:
-            bullish_points += 1
-            reasons.append(f"Price touching lower Bollinger Band ({bb_lower:.2f}) — potential bounce")
-        elif close >= bb_upper and bb_upper is not None and not pd.isna(bb_upper):
-            bearish_points += 1
-            reasons.append(f"Price touching upper Bollinger Band ({bb_upper:.2f}) — potential pullback")
-
-    # ==========================================
-    # 5. ADX Trend Strength
-    # ==========================================
-    adx = latest.get("adx_14")
-    if adx is not None and not pd.isna(adx):
-        if adx > 25:
-            reasons.append(f"ADX at {adx:.1f} — strong trend in place")
-        else:
-            reasons.append(f"ADX at {adx:.1f} — weak/no trend (choppy market)")
-
-    # ==========================================
-    # 6. Stochastic Oscillator
-    # ==========================================
-    stoch_k = latest.get("stoch_k")
-    if stoch_k is not None and not pd.isna(stoch_k):
-        if stoch_k < 20:
-            bullish_points += 1
-            reasons.append(f"Stochastic %K oversold at {stoch_k:.1f}")
-        elif stoch_k > 80:
-            bearish_points += 1
-            reasons.append(f"Stochastic %K overbought at {stoch_k:.1f}")
-
-    # ==========================================
-    # 7. EMA Cross
-    # ==========================================
-    ema_9 = latest.get("ema_9")
-    ema_21 = latest.get("ema_21")
-    if ema_9 is not None and ema_21 is not None and not pd.isna(ema_9):
-        if ema_9 > ema_21:
-            bullish_points += 1
-            reasons.append("EMA-9 above EMA-21 (short-term bullish)")
-        else:
-            bearish_points += 1
-            reasons.append("EMA-9 below EMA-21 (short-term bearish)")
-
-    # ==========================================
-    # DETERMINE SIGNAL
-    # ==========================================
     net_score = bullish_points - bearish_points
-    total_signals = bullish_points + bearish_points
+    strength = min(100.0, abs(net_score) / max((bullish_points + bearish_points), 1) * 100)
 
-    if total_signals == 0:
-        return "HOLD", 0.0, ["No indicators available for analysis"]
-
-    # Determine signal level
-    if net_score >= 5 and rsi is not None and rsi < 40:
-        signal = "STRONG BUY"
-    elif net_score >= 3:
-        signal = "STRONG BUY"
-    elif net_score >= 2:
-        signal = "BUY"
-    elif net_score <= -5 and rsi is not None and rsi > 70:
-        signal = "STRONG SELL"
-    elif net_score <= -3:
-        signal = "STRONG SELL"
-    elif net_score <= -2:
-        signal = "SELL"
-    else:
-        signal = "HOLD"
-
-    # Calculate signal strength (0-100)
-    strength = min(100.0, abs(net_score) / max(total_signals, 1) * 100)
-
-    reasons.insert(0, f"Net Score: {net_score} (Bullish: {bullish_points}, Bearish: {bearish_points})")
+    if net_score >= 2: signal = "BUY"
+    elif net_score <= -2: signal = "SELL"
+    else: signal = "HOLD"
 
     return signal, round(strength, 1), reasons
 
 
-def process_stock(symbol: str, days: int = 365) -> Optional[Dict]:
+def process_stock(symbol: str, days: int = 365, conn: Optional[Any] = None) -> Optional[Dict]:
     """
     Process a single stock: calculate indicators and generate signal.
 
@@ -254,8 +209,8 @@ def process_stock(symbol: str, days: int = 365) -> Optional[Dict]:
         # Calculate all technical indicators
         df = calculate_all(df)
 
-        # Generate trading signal
-        signal, strength, reasons = generate_signal(df)
+        # Generate trading signal using ML Model
+        signal, strength, reasons = generate_signal(df, symbol)
 
         # Get the latest row of indicators for storage
         latest = df.iloc[-1]
@@ -290,7 +245,7 @@ def process_stock(symbol: str, days: int = 365) -> Optional[Dict]:
             "signal_strength": strength,
         }
 
-        insert_indicators(symbol, str(latest_date), indicators_data)
+        insert_indicators(symbol, str(latest_date), indicators_data, conn=conn)
 
         # Calculate target price and stop loss based on ATR
         close_price = float(latest.get("close", 0))
@@ -308,15 +263,17 @@ def process_stock(symbol: str, days: int = 365) -> Optional[Dict]:
                 stop_loss = round(close_price + (1.5 * atr), 2)
 
         # Store AI signal
+        model_ver = f"v2.0.0-ml" if "ML Model Prediction" in " ".join(reasons) else "v1.0.0-rules-fallback"
         insert_ai_signal(
             symbol=symbol,
             signal=signal,
             confidence=strength,
-            model_version="v1.0.0-rules",
+            model_version=model_ver,
             target_price=target_price,
             stop_loss=stop_loss,
             reasoning=reasons,
             features_used={"indicators": list(indicators_data.keys())},
+            conn=conn,
         )
 
         return {
@@ -347,69 +304,86 @@ def process_all_stocks() -> Dict:
         for s in summary['top_buys'][:5]:
             print(f"  {s['symbol']}: {s['signal']} ({s['strength']}%)")
     """
-    init_database()
-
-    # Get all symbols that have price data
-    conn = get_connection()
+    import database.db as db_module
+    
+    # Force disable Turso sync for this heavy batch process to prevent WAL locks
+    original_use_turso = db_module.USE_TURSO
+    db_module.USE_TURSO = False
+    
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT symbol FROM prices WHERE interval = '1d' ORDER BY symbol"
-        ).fetchall()
-        symbols = [row[0] for row in rows]
+        init_database()
+        
+        # Get all symbols that have price data
+        conn = get_connection(sync_on_connect=False)
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT symbol FROM prices WHERE interval = '1d' ORDER BY symbol"
+            ).fetchall()
+            symbols = [row[0] for row in rows]
+        finally:
+            conn.close()
+
+        if not symbols:
+            print("⚠️  No price data in database. Run price collector first!")
+            return {"processed": 0, "failed": 0, "top_buys": [], "top_sells": []}
+
+        processed = 0
+        failed = 0
+        all_signals = []
+
+        print(f"\n🔬 Processing indicators for {len(symbols)} stocks...\n")
+
+        for symbol in tqdm(symbols, desc="Analyzing", unit="stock"):
+            result = process_stock(symbol, conn=conn)
+            if result:
+                processed += 1
+                all_signals.append(result)
+            else:
+                failed += 1
+
+        # Sort signals
+        buy_signals = sorted(
+            [s for s in all_signals if "BUY" in s["signal"]],
+            key=lambda x: x["strength"],
+            reverse=True,
+        )
+        sell_signals = sorted(
+            [s for s in all_signals if "SELL" in s["signal"]],
+            key=lambda x: x["strength"],
+            reverse=True,
+        )
+
+        # Print summary
+        print(f"\n{'='*60}")
+        print(f"📊 Signal Generation Summary")
+        print(f"{'='*60}")
+        print(f"✅ Processed: {processed}/{len(symbols)} stocks")
+        print(f"❌ Failed: {failed}/{len(symbols)} stocks")
+        print(f"\n🟢 Top BUY Signals:")
+        for s in buy_signals[:10]:
+            print(f"   {s['symbol']:20s} — {s['signal']:12s} (strength: {s['strength']:5.1f}%)")
+        print(f"\n🔴 Top SELL Signals:")
+        for s in sell_signals[:10]:
+            print(f"   {s['symbol']:20s} — {s['signal']:12s} (strength: {s['strength']:5.1f}%)")
+        print(f"{'='*60}\n")
+
+        return {
+            "processed": processed,
+            "failed": failed,
+            "top_buys": buy_signals[:10],
+            "top_sells": sell_signals[:10],
+            "all_signals": all_signals,
+        }
     finally:
-        conn.close()
-
-    if not symbols:
-        print("⚠️  No price data in database. Run price collector first!")
-        return {"processed": 0, "failed": 0, "top_buys": [], "top_sells": []}
-
-    processed = 0
-    failed = 0
-    all_signals = []
-
-    print(f"\n🔬 Processing indicators for {len(symbols)} stocks...\n")
-
-    for symbol in tqdm(symbols, desc="Analyzing", unit="stock"):
-        result = process_stock(symbol)
-        if result:
-            processed += 1
-            all_signals.append(result)
-        else:
-            failed += 1
-
-    # Sort signals
-    buy_signals = sorted(
-        [s for s in all_signals if "BUY" in s["signal"]],
-        key=lambda x: x["strength"],
-        reverse=True,
-    )
-    sell_signals = sorted(
-        [s for s in all_signals if "SELL" in s["signal"]],
-        key=lambda x: x["strength"],
-        reverse=True,
-    )
-
-    # Print summary
-    print(f"\n{'='*60}")
-    print(f"📊 Signal Generation Summary")
-    print(f"{'='*60}")
-    print(f"✅ Processed: {processed}/{len(symbols)} stocks")
-    print(f"❌ Failed: {failed}/{len(symbols)} stocks")
-    print(f"\n🟢 Top BUY Signals:")
-    for s in buy_signals[:10]:
-        print(f"   {s['symbol']:20s} — {s['signal']:12s} (strength: {s['strength']:5.1f}%)")
-    print(f"\n🔴 Top SELL Signals:")
-    for s in sell_signals[:10]:
-        print(f"   {s['symbol']:20s} — {s['signal']:12s} (strength: {s['strength']:5.1f}%)")
-    print(f"{'='*60}\n")
-
-    return {
-        "processed": processed,
-        "failed": failed,
-        "top_buys": buy_signals[:10],
-        "top_sells": sell_signals[:10],
-        "all_signals": all_signals,
-    }
+        # Restore original Turso setting
+        db_module.USE_TURSO = original_use_turso
+        
+        # Sync once at the very end if Turso was originally enabled
+        if original_use_turso:
+            print("\n☁️ Syncing all batch results to Turso cloud...")
+            conn = get_connection(sync_on_connect=True)
+            conn.close()
+            print("✅ Sync complete!")
 
 
 def _safe_float(value) -> Optional[float]:

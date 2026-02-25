@@ -228,6 +228,7 @@ def insert_indicators(
     symbol: str,
     date: str,
     indicators: Dict[str, Any],
+    conn: Optional[Any] = None,
 ) -> bool:
     """
     Insert or replace technical indicators for a stock on a date.
@@ -236,13 +237,14 @@ def insert_indicators(
         symbol: Stock symbol
         date: ISO date string
         indicators: Dict with keys matching column names (rsi_14, macd, etc.)
+        conn: Optional existing DB connection to reuse
 
     Returns:
         True if successful.
     """
-    conn = get_connection()
+    db_conn = conn or get_connection()
     try:
-        conn.execute(
+        db_conn.execute(
             """INSERT OR REPLACE INTO technical_indicators
             (symbol, date, rsi_14, macd, macd_signal, macd_hist,
              bb_upper, bb_middle, bb_lower,
@@ -281,15 +283,16 @@ def insert_indicators(
                 indicators.get("signal_strength"),
             ),
         )
-        conn.commit()
-        if USE_TURSO:
-            conn.sync()
+        db_conn.commit()
+        if not conn and USE_TURSO:
+            db_conn.sync()
         return True
     except Exception as e:
         logger.error(f"Error inserting indicators for {symbol} on {date}: {e}")
         return False
     finally:
-        conn.close()
+        if not conn:
+            db_conn.close()
 
 
 def insert_news(
@@ -394,6 +397,7 @@ def insert_ai_signal(
     stop_loss: Optional[float] = None,
     reasoning: Optional[List[str]] = None,
     features_used: Optional[Dict] = None,
+    conn: Optional[Any] = None,
 ) -> bool:
     """
     Insert an AI-generated trading signal.
@@ -407,13 +411,14 @@ def insert_ai_signal(
         stop_loss: Suggested stop loss price
         reasoning: List of reason strings
         features_used: Dict of feature values used
+        conn: Optional existing DB connection to reuse
 
     Returns:
         True if successful.
     """
-    conn = get_connection()
+    db_conn = conn or get_connection()
     try:
-        conn.execute(
+        db_conn.execute(
             """INSERT INTO ai_signals
             (symbol, signal, confidence, model_version,
              target_price, stop_loss, reasoning, features_used)
@@ -429,15 +434,16 @@ def insert_ai_signal(
                 json.dumps(features_used) if features_used else None,
             ),
         )
-        conn.commit()
-        if USE_TURSO:
-            conn.sync()
+        db_conn.commit()
+        if not conn and USE_TURSO:
+            db_conn.sync()
         return True
     except Exception as e:
         logger.error(f"Error inserting AI signal for {symbol}: {e}")
         return False
     finally:
-        conn.close()
+        if not conn:
+            db_conn.close()
 
 
 # ==========================================

@@ -125,11 +125,8 @@ def score_sentiment(text: str) -> Dict:
 
     except Exception as e:
         logger.error(f"Sentiment scoring failed: {e}")
-        return {
-            "sentiment": "neutral",
-            "confidence": 0.0,
-            "scores": {"positive": 0.0, "negative": 0.0, "neutral": 1.0},
-        }
+        # Raise the exception so the caller can fall back to the simple scorer
+        raise e
 
 
 def score_sentiment_simple(text: str) -> Dict:
@@ -221,7 +218,7 @@ def aggregate_sentiment(news_list: List[Dict]) -> Dict:
 
     for article in news_list:
         # Get or calculate sentiment
-        if "sentiment" in article and "confidence" in article:
+        if article.get("sentiment") is not None and article.get("confidence") is not None:
             sentiment = article["sentiment"]
             confidence = article["confidence"]
         elif "headline" in article:

@@ -127,6 +127,28 @@ CREATE TABLE IF NOT EXISTS ai_signals (
 """
 
 # ==========================================
+# Table: news_daily_sentiment
+# Pre-aggregated daily sentiment scores for ML features
+# ==========================================
+CREATE_NEWS_DAILY_SENTIMENT_TABLE = """
+CREATE TABLE IF NOT EXISTS news_daily_sentiment (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    symbol TEXT,
+    avg_sentiment REAL DEFAULT 0,
+    news_count INTEGER DEFAULT 0,
+    positive_count INTEGER DEFAULT 0,
+    negative_count INTEGER DEFAULT 0,
+    neutral_count INTEGER DEFAULT 0,
+    max_positive REAL DEFAULT 0,
+    max_negative REAL DEFAULT 0,
+    avg_confidence REAL DEFAULT 0,
+    source TEXT,
+    UNIQUE(date, symbol)
+);
+"""
+
+# ==========================================
 # Indexes for fast queries
 # ==========================================
 CREATE_INDEXES = [
@@ -142,6 +164,9 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_ai_signals_symbol ON ai_signals(symbol);",
     "CREATE INDEX IF NOT EXISTS idx_ai_signals_signal ON ai_signals(signal);",
     "CREATE INDEX IF NOT EXISTS idx_ai_signals_confidence ON ai_signals(confidence);",
+    "CREATE INDEX IF NOT EXISTS idx_daily_sentiment_date ON news_daily_sentiment(date);",
+    "CREATE INDEX IF NOT EXISTS idx_daily_sentiment_symbol ON news_daily_sentiment(symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_daily_sentiment_date_symbol ON news_daily_sentiment(date, symbol);",
 ]
 
 # All table creation statements in order
@@ -151,4 +176,5 @@ ALL_TABLES = [
     CREATE_NEWS_SENTIMENT_TABLE,
     CREATE_MARKET_OVERVIEW_TABLE,
     CREATE_AI_SIGNALS_TABLE,
+    CREATE_NEWS_DAILY_SENTIMENT_TABLE,
 ]

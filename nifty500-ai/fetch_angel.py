@@ -153,7 +153,7 @@ for idx, (symbol, token_id) in enumerate(tokens_to_fetch, 1):
                     _safe_float(row.get("resistance_3")), None, None
                 ))
                 
-            sig_val, sig_str, reasons = generate_signal(df_calc)
+            sig_val, sig_str, reasons = generate_signal(df_calc, symbol_ns)
             latest = df_calc.iloc[-1]
             c_price = float(latest.get("close", 0))
             atr = _safe_float(latest.get("atr_14"))

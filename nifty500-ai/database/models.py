@@ -167,7 +167,65 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_daily_sentiment_date ON news_daily_sentiment(date);",
     "CREATE INDEX IF NOT EXISTS idx_daily_sentiment_symbol ON news_daily_sentiment(symbol);",
     "CREATE INDEX IF NOT EXISTS idx_daily_sentiment_date_symbol ON news_daily_sentiment(date, symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_portfolio_stocks_portfolio ON portfolio_stocks(portfolio_id);",
+    "CREATE INDEX IF NOT EXISTS idx_portfolio_stocks_symbol ON portfolio_stocks(symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_portfolio_sectors_portfolio ON portfolio_sectors(portfolio_id);",
 ]
+
+# ==========================================
+# Table: portfolios
+# User-created investment portfolios
+# ==========================================
+CREATE_PORTFOLIOS_TABLE = """
+CREATE TABLE IF NOT EXISTS portfolios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    investment_amount REAL NOT NULL,
+    time_horizon TEXT NOT NULL,
+    risk_profile TEXT DEFAULT 'moderate',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+"""
+
+# ==========================================
+# Table: portfolio_sectors
+# Sector allocations within a portfolio
+# ==========================================
+CREATE_PORTFOLIO_SECTORS_TABLE = """
+CREATE TABLE IF NOT EXISTS portfolio_sectors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL,
+    sector TEXT NOT NULL,
+    allocation_pct REAL NOT NULL,
+    ai_suggested_pct REAL,
+    num_stocks INTEGER DEFAULT 0,
+    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id)
+);
+"""
+
+# ==========================================
+# Table: portfolio_stocks
+# Individual stock picks within a portfolio
+# ==========================================
+CREATE_PORTFOLIO_STOCKS_TABLE = """
+CREATE TABLE IF NOT EXISTS portfolio_stocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    sector TEXT,
+    signal TEXT,
+    confidence REAL,
+    buy_price REAL,
+    target_price REAL,
+    stop_loss REAL,
+    allocated_amount REAL,
+    quantity INTEGER,
+    status TEXT DEFAULT 'recommended',
+    added_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (portfolio_id) REFERENCES portfolios(id)
+);
+"""
 
 # All table creation statements in order
 ALL_TABLES = [
@@ -177,4 +235,8 @@ ALL_TABLES = [
     CREATE_MARKET_OVERVIEW_TABLE,
     CREATE_AI_SIGNALS_TABLE,
     CREATE_NEWS_DAILY_SENTIMENT_TABLE,
+    CREATE_PORTFOLIOS_TABLE,
+    CREATE_PORTFOLIO_SECTORS_TABLE,
+    CREATE_PORTFOLIO_STOCKS_TABLE,
 ]
+

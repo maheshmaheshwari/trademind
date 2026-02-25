@@ -64,6 +64,11 @@ app.include_router(indicators.router, prefix="/api", tags=["Indicators"])
 app.include_router(sentiment.router, prefix="/api", tags=["Sentiment"])
 app.include_router(signals.router, prefix="/api", tags=["Signals"])
 
+from api.routes import portfolio as portfolio_routes
+from api.routes import trades as trades_routes
+app.include_router(portfolio_routes.router)
+app.include_router(trades_routes.router)
+
 
 # ==========================================
 # Simple in-memory cache

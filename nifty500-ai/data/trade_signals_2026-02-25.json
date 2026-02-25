@@ -1,0 +1,7655 @@
+{
+  "generated_at": "2026-02-25T14:56:54.424296",
+  "total_models": 191,
+  "total_signals": 191,
+  "summary": {
+    "STRONG BUY": 9,
+    "BUY": 27,
+    "HOLD": 80,
+    "SELL": 37,
+    "STRONG SELL": 38
+  },
+  "trades": [
+    {
+      "symbol": "COCHINSHIP.NS",
+      "signal": "STRONG BUY",
+      "confidence": 92.0,
+      "latest_price": 1478.6,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "6 Months",
+        "accuracy": 84.8,
+        "precision": 70.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1153
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0879
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0837
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0757
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0577
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "APTUS.NS",
+      "signal": "STRONG BUY",
+      "confidence": 91.2,
+      "latest_price": 243.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "6 Months",
+        "accuracy": 95.2,
+        "precision": 73.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0585
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0493
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0466
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0396
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0293
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DIXON.NS",
+      "signal": "STRONG BUY",
+      "confidence": 87.2,
+      "latest_price": 10376.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "6 Months",
+        "accuracy": 80.8,
+        "precision": 81.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0584
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0573
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0476
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0426
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0383
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ICICIPRULI.NS",
+      "signal": "STRONG BUY",
+      "confidence": 83.7,
+      "latest_price": 662.2,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 90.4,
+        "precision": 71.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.2266
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.2051
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.1532
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0442
+        },
+        {
+          "feature": "volume",
+          "importance": 0.0334
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CEATLTD.NS",
+      "signal": "STRONG BUY",
+      "confidence": 83.4,
+      "latest_price": 3726.8,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "3 Months",
+        "accuracy": 95.2,
+        "precision": 96.5
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "rsi_14",
+          "importance": 0.055
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0429
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0408
+        },
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.0334
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0334
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CERA.NS",
+      "signal": "STRONG BUY",
+      "confidence": 81.0,
+      "latest_price": 4950.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 92.0,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.104
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.08
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0498
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0428
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0363
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HOMEFIRST.NS",
+      "signal": "STRONG BUY",
+      "confidence": 78.1,
+      "latest_price": 1231.8,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Months",
+        "accuracy": 93.7,
+        "precision": 83.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.2476
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0704
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0696
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0537
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0519
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "FIRSTCRY.NS",
+      "signal": "STRONG BUY",
+      "confidence": 78.0,
+      "latest_price": 212.75,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Months",
+        "accuracy": 88.1,
+        "precision": 70.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0777
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0693
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0548
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0545
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0477
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HBLENGINE.NS",
+      "signal": "STRONG BUY",
+      "confidence": 76.3,
+      "latest_price": 703.15,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 88.8,
+        "precision": 88.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1079
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0824
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0548
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0521
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0477
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BRIGADE.NS",
+      "signal": "BUY",
+      "confidence": 91.3,
+      "latest_price": 711.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 70.6,
+        "precision": 83.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1025
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0977
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0491
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0455
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0432
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "TCS.NS",
+      "signal": "BUY",
+      "confidence": 90.3,
+      "latest_price": 2676.3,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 71.0,
+        "precision": 85.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.1033
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0834
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0744
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0593
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0526
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "POWERINDIA.NS",
+      "signal": "BUY",
+      "confidence": 86.2,
+      "latest_price": 24962.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "3 Months",
+        "accuracy": 70.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0368
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0364
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0325
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0284
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0279
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HAL.NS",
+      "signal": "BUY",
+      "confidence": 83.9,
+      "latest_price": 3980.2,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Months",
+        "accuracy": 76.2,
+        "precision": 59.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0814
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0421
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0408
+        },
+        {
+          "feature": "rsi_lag_5",
+          "importance": 0.0344
+        },
+        {
+          "feature": "mkt_sent_3d",
+          "importance": 0.0341
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ITCHOTELS.NS",
+      "signal": "BUY",
+      "confidence": 83.1,
+      "latest_price": 177.71,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 74.6,
+        "precision": 50.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd",
+          "importance": 0.0921
+        },
+        {
+          "feature": "avg_return_20d",
+          "importance": 0.0725
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.072
+        },
+        {
+          "feature": "return_20d",
+          "importance": 0.0649
+        },
+        {
+          "feature": "volatility_5d",
+          "importance": 0.0581
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AFFLE.NS",
+      "signal": "BUY",
+      "confidence": 81.0,
+      "latest_price": 1357.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 71.2,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_signal",
+          "importance": 0.0596
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0516
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0382
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0316
+        },
+        {
+          "feature": "mkt_sent_3d",
+          "importance": 0.03
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BLUEDART.NS",
+      "signal": "BUY",
+      "confidence": 76.6,
+      "latest_price": 5564.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 77.0,
+        "precision": 73.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0863
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0683
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.05
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0476
+        },
+        {
+          "feature": "rsi_std_10d",
+          "importance": 0.0458
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "COLPAL.NS",
+      "signal": "BUY",
+      "confidence": 76.1,
+      "latest_price": 2246.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Month",
+        "accuracy": 76.8,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.156
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.1389
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1007
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0865
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0608
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "COROMANDEL.NS",
+      "signal": "BUY",
+      "confidence": 75.0,
+      "latest_price": 2295.9,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 77.6,
+        "precision": 85.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0584
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0568
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0542
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0521
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0389
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CHALET.NS",
+      "signal": "BUY",
+      "confidence": 71.6,
+      "latest_price": 814.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "3 Months",
+        "accuracy": 81.0,
+        "precision": 70.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_pct",
+          "importance": 0.1167
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.1042
+        },
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.0552
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.048
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0475
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CIPLA.NS",
+      "signal": "BUY",
+      "confidence": 71.1,
+      "latest_price": 1342.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Months",
+        "accuracy": 92.9,
+        "precision": 78.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.099
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0796
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0614
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0571
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0513
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CYIENT.NS",
+      "signal": "BUY",
+      "confidence": 70.2,
+      "latest_price": 935.4,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "1 Month",
+        "accuracy": 80.8,
+        "precision": 80.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0434
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0301
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0297
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0296
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0271
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AFCONS.NS",
+      "signal": "BUY",
+      "confidence": 68.7,
+      "latest_price": 302.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Month",
+        "accuracy": 73.6,
+        "precision": 45.5
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "volatility_20d",
+          "importance": 0.2533
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.1746
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.1494
+        },
+        {
+          "feature": "vol_ratio",
+          "importance": 0.0672
+        },
+        {
+          "feature": "volume_trend",
+          "importance": 0.0367
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AEGISLOG.NS",
+      "signal": "BUY",
+      "confidence": 68.3,
+      "latest_price": 716.45,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Months",
+        "accuracy": 84.9,
+        "precision": 75.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0303
+        },
+        {
+          "feature": "sentiment_14d",
+          "importance": 0.0294
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0258
+        },
+        {
+          "feature": "news_volume_spike",
+          "importance": 0.0249
+        },
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.0245
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AMBUJACEM.NS",
+      "signal": "BUY",
+      "confidence": 67.8,
+      "latest_price": 509.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 88.0,
+        "precision": 78.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.05
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0425
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0405
+        },
+        {
+          "feature": "dist_ema_21",
+          "importance": 0.0373
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0331
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ICICIBANK.NS",
+      "signal": "BUY",
+      "confidence": 67.5,
+      "latest_price": 1399.4,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Months",
+        "accuracy": 92.1,
+        "precision": 80.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1527
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1146
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0405
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0351
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0327
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DEVYANI.NS",
+      "signal": "BUY",
+      "confidence": 65.9,
+      "latest_price": 132.07,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "6 Months",
+        "accuracy": 91.2,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1768
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.099
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0783
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0628
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0557
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CGPOWER.NS",
+      "signal": "BUY",
+      "confidence": 65.3,
+      "latest_price": 717.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Months",
+        "accuracy": 76.2,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0463
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0389
+        },
+        {
+          "feature": "dist_ema_21",
+          "importance": 0.0359
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0357
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0354
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GODREJIND.NS",
+      "signal": "BUY",
+      "confidence": 65.1,
+      "latest_price": 1035.75,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Months",
+        "accuracy": 88.9,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0724
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0573
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0506
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0459
+        },
+        {
+          "feature": "macd_hist_lag_3",
+          "importance": 0.0427
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GESHIP.NS",
+      "signal": "BUY",
+      "confidence": 64.7,
+      "latest_price": 1356.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 92.0,
+        "precision": 92.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0797
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0776
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0501
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0468
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0437
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CENTURYPLY.NS",
+      "signal": "BUY",
+      "confidence": 64.4,
+      "latest_price": 745.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 78.6,
+        "precision": 75.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1066
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0917
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0824
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0564
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.048
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "APLLTD.NS",
+      "signal": "BUY",
+      "confidence": 63.9,
+      "latest_price": 739.65,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 79.4,
+        "precision": 71.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1003
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0768
+        },
+        {
+          "feature": "sentiment_14d",
+          "importance": 0.0527
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0512
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0486
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CUMMINSIND.NS",
+      "signal": "BUY",
+      "confidence": 63.6,
+      "latest_price": 4878.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 100.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1143
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.047
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0435
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0398
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.039
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "M&M.NS",
+      "signal": "BUY",
+      "confidence": 61.5,
+      "latest_price": 3447.1,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 89.4,
+        "precision": 89.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0795
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.067
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0606
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0469
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0441
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BHARTIARTL.NS",
+      "signal": "BUY",
+      "confidence": 61.4,
+      "latest_price": 1997.3,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "3 Months",
+        "accuracy": 82.8,
+        "precision": 92.5
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_pct",
+          "importance": 0.0515
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0413
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.041
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.04
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0352
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DCMSHRIRAM.NS",
+      "signal": "BUY",
+      "confidence": 60.8,
+      "latest_price": 1062.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "6 Months",
+        "accuracy": 87.2,
+        "precision": 88.2
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1399
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.056
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0446
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0397
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0391
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CONCORDBIO.NS",
+      "signal": "BUY",
+      "confidence": 60.2,
+      "latest_price": 1232.9,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Week",
+        "accuracy": 81.9,
+        "precision": 81.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_pct",
+          "importance": 0.0775
+        },
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.0651
+        },
+        {
+          "feature": "rsi_slope_5d",
+          "importance": 0.0391
+        },
+        {
+          "feature": "macd_hist_slope",
+          "importance": 0.0357
+        },
+        {
+          "feature": "rsi_std_10d",
+          "importance": 0.0288
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HEXT.NS",
+      "signal": "HOLD",
+      "confidence": 80.2,
+      "latest_price": 463.2,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 64.3,
+        "precision": 52.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "volatility_20d",
+          "importance": 0.5006
+        },
+        {
+          "feature": "mkt_sent_3d",
+          "importance": 0.0862
+        },
+        {
+          "feature": "volatility_5d",
+          "importance": 0.0623
+        },
+        {
+          "feature": "return_10d",
+          "importance": 0.0426
+        },
+        {
+          "feature": "upper_shadow",
+          "importance": 0.0278
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CRISIL.NS",
+      "signal": "HOLD",
+      "confidence": 71.1,
+      "latest_price": 4495.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Week",
+        "accuracy": 67.7,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": -0.5426,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.084
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0673
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0544
+        },
+        {
+          "feature": "mkt_sent_3d",
+          "importance": 0.0358
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0353
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ENDURANCE.NS",
+      "signal": "HOLD",
+      "confidence": 68.4,
+      "latest_price": 2649.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "6 Months",
+        "accuracy": 67.2,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0403
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0357
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0354
+        },
+        {
+          "feature": "stoch_k",
+          "importance": 0.0353
+        },
+        {
+          "feature": "stoch_d",
+          "importance": 0.033
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AJANTPHARM.NS",
+      "signal": "HOLD",
+      "confidence": 65.2,
+      "latest_price": 3018.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "3 Months",
+        "accuracy": 68.3,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_signal",
+          "importance": 0.0837
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.071
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0689
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0653
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0647
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DEEPAKFERT.NS",
+      "signal": "HOLD",
+      "confidence": 63.3,
+      "latest_price": 991.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Week",
+        "accuracy": 66.9,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0646
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0512
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0466
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0404
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0391
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CRAFTSMAN.NS",
+      "signal": "HOLD",
+      "confidence": 59.7,
+      "latest_price": 7746.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 99.2,
+        "precision": 99.2
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.084
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0622
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0609
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0547
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0524
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CANBK.NS",
+      "signal": "HOLD",
+      "confidence": 59.3,
+      "latest_price": 157.82,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 100.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0924
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0678
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0654
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.056
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0497
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ADANIPOWER.NS",
+      "signal": "HOLD",
+      "confidence": 58.7,
+      "latest_price": 142.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 100.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0625
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0503
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0447
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0366
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0358
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ACC.NS",
+      "signal": "HOLD",
+      "confidence": 58.4,
+      "latest_price": 1623.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 89.6,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0649
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.063
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0527
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0511
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0456
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AWL.NS",
+      "signal": "HOLD",
+      "confidence": 58.2,
+      "latest_price": 191.11,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 69.0,
+        "precision": 71.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0384
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.038
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0312
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0306
+        },
+        {
+          "feature": "adx_slope",
+          "importance": 0.0272
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "MAPMYINDIA.NS",
+      "signal": "HOLD",
+      "confidence": 57.6,
+      "latest_price": 1067.2,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Month",
+        "accuracy": 84.0,
+        "precision": 73.1
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0461
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0429
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0396
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.037
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0352
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AADHARHFC.NS",
+      "signal": "HOLD",
+      "confidence": 57.2,
+      "latest_price": 450.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "6 Months",
+        "accuracy": 65.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "avg_return_20d",
+          "importance": 0.0877
+        },
+        {
+          "feature": "return_20d",
+          "importance": 0.0734
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0711
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.061
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0603
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ASAHIINDIA.NS",
+      "signal": "HOLD",
+      "confidence": 57.1,
+      "latest_price": 928.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 97.6,
+        "precision": 97.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.186
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0661
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0476
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.044
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0431
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HAPPSTMNDS.NS",
+      "signal": "HOLD",
+      "confidence": 57.0,
+      "latest_price": 360.6,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 95.2,
+        "precision": 50.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0816
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0607
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0536
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0523
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0522
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AGARWALEYE.NS",
+      "signal": "HOLD",
+      "confidence": 56.6,
+      "latest_price": 446.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "1 Week",
+        "accuracy": 58.3,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "rsi_lag_3",
+          "importance": 0.0587
+        },
+        {
+          "feature": "bb_position",
+          "importance": 0.0426
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.042
+        },
+        {
+          "feature": "macd_hist_lag_10",
+          "importance": 0.0418
+        },
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.0412
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BOSCHLTD.NS",
+      "signal": "HOLD",
+      "confidence": 56.5,
+      "latest_price": 36595.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 85.6,
+        "precision": 82.8
+      },
+      "sentiment": {
+        "sent_stock": 0.1125,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sentiment_14d",
+          "importance": 0.0541
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0402
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0378
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0374
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0349
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "INDGN.NS",
+      "signal": "HOLD",
+      "confidence": 55.9,
+      "latest_price": 491.6,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 86.4,
+        "precision": 70.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0512
+        },
+        {
+          "feature": "avg_return_10d",
+          "importance": 0.0478
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0462
+        },
+        {
+          "feature": "return_10d",
+          "importance": 0.0409
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0406
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "SUNPHARMA.NS",
+      "signal": "HOLD",
+      "confidence": 55.8,
+      "latest_price": 1732.3,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "3 Months",
+        "accuracy": 79.7,
+        "precision": 71.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0759
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0365
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0364
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0339
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0289
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HUDCO.NS",
+      "signal": "HOLD",
+      "confidence": 55.5,
+      "latest_price": 189.22,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 69.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0657
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0612
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0476
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0433
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0343
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ABB.NS",
+      "signal": "HOLD",
+      "confidence": 55.4,
+      "latest_price": 6145.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Months",
+        "accuracy": 79.4,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.09
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0588
+        },
+        {
+          "feature": "rsi_lag_3",
+          "importance": 0.0528
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0504
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0364
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CREDITACC.NS",
+      "signal": "HOLD",
+      "confidence": 55.2,
+      "latest_price": 1291.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 63.5,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0706
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0649
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0503
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0466
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0413
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "LT.NS",
+      "signal": "HOLD",
+      "confidence": 55.2,
+      "latest_price": 4418.1,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 85.4,
+        "precision": 85.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1629
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.036
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0327
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0327
+        },
+        {
+          "feature": "stoch_overbought",
+          "importance": 0.032
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "EIHOTEL.NS",
+      "signal": "HOLD",
+      "confidence": 54.8,
+      "latest_price": 315.25,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Months",
+        "accuracy": 82.5,
+        "precision": 71.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1379
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.1271
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.1043
+        },
+        {
+          "feature": "sentiment_14d",
+          "importance": 0.0965
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0619
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HONAUT.NS",
+      "signal": "HOLD",
+      "confidence": 54.8,
+      "latest_price": 31280.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 78.6,
+        "precision": 70.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0876
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0561
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0509
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0409
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0325
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HYUNDAI.NS",
+      "signal": "HOLD",
+      "confidence": 53.8,
+      "latest_price": 2191.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 78.4,
+        "precision": 80.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "stoch_d",
+          "importance": 0.0748
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0598
+        },
+        {
+          "feature": "stoch_k",
+          "importance": 0.057
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0535
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0462
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GRAVITA.NS",
+      "signal": "HOLD",
+      "confidence": 53.6,
+      "latest_price": 1593.6,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 60.3,
+        "precision": 87.5
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0811
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0637
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0631
+        },
+        {
+          "feature": "volume",
+          "importance": 0.0616
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0476
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CHAMBLFERT.NS",
+      "signal": "HOLD",
+      "confidence": 53.4,
+      "latest_price": 457.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Month",
+        "accuracy": 80.0,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1175
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1132
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0871
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0864
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0574
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BLUESTARCO.NS",
+      "signal": "HOLD",
+      "confidence": 53.1,
+      "latest_price": 1957.9,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Week",
+        "accuracy": 61.4,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0365,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "bb_width",
+          "importance": 0.0824
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.047
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0389
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0369
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0363
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "IIFL.NS",
+      "signal": "HOLD",
+      "confidence": 52.8,
+      "latest_price": 506.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 97.6,
+        "precision": 97.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0986
+        },
+        {
+          "feature": "avg_return_20d",
+          "importance": 0.0474
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.045
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0439
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0397
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "MARUTI.NS",
+      "signal": "HOLD",
+      "confidence": 52.7,
+      "latest_price": 15072.0,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 92.7,
+        "precision": 92.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0777
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0585
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0562
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0546
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0486
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ANANTRAJ.NS",
+      "signal": "HOLD",
+      "confidence": 52.6,
+      "latest_price": 540.45,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Week",
+        "accuracy": 64.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "stoch_k_lag_3",
+          "importance": 0.037
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0336
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.033
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0319
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0281
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CONCOR.NS",
+      "signal": "HOLD",
+      "confidence": 52.4,
+      "latest_price": 500.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Week",
+        "accuracy": 61.4,
+        "precision": 71.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "avg_return_10d",
+          "importance": 0.0424
+        },
+        {
+          "feature": "return_10d",
+          "importance": 0.0416
+        },
+        {
+          "feature": "vol_ratio",
+          "importance": 0.0412
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0358
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.035
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GODREJAGRO.NS",
+      "signal": "HOLD",
+      "confidence": 51.9,
+      "latest_price": 626.35,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 89.6,
+        "precision": 80.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0613
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0587
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0488
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0465
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0318
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ITC.NS",
+      "signal": "HOLD",
+      "confidence": 51.8,
+      "latest_price": 325.4,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Week",
+        "accuracy": 73.6,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "volatility_5d",
+          "importance": 0.047
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.039
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0359
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0349
+        },
+        {
+          "feature": "rsi_std_10d",
+          "importance": 0.0279
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GRAPHITE.NS",
+      "signal": "HOLD",
+      "confidence": 51.7,
+      "latest_price": 712.9,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 57.1,
+        "precision": 77.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1028
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.1013
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0981
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0471
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0469
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GODFRYPHLP.NS",
+      "signal": "HOLD",
+      "confidence": 51.6,
+      "latest_price": 2097.4,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 80.2,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0577
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0426
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0357
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0341
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0339
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AKZOINDIA.NS",
+      "signal": "HOLD",
+      "confidence": 51.0,
+      "latest_price": 3093.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 77.0,
+        "precision": 72.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0733
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0411
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0373
+        },
+        {
+          "feature": "mkt_sent_3d",
+          "importance": 0.0342
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0329
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ACE.NS",
+      "signal": "HOLD",
+      "confidence": 50.9,
+      "latest_price": 868.8,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Month",
+        "accuracy": 80.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0371
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0349
+        },
+        {
+          "feature": "return_20d",
+          "importance": 0.0331
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0301
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0295
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BLUEJET.NS",
+      "signal": "HOLD",
+      "confidence": 50.3,
+      "latest_price": 402.9,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Week",
+        "accuracy": 74.0,
+        "precision": 40.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_14",
+          "importance": 0.0267
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0235
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0231
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0219
+        },
+        {
+          "feature": "bb_position",
+          "importance": 0.0206
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "FLUOROCHEM.NS",
+      "signal": "HOLD",
+      "confidence": 50.3,
+      "latest_price": 3452.7,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Weeks",
+        "accuracy": 68.3,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0282
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0247
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0246
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0206
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0205
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GODREJPROP.NS",
+      "signal": "HOLD",
+      "confidence": 50.3,
+      "latest_price": 1792.7,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 65.9,
+        "precision": 80.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0268
+        },
+        {
+          "feature": "sentiment_14d",
+          "importance": 0.0259
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0258
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0245
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0241
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HINDALCO.NS",
+      "signal": "HOLD",
+      "confidence": 49.0,
+      "latest_price": 933.7,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "3 Months",
+        "accuracy": 100.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.1221
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0824
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0557
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.035
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0292
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GMDCLTD.NS",
+      "signal": "HOLD",
+      "confidence": 48.9,
+      "latest_price": 563.8,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 100.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1566
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0513
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0407
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0315
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0299
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ELECON.NS",
+      "signal": "HOLD",
+      "confidence": 48.6,
+      "latest_price": 418.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Months",
+        "accuracy": 92.1,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1077
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0801
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0528
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0461
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.046
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CHOLAHLDNG.NS",
+      "signal": "HOLD",
+      "confidence": 48.1,
+      "latest_price": 1690.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 69.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0511
+        },
+        {
+          "feature": "adx_slope",
+          "importance": 0.0506
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0503
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0473
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0383
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HCLTECH.NS",
+      "signal": "HOLD",
+      "confidence": 48.1,
+      "latest_price": 1426.2,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 96.7,
+        "precision": 83.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "macd",
+          "importance": 0.0713
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0704
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0622
+        },
+        {
+          "feature": "avg_return_20d",
+          "importance": 0.0496
+        },
+        {
+          "feature": "rsi_lag_3",
+          "importance": 0.0373
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AAVAS.NS",
+      "signal": "HOLD",
+      "confidence": 47.9,
+      "latest_price": 1271.8,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Week",
+        "accuracy": 70.1,
+        "precision": 81.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0387
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0342
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0306
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0262
+        },
+        {
+          "feature": "volume_trend",
+          "importance": 0.0254
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HEG.NS",
+      "signal": "HOLD",
+      "confidence": 47.8,
+      "latest_price": 575.25,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "3 Months",
+        "accuracy": 67.5,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_pct",
+          "importance": 0.0502
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0477
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0397
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0361
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.036
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ANANDRATHI.NS",
+      "signal": "HOLD",
+      "confidence": 47.6,
+      "latest_price": 3062.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 89.6,
+        "precision": 89.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1124
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0414
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0384
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0359
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0326
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GRASIM.NS",
+      "signal": "HOLD",
+      "confidence": 47.6,
+      "latest_price": 2879.8,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Month",
+        "accuracy": 73.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "avg_return_20d",
+          "importance": 0.0413
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0402
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0371
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0339
+        },
+        {
+          "feature": "return_20d",
+          "importance": 0.0338
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "LALPATHLAB.NS",
+      "signal": "HOLD",
+      "confidence": 47.4,
+      "latest_price": 1421.6,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Months",
+        "accuracy": 84.1,
+        "precision": 83.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0363
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0356
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0351
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0282
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0276
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DOMS.NS",
+      "signal": "HOLD",
+      "confidence": 47.0,
+      "latest_price": 2376.4,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 68.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0645
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0627
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0547
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0459
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0342
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ABREL.NS",
+      "signal": "HOLD",
+      "confidence": 46.6,
+      "latest_price": 1262.9,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Weeks",
+        "accuracy": 70.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0219
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0208
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0202
+        },
+        {
+          "feature": "rsi_lag_10",
+          "importance": 0.0202
+        },
+        {
+          "feature": "bb_position",
+          "importance": 0.0196
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CHOLAFIN.NS",
+      "signal": "HOLD",
+      "confidence": 46.6,
+      "latest_price": 1742.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "6 Months",
+        "accuracy": 88.0,
+        "precision": 90.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1147
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0795
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0613
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0473
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0459
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DEEPAKNTR.NS",
+      "signal": "HOLD",
+      "confidence": 45.9,
+      "latest_price": 1583.8,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Week",
+        "accuracy": 69.3,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0687
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0585
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0404
+        },
+        {
+          "feature": "volume",
+          "importance": 0.0373
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.036
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BRITANNIA.NS",
+      "signal": "HOLD",
+      "confidence": 45.8,
+      "latest_price": 6155.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Month",
+        "accuracy": 68.8,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0453
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0436
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0408
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0364
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0312
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AXISBANK.NS",
+      "signal": "HOLD",
+      "confidence": 45.7,
+      "latest_price": 1386.7,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Month",
+        "accuracy": 79.0,
+        "precision": 79.2
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0368
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0352
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0297
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.029
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0267
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ABBOTINDIA.NS",
+      "signal": "HOLD",
+      "confidence": 45.2,
+      "latest_price": 26290.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Week",
+        "accuracy": 75.6,
+        "precision": 66.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0926
+        },
+        {
+          "feature": "vol_ratio",
+          "importance": 0.0557
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.049
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0447
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0353
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "EMAMILTD.NS",
+      "signal": "HOLD",
+      "confidence": 45.1,
+      "latest_price": 478.05,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 79.4,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0653
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0569
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0479
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0338
+        },
+        {
+          "feature": "macd_hist_lag_10",
+          "importance": 0.0312
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "NTPC.NS",
+      "signal": "HOLD",
+      "confidence": 45.1,
+      "latest_price": 375.45,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "RandForest",
+        "horizon": "3 Months",
+        "accuracy": 86.7,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1217
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0757
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0568
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0528
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0479
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ABCAPITAL.NS",
+      "signal": "HOLD",
+      "confidence": 45.0,
+      "latest_price": 353.85,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 100.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0634
+        },
+        {
+          "feature": "sentiment_14d",
+          "importance": 0.0617
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0493
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0445
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0412
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "COFORGE.NS",
+      "signal": "HOLD",
+      "confidence": 44.8,
+      "latest_price": 1215.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Month",
+        "accuracy": 67.2,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.8361,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "rsi_lag_3",
+          "importance": 0.0282
+        },
+        {
+          "feature": "news_volume_spike",
+          "importance": 0.0271
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0251
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0242
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.024
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "APLAPOLLO.NS",
+      "signal": "HOLD",
+      "confidence": 44.6,
+      "latest_price": 2209.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 77.6,
+        "precision": 93.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1081
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0809
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0529
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0402
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0369
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ABFRL.NS",
+      "signal": "HOLD",
+      "confidence": 44.4,
+      "latest_price": 68.52,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "1 Week",
+        "accuracy": 61.4,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "bb_position",
+          "importance": 0.0248
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0238
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0228
+        },
+        {
+          "feature": "stoch_k_lag_3",
+          "importance": 0.0226
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0224
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "SBIN.NS",
+      "signal": "HOLD",
+      "confidence": 43.9,
+      "latest_price": 1227.8,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 97.6,
+        "precision": 97.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.105
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0811
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0496
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0394
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0374
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "WIPRO.NS",
+      "signal": "HOLD",
+      "confidence": 43.9,
+      "latest_price": 205.89,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 58.9,
+        "precision": 83.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0944
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0504
+        },
+        {
+          "feature": "adx_slope",
+          "importance": 0.0369
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0362
+        },
+        {
+          "feature": "macd_hist_lag_5",
+          "importance": 0.0345
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CDSL.NS",
+      "signal": "HOLD",
+      "confidence": 43.8,
+      "latest_price": 1324.9,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 77.0,
+        "precision": 83.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_pct",
+          "importance": 0.0842
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0532
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0485
+        },
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.0389
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0379
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CARBORUNIV.NS",
+      "signal": "HOLD",
+      "confidence": 43.6,
+      "latest_price": 839.45,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "1 Month",
+        "accuracy": 85.6,
+        "precision": 76.2
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "bb_width",
+          "importance": 0.0444
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0377
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0274
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0252
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0249
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BSOFT.NS",
+      "signal": "HOLD",
+      "confidence": 43.1,
+      "latest_price": 373.85,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Months",
+        "accuracy": 69.8,
+        "precision": 70.2
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0727
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0659
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0652
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.064
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0426
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CANFINHOME.NS",
+      "signal": "HOLD",
+      "confidence": 43.0,
+      "latest_price": 886.25,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 98.4,
+        "precision": 98.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0617
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0591
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0521
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0478
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0474
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "INDUSINDBK.NS",
+      "signal": "HOLD",
+      "confidence": 42.7,
+      "latest_price": 919.75,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "RandForest",
+        "horizon": "6 Months",
+        "accuracy": 67.5,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.1098
+        },
+        {
+          "feature": "mkt_sent_3d",
+          "importance": 0.0768
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0595
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0532
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0492
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ALKEM.NS",
+      "signal": "HOLD",
+      "confidence": 42.6,
+      "latest_price": 5546.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 85.6,
+        "precision": 85.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0961
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0458
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0435
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0334
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.029
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CASTROLIND.NS",
+      "signal": "HOLD",
+      "confidence": 42.6,
+      "latest_price": 187.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "1 Week",
+        "accuracy": 69.3,
+        "precision": 50.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_pct",
+          "importance": 0.0211
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0208
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0206
+        },
+        {
+          "feature": "stoch_k_lag_10",
+          "importance": 0.0202
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0199
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "EIDPARRY.NS",
+      "signal": "HOLD",
+      "confidence": 42.5,
+      "latest_price": 864.4,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Weeks",
+        "accuracy": 84.9,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0374
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0292
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0266
+        },
+        {
+          "feature": "rsi_lag_5",
+          "importance": 0.0257
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0244
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AIAENG.NS",
+      "signal": "HOLD",
+      "confidence": 41.4,
+      "latest_price": 3832.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "3 Months",
+        "accuracy": 73.8,
+        "precision": 78.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0438
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.039
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0366
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0353
+        },
+        {
+          "feature": "return_10d",
+          "importance": 0.0352
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "COHANCE.NS",
+      "signal": "HOLD",
+      "confidence": 41.4,
+      "latest_price": 307.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 66.7,
+        "precision": 21.1
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_signal",
+          "importance": 0.0347
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0307
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0294
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0227
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0227
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CLEAN.NS",
+      "signal": "HOLD",
+      "confidence": 41.3,
+      "latest_price": 721.9,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Week",
+        "accuracy": 75.6,
+        "precision": 33.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0156,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "rsi_14",
+          "importance": 0.0315
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0306
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0295
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0293
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0288
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BAJAJFINSV.NS",
+      "signal": "HOLD",
+      "confidence": 40.2,
+      "latest_price": 2046.8,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Months",
+        "accuracy": 80.2,
+        "precision": 76.2
+      },
+      "sentiment": {
+        "sent_stock": 0.4795,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.054
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0425
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0387
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0363
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0321
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HAVELLS.NS",
+      "signal": "HOLD",
+      "confidence": 40.1,
+      "latest_price": 1407.6,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Week",
+        "accuracy": 63.0,
+        "precision": 66.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_14",
+          "importance": 0.0727
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0541
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0526
+        },
+        {
+          "feature": "stoch_d",
+          "importance": 0.0505
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0408
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DALBHARAT.NS",
+      "signal": "HOLD",
+      "confidence": 40.0,
+      "latest_price": 2054.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 65.9,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_signal",
+          "importance": 0.0725
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0459
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0421
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0398
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0349
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ARE&M.NS",
+      "signal": "SELL",
+      "confidence": 39.5,
+      "latest_price": 848.85,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 77.8,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "stoch_k_lag_10",
+          "importance": 0.0288
+        },
+        {
+          "feature": "dist_ema_21",
+          "importance": 0.0274
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0264
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0263
+        },
+        {
+          "feature": "avg_return_20d",
+          "importance": 0.0256
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GSPL.NS",
+      "signal": "SELL",
+      "confidence": 39.5,
+      "latest_price": 303.9,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Months",
+        "accuracy": 76.2,
+        "precision": 83.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.057
+        },
+        {
+          "feature": "bb_position",
+          "importance": 0.0338
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0337
+        },
+        {
+          "feature": "avg_return_20d",
+          "importance": 0.0327
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0304
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AUBANK.NS",
+      "signal": "SELL",
+      "confidence": 39.2,
+      "latest_price": 979.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 100.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0846
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0577
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0428
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0364
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0327
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ONGC.NS",
+      "signal": "SELL",
+      "confidence": 38.9,
+      "latest_price": 275.65,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Months",
+        "accuracy": 81.7,
+        "precision": 70.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0751
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0331
+        },
+        {
+          "feature": "macd_hist_lag_10",
+          "importance": 0.033
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0328
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0306
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "KOTAKBANK.NS",
+      "signal": "SELL",
+      "confidence": 38.7,
+      "latest_price": 430.7,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "RandForest",
+        "horizon": "3 Months",
+        "accuracy": 82.0,
+        "precision": 70.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1041
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0879
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0668
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0596
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.046
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HINDCOPPER.NS",
+      "signal": "SELL",
+      "confidence": 38.6,
+      "latest_price": 580.15,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 98.4,
+        "precision": 98.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0987
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0756
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0694
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0454
+        },
+        {
+          "feature": "avg_return_20d",
+          "importance": 0.0438
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "EMCURE.NS",
+      "signal": "SELL",
+      "confidence": 38.4,
+      "latest_price": 1419.7,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Week",
+        "accuracy": 66.1,
+        "precision": 80.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "mkt_sent_3d",
+          "importance": 0.1307
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.101
+        },
+        {
+          "feature": "volume_trend",
+          "importance": 0.0494
+        },
+        {
+          "feature": "macd_hist_lag_5",
+          "importance": 0.0407
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0406
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "TECHM.NS",
+      "signal": "SELL",
+      "confidence": 38.3,
+      "latest_price": 1440.9,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "RandForest",
+        "horizon": "3 Months",
+        "accuracy": 70.3,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.112
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1053
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0834
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0821
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0466
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "TATASTEEL.NS",
+      "signal": "SELL",
+      "confidence": 38.2,
+      "latest_price": 208.14,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "6 Months",
+        "accuracy": 77.2,
+        "precision": 77.2
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0753
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0638
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0586
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0541
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0508
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "IFCI.NS",
+      "signal": "SELL",
+      "confidence": 38.0,
+      "latest_price": 58.13,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 89.6,
+        "precision": 88.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1625
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.1211
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.1181
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.1001
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0951
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DRREDDY.NS",
+      "signal": "SELL",
+      "confidence": 37.6,
+      "latest_price": 1307.4,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Months",
+        "accuracy": 86.5,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.0503
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0497
+        },
+        {
+          "feature": "dist_ema_21",
+          "importance": 0.0462
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0428
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0421
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HSCL.NS",
+      "signal": "SELL",
+      "confidence": 37.5,
+      "latest_price": 484.55,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Weeks",
+        "accuracy": 61.9,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "return_10d",
+          "importance": 0.0249
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0243
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0241
+        },
+        {
+          "feature": "stoch_d",
+          "importance": 0.0216
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0216
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ADANIENT.NS",
+      "signal": "SELL",
+      "confidence": 37.4,
+      "latest_price": 2208.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Weeks",
+        "accuracy": 69.8,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_ema_9",
+          "importance": 0.0237
+        },
+        {
+          "feature": "avg_return_10d",
+          "importance": 0.0218
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0209
+        },
+        {
+          "feature": "sentiment_14d",
+          "importance": 0.0207
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0203
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BIOCON.NS",
+      "signal": "SELL",
+      "confidence": 37.2,
+      "latest_price": 395.75,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Months",
+        "accuracy": 67.5,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0405
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0401
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0378
+        },
+        {
+          "feature": "dist_ema_21",
+          "importance": 0.0339
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0312
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CUB.NS",
+      "signal": "SELL",
+      "confidence": 37.2,
+      "latest_price": 290.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 100.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_20",
+          "importance": 0.0675
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0614
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0565
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0538
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0471
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ACMESOLAR.NS",
+      "signal": "SELL",
+      "confidence": 36.8,
+      "latest_price": 232.2,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Weeks",
+        "accuracy": 70.6,
+        "precision": 84.2
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "stoch_k_lag_3",
+          "importance": 0.0518
+        },
+        {
+          "feature": "stoch_k_lag_5",
+          "importance": 0.0484
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0447
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0416
+        },
+        {
+          "feature": "macd_hist_lag_3",
+          "importance": 0.0402
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ALOKINDS.NS",
+      "signal": "SELL",
+      "confidence": 36.8,
+      "latest_price": 14.47,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "1 Week",
+        "accuracy": 74.8,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd",
+          "importance": 0.0265
+        },
+        {
+          "feature": "sentiment_14d",
+          "importance": 0.0258
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0255
+        },
+        {
+          "feature": "dist_sma_20",
+          "importance": 0.0245
+        },
+        {
+          "feature": "sentiment_7d",
+          "importance": 0.0234
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HEROMOTOCO.NS",
+      "signal": "SELL",
+      "confidence": 36.5,
+      "latest_price": 5719.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 96.0,
+        "precision": 96.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.076
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0698
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0508
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0495
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.042
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HFCL.NS",
+      "signal": "SELL",
+      "confidence": 36.4,
+      "latest_price": 69.85,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 69.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0805
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0511
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0367
+        },
+        {
+          "feature": "stoch_k",
+          "importance": 0.0353
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0295
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CHOICEIN.NS",
+      "signal": "SELL",
+      "confidence": 35.9,
+      "latest_price": 755.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Week",
+        "accuracy": 63.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0218
+        },
+        {
+          "feature": "dist_ema_21",
+          "importance": 0.021
+        },
+        {
+          "feature": "consecutive_up",
+          "importance": 0.0207
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0206
+        },
+        {
+          "feature": "macd_hist_lag_5",
+          "importance": 0.0204
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CROMPTON.NS",
+      "signal": "SELL",
+      "confidence": 35.8,
+      "latest_price": 264.23,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Month",
+        "accuracy": 87.2,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "bb_width",
+          "importance": 0.084
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0434
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0422
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0422
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0394
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BAJFINANCE.NS",
+      "signal": "SELL",
+      "confidence": 35.6,
+      "latest_price": 1031.0,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Weeks",
+        "accuracy": 62.9,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_signal",
+          "importance": 0.0255
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0235
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0235
+        },
+        {
+          "feature": "rsi_slope_5d",
+          "importance": 0.0233
+        },
+        {
+          "feature": "bb_position",
+          "importance": 0.0221
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AKUMS.NS",
+      "signal": "SELL",
+      "confidence": 35.1,
+      "latest_price": 482.05,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "1 Month",
+        "accuracy": 72.8,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_pct",
+          "importance": 0.0505
+        },
+        {
+          "feature": "stoch_k_lag_10",
+          "importance": 0.0442
+        },
+        {
+          "feature": "macd_hist_lag_10",
+          "importance": 0.0411
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0359
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0348
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DLF.NS",
+      "signal": "SELL",
+      "confidence": 34.8,
+      "latest_price": 610.4,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 93.6,
+        "precision": 90.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0867
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0656
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0364
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.035
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0342
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HDFCAMC.NS",
+      "signal": "SELL",
+      "confidence": 34.6,
+      "latest_price": 2721.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 70.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0357
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0304
+        },
+        {
+          "feature": "dist_ema_21",
+          "importance": 0.0259
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.022
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0219
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CAMPUS.NS",
+      "signal": "SELL",
+      "confidence": 34.5,
+      "latest_price": 263.45,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "1 Week",
+        "accuracy": 75.6,
+        "precision": 73.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0304
+        },
+        {
+          "feature": "rsi_lag_3",
+          "importance": 0.0236
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0235
+        },
+        {
+          "feature": "return_20d",
+          "importance": 0.0215
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0212
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ABSLAMC.NS",
+      "signal": "SELL",
+      "confidence": 34.2,
+      "latest_price": 913.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "1 Month",
+        "accuracy": 64.8,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "rsi_14",
+          "importance": 0.0661
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0546
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0496
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0463
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0445
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "APOLLOTYRE.NS",
+      "signal": "SELL",
+      "confidence": 33.8,
+      "latest_price": 461.45,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "6 Months",
+        "accuracy": 76.0,
+        "precision": 74.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0747
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0646
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0545
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0428
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0397
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HDFCBANK.NS",
+      "signal": "SELL",
+      "confidence": 33.1,
+      "latest_price": 923.6,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 74.2,
+        "precision": 80.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0276
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0271
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0248
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0218
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0211
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DIVISLAB.NS",
+      "signal": "SELL",
+      "confidence": 32.3,
+      "latest_price": 6384.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Week",
+        "accuracy": 63.8,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0618
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0584
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0532
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0526
+        },
+        {
+          "feature": "macd_hist_lag_10",
+          "importance": 0.0391
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "IRB.NS",
+      "signal": "SELL",
+      "confidence": 30.7,
+      "latest_price": 40.52,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 70.6,
+        "precision": 73.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1019
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.082
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0786
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0595
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0504
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ICICIGI.NS",
+      "signal": "SELL",
+      "confidence": 30.3,
+      "latest_price": 1934.2,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 65.9,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_20",
+          "importance": 0.0288
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0241
+        },
+        {
+          "feature": "return_5d",
+          "importance": 0.0238
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0235
+        },
+        {
+          "feature": "stoch_d",
+          "importance": 0.0234
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "BBTC.NS",
+      "signal": "SELL",
+      "confidence": 28.6,
+      "latest_price": 1749.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Weeks",
+        "accuracy": 68.3,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0521
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0479
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0457
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0377
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0341
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ADANIENSOL.NS",
+      "signal": "SELL",
+      "confidence": 27.2,
+      "latest_price": 1009.6,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "RandForest",
+        "horizon": "2 Months",
+        "accuracy": 68.3,
+        "precision": 97.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "volume",
+          "importance": 0.0853
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0508
+        },
+        {
+          "feature": "obv_slope",
+          "importance": 0.0468
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0428
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0418
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ADANIPORTS.NS",
+      "signal": "SELL",
+      "confidence": 27.1,
+      "latest_price": 1555.8,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 74.8,
+        "precision": 80.8
+      },
+      "sentiment": {
+        "sent_stock": 0.2387,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.076
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.049
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0476
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0348
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0283
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "3MINDIA.NS",
+      "signal": "SELL",
+      "confidence": 26.5,
+      "latest_price": 35870.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Week",
+        "accuracy": 66.9,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0816
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0517
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0368
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0368
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0322
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ANGELONE.NS",
+      "signal": "SELL",
+      "confidence": 25.7,
+      "latest_price": 2423.6,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "6 Months",
+        "accuracy": 92.0,
+        "precision": 81.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0683,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0606
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.038
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.037
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.035
+        },
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.0344
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AARTIIND.NS",
+      "signal": "STRONG SELL",
+      "confidence": 24.4,
+      "latest_price": 455.25,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 67.5,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1045
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0815
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0709
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0433
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0419
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CGCL.NS",
+      "signal": "STRONG SELL",
+      "confidence": 24.2,
+      "latest_price": 168.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Weeks",
+        "accuracy": 69.8,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_20",
+          "importance": 0.0273
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0227
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0227
+        },
+        {
+          "feature": "macd_hist",
+          "importance": 0.0226
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0222
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "EICHERMOT.NS",
+      "signal": "STRONG SELL",
+      "confidence": 23.8,
+      "latest_price": 8029.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 92.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0413
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0413
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0339
+        },
+        {
+          "feature": "stoch_oversold",
+          "importance": 0.033
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0299
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GODREJCP.NS",
+      "signal": "STRONG SELL",
+      "confidence": 23.1,
+      "latest_price": 1234.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 92.8,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "bb_width",
+          "importance": 0.0452
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0409
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.04
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.039
+        },
+        {
+          "feature": "adx_lag_3",
+          "importance": 0.0366
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ADANIGREEN.NS",
+      "signal": "STRONG SELL",
+      "confidence": 23.0,
+      "latest_price": 962.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Week",
+        "accuracy": 59.1,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0563
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0561
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0404
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0387
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0365
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "360ONE.NS",
+      "signal": "STRONG SELL",
+      "confidence": 22.2,
+      "latest_price": 1129.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Months",
+        "accuracy": 73.8,
+        "precision": 90.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.3059
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.1492
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0574
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0462
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0434
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "IRCON.NS",
+      "signal": "STRONG SELL",
+      "confidence": 21.4,
+      "latest_price": 146.88,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "1 Month",
+        "accuracy": 72.8,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_hist",
+          "importance": 0.0271
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0271
+        },
+        {
+          "feature": "macd_hist_mean_5d",
+          "importance": 0.0261
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0261
+        },
+        {
+          "feature": "stoch_k_lag_5",
+          "importance": 0.0252
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CAPLIPOINT.NS",
+      "signal": "STRONG SELL",
+      "confidence": 20.9,
+      "latest_price": 1724.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 87.2,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.2882
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1139
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0912
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0908
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.07
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "RELIANCE.NS",
+      "signal": "STRONG SELL",
+      "confidence": 19.3,
+      "latest_price": 1428.0,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Months",
+        "accuracy": 76.2,
+        "precision": 95.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.2892
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1204
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0999
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0677
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0574
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CESC.NS",
+      "signal": "STRONG SELL",
+      "confidence": 19.1,
+      "latest_price": 158.95,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "6 Months",
+        "accuracy": 89.6,
+        "precision": 89.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "stoch_d",
+          "importance": 0.0638
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.049
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0348
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0322
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0322
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ITI.NS",
+      "signal": "STRONG SELL",
+      "confidence": 18.7,
+      "latest_price": 272.4,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "6 Months",
+        "accuracy": 92.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.053
+        },
+        {
+          "feature": "rsi_lag_10",
+          "importance": 0.0338
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0313
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.031
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.03
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "IDBI.NS",
+      "signal": "STRONG SELL",
+      "confidence": 18.5,
+      "latest_price": 112.54,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 78.4,
+        "precision": 76.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.3184
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.2192
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0863
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0625
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0411
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HINDUNILVR.NS",
+      "signal": "STRONG SELL",
+      "confidence": 17.7,
+      "latest_price": 2345.4,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "3 Months",
+        "accuracy": 90.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.3396
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.1715
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.1262
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0446
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.0411
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "POWERGRID.NS",
+      "signal": "STRONG SELL",
+      "confidence": 17.7,
+      "latest_price": 303.35,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "2 Months",
+        "accuracy": 91.3,
+        "precision": 72.2
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1472
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1119
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1007
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.065
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0629
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DABUR.NS",
+      "signal": "STRONG SELL",
+      "confidence": 16.2,
+      "latest_price": 518.35,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "2 Months",
+        "accuracy": 79.4,
+        "precision": 81.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0378
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0373
+        },
+        {
+          "feature": "sentiment_7d",
+          "importance": 0.037
+        },
+        {
+          "feature": "sentiment_14d",
+          "importance": 0.0367
+        },
+        {
+          "feature": "news_volume_spike",
+          "importance": 0.0335
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "TITAN.NS",
+      "signal": "STRONG SELL",
+      "confidence": 16.2,
+      "latest_price": 4272.7,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "RandForest",
+        "horizon": "6 Months",
+        "accuracy": 78.0,
+        "precision": 94.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.2914
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0706
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0556
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0508
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0483
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HDFCLIFE.NS",
+      "signal": "STRONG SELL",
+      "confidence": 15.8,
+      "latest_price": 737.2,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 89.6,
+        "precision": 93.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.2264
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.1281
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0829
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0811
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0624
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "COALINDIA.NS",
+      "signal": "STRONG SELL",
+      "confidence": 15.4,
+      "latest_price": 426.0,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "3 Months",
+        "accuracy": 92.2,
+        "precision": 81.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0222,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.2319
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.1503
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1163
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0863
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0422
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GRANULES.NS",
+      "signal": "STRONG SELL",
+      "confidence": 14.3,
+      "latest_price": 597.6,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 80.8,
+        "precision": 80.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_pct",
+          "importance": 0.0475
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0458
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0432
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0431
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0377
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HINDPETRO.NS",
+      "signal": "STRONG SELL",
+      "confidence": 13.8,
+      "latest_price": 433.4,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "3 Months",
+        "accuracy": 76.2,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1705
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.1604
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.1211
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.1175
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0705
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ATGL.NS",
+      "signal": "STRONG SELL",
+      "confidence": 13.6,
+      "latest_price": 516.15,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "2 Months",
+        "accuracy": 87.3,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0324
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0302
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.029
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0282
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0255
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "INFY.NS",
+      "signal": "STRONG SELL",
+      "confidence": 10.8,
+      "latest_price": 1327.5,
+      "price_date": "2026-02-23",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "3 Months",
+        "accuracy": 68.8,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0496
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.3426
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.1449
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0809
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0704
+        },
+        {
+          "feature": "ema_9_21_cross",
+          "importance": 0.0632
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "IDFCFIRSTB.NS",
+      "signal": "STRONG SELL",
+      "confidence": 10.4,
+      "latest_price": 69.95,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 75.2,
+        "precision": 94.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0985
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0843
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0626
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.041
+        },
+        {
+          "feature": "dist_sma_20",
+          "importance": 0.0368
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HONASA.NS",
+      "signal": "STRONG SELL",
+      "confidence": 9.8,
+      "latest_price": 304.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 72.8,
+        "precision": 93.3
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.3148
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.2841
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.1206
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0781
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0288
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CCL.NS",
+      "signal": "STRONG SELL",
+      "confidence": 9.5,
+      "latest_price": 1032.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "3 Months",
+        "accuracy": 84.9,
+        "precision": 93.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.3724
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0965
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0662
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0572
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0505
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ALKYLAMINE.NS",
+      "signal": "STRONG SELL",
+      "confidence": 8.4,
+      "latest_price": 1486.7,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 93.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_signal",
+          "importance": 0.0685
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0648
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0581
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0469
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0458
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "APARINDS.NS",
+      "signal": "STRONG SELL",
+      "confidence": 8.0,
+      "latest_price": 10395.0,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 77.6,
+        "precision": 81.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.386
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.163
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1172
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.1109
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0856
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "ELGIEQUIP.NS",
+      "signal": "STRONG SELL",
+      "confidence": 8.0,
+      "latest_price": 541.45,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGB_HiReg",
+        "horizon": "6 Months",
+        "accuracy": 84.8,
+        "precision": 75.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.0494
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0399
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0396
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0341
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0338
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "HINDZINC.NS",
+      "signal": "STRONG SELL",
+      "confidence": 6.2,
+      "latest_price": 614.2,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 48.0,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.2093
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.1758
+        },
+        {
+          "feature": "rsi_14",
+          "importance": 0.0835
+        },
+        {
+          "feature": "mkt_sent_7d",
+          "importance": 0.0772
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0592
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CHENNPETRO.NS",
+      "signal": "STRONG SELL",
+      "confidence": 4.6,
+      "latest_price": 917.15,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 92.8,
+        "precision": 96.6
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_pct",
+          "importance": 0.0603
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0495
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0469
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0439
+        },
+        {
+          "feature": "adx_lag_5",
+          "importance": 0.0399
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DATAPATTNS.NS",
+      "signal": "STRONG SELL",
+      "confidence": 4.5,
+      "latest_price": 3050.3,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 83.2,
+        "precision": 87.7
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.3163
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.2014
+        },
+        {
+          "feature": "macd_signal",
+          "importance": 0.0956
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0687
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0677
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "INOXINDIA.NS",
+      "signal": "STRONG SELL",
+      "confidence": 3.8,
+      "latest_price": 1151.8,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 98.4,
+        "precision": 97.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.1462
+        },
+        {
+          "feature": "macd",
+          "importance": 0.1043
+        },
+        {
+          "feature": "bb_width",
+          "importance": 0.1012
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0739
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0676
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CENTRALBK.NS",
+      "signal": "STRONG SELL",
+      "confidence": 3.5,
+      "latest_price": 39.95,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "1 Month",
+        "accuracy": 66.4,
+        "precision": 90.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.1152
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0949
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0886
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0797
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0666
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "APOLLOHOSP.NS",
+      "signal": "STRONG SELL",
+      "confidence": 3.3,
+      "latest_price": 7778.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 70.4,
+        "precision": 92.9
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "atr_14",
+          "importance": 0.3418
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.1264
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1074
+        },
+        {
+          "feature": "sma_20_50_cross",
+          "importance": 0.0528
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0395
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "AMBER.NS",
+      "signal": "STRONG SELL",
+      "confidence": 2.1,
+      "latest_price": 7994.5,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 86.4,
+        "precision": 82.4
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.3094
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.2729
+        },
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.1559
+        },
+        {
+          "feature": "macd",
+          "importance": 0.0775
+        },
+        {
+          "feature": "volatility_20d",
+          "importance": 0.0308
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "DELHIVERY.NS",
+      "signal": "STRONG SELL",
+      "confidence": 2.1,
+      "latest_price": 436.15,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "GradBoost",
+        "horizon": "6 Months",
+        "accuracy": 85.6,
+        "precision": 93.8
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.5158
+        },
+        {
+          "feature": "adx_lag_10",
+          "importance": 0.0883
+        },
+        {
+          "feature": "atr_pct",
+          "importance": 0.0816
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0586
+        },
+        {
+          "feature": "bb_position",
+          "importance": 0.0434
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "GUJGASLTD.NS",
+      "signal": "STRONG SELL",
+      "confidence": 1.8,
+      "latest_price": 406.05,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 93.6,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.0819
+        },
+        {
+          "feature": "rsi_lag_5",
+          "importance": 0.0669
+        },
+        {
+          "feature": "adx_14",
+          "importance": 0.0596
+        },
+        {
+          "feature": "rsi_mean_10d",
+          "importance": 0.0483
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0459
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    },
+    {
+      "symbol": "CAMS.NS",
+      "signal": "STRONG SELL",
+      "confidence": 1.1,
+      "latest_price": 710.1,
+      "price_date": "2026-02-25",
+      "model": {
+        "name": "XGBoost",
+        "horizon": "6 Months",
+        "accuracy": 94.4,
+        "precision": 100.0
+      },
+      "sentiment": {
+        "sent_stock": 0.0,
+        "mkt_sentiment": 0.0
+      },
+      "top_drivers": [
+        {
+          "feature": "dist_sma_200",
+          "importance": 0.0523
+        },
+        {
+          "feature": "atr_14",
+          "importance": 0.0471
+        },
+        {
+          "feature": "sma_50_200_cross",
+          "importance": 0.0466
+        },
+        {
+          "feature": "dist_sma_50",
+          "importance": 0.0455
+        },
+        {
+          "feature": "macd_hist_std_5d",
+          "importance": 0.042
+        }
+      ],
+      "predicted_at": "2026-02-25"
+    }
+  ],
+  "errors": []
+}

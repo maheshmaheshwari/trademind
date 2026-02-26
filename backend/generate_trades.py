@@ -98,10 +98,83 @@ def calculate_trade_levels(df, signal, horizon, model_target_pct):
     }
 
 
+def calculate_position_sizing(df, signal, buy_price):
+    """
+    Calculate safe position size based on average daily volume.
+    
+    Key rule: Never recommend more than 2% of avg daily volume.
+    This prevents our users from moving the stock price.
+    
+    For a product with many users, further divide by estimated
+    concurrent users acting on the same signal.
+    """
+    # Average daily volume (20-day and 50-day)
+    vol_20d = int(df["volume"].tail(20).mean()) if len(df) >= 20 else int(df["volume"].mean())
+    vol_50d = int(df["volume"].tail(50).mean()) if len(df) >= 50 else vol_20d
+    
+    # Use more conservative (lower) volume estimate
+    avg_daily_volume = min(vol_20d, vol_50d)
+    
+    # Max safe quantity: 2% of average daily volume
+    # This is the industry standard for avoiding market impact
+    SAFE_VOLUME_PCT = 0.02  # 2% of ADV
+    max_safe_qty = int(avg_daily_volume * SAFE_VOLUME_PCT)
+    
+    # For a product with N concurrent users, divide further
+    # Assume 100 users might act on the same signal
+    ESTIMATED_CONCURRENT_USERS = 100
+    max_qty_per_user = max(1, int(max_safe_qty / ESTIMATED_CONCURRENT_USERS))
+    
+    # Calculate max safe investment amount
+    price = buy_price if buy_price else float(df["close"].iloc[-1])
+    max_safe_investment = round(max_safe_qty * price, 2) if price > 0 else 0
+    max_investment_per_user = round(max_qty_per_user * price, 2) if price > 0 else 0
+    
+    # Liquidity rating based on avg daily turnover (volume × price)
+    daily_turnover = avg_daily_volume * price
+    if daily_turnover >= 50_00_00_000:      # ₹50 Cr+
+        liquidity = "VERY_HIGH"
+    elif daily_turnover >= 10_00_00_000:     # ₹10 Cr+
+        liquidity = "HIGH"
+    elif daily_turnover >= 2_00_00_000:      # ₹2 Cr+
+        liquidity = "MEDIUM"
+    elif daily_turnover >= 50_00_000:        # ₹50 L+
+        liquidity = "LOW"
+    else:
+        liquidity = "VERY_LOW"
+    
+    # Minimum lot size (practical: at least ₹5000 worth)
+    min_qty = max(1, int(5000 / price)) if price > 0 else 1
+    
+    return {
+        "avg_daily_volume": avg_daily_volume,
+        "avg_daily_volume_20d": vol_20d,
+        "avg_daily_volume_50d": vol_50d,
+        "daily_turnover_cr": round(daily_turnover / 1_00_00_000, 2),
+        "max_safe_qty_total": max_safe_qty,
+        "max_qty_per_user": max_qty_per_user,
+        "max_safe_investment": max_safe_investment,
+        "max_investment_per_user": max_investment_per_user,
+        "min_qty": min_qty,
+        "liquidity": liquidity,
+        "safe_volume_pct": SAFE_VOLUME_PCT * 100,
+        "estimated_concurrent_users": ESTIMATED_CONCURRENT_USERS,
+    }
+
+
 def generate_signals():
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Load stock names from angel_tokens.json
+    name_map = {}
+    tokens_path = os.path.join(OUTPUT_DIR, "angel_tokens.json")
+    if os.path.exists(tokens_path):
+        with open(tokens_path) as f:
+            tokens = json.load(f)
+        for sym, info in tokens.items():
+            name_map[f"{sym}.NS"] = info.get("name", sym)
     
     model_files = sorted([f for f in os.listdir(FINAL_DIR) if f.endswith("_final.pkl")])
     print(f"📊 {len(model_files)} final models found\n")
@@ -161,6 +234,9 @@ def generate_signals():
             # Calculate trade levels
             levels = calculate_trade_levels(df, signal, horizon, target_pct)
             
+            # Calculate position sizing with volume caps
+            position = calculate_position_sizing(df, signal, levels["buy_price"])
+            
             # Feature importance — top 5
             top_features = []
             if hasattr(model, "feature_importances_"):
@@ -177,6 +253,7 @@ def generate_signals():
             
             trade = {
                 "symbol": symbol,
+                "name": name_map.get(symbol, symbol.replace(".NS", "")),
                 "signal": signal,
                 "confidence": round(float(buy_prob) * 100, 1),
                 "trade": {
@@ -186,6 +263,15 @@ def generate_signals():
                     "stop_loss": levels["stop_loss"],
                     "risk_reward": levels["risk_reward"],
                     "expected_return_pct": levels["expected_return_pct"],
+                },
+                "position": {
+                    "avg_daily_volume": position["avg_daily_volume"],
+                    "daily_turnover_cr": position["daily_turnover_cr"],
+                    "liquidity": position["liquidity"],
+                    "max_safe_qty": position["max_safe_qty_total"],
+                    "max_qty_per_user": position["max_qty_per_user"],
+                    "max_investment_per_user": position["max_investment_per_user"],
+                    "min_qty": position["min_qty"],
                 },
                 "price": {
                     "current": levels["current_price"],
@@ -240,6 +326,31 @@ def generate_signals():
         "errors": errors[:5],
     }
     
+    # ==========================================
+    # Store trade signals in database
+    # ==========================================
+    try:
+        from database.db import insert_trade_signals_batch, get_local_connection
+        from database.models import CREATE_TRADE_SIGNALS_TABLE, CREATE_INDEXES
+
+        # Ensure trade_signals table exists
+        conn = get_local_connection()
+        conn.execute(CREATE_TRADE_SIGNALS_TABLE)
+        for idx_sql in CREATE_INDEXES:
+            try:
+                conn.execute(idx_sql)
+            except Exception:
+                pass  # Index may reference tables not yet created
+        conn.commit()
+        conn.close()
+
+        # Store all trades (deduplicates on symbol + date)
+        all_trades = trades  # trades list has all 493 signals
+        stored = insert_trade_signals_batch(all_trades, today, timestamp, sync=False)
+        print(f"\n   💾 Stored {stored} trade signals in database for {today}")
+    except Exception as e:
+        print(f"\n   ⚠️  DB storage failed: {e}")
+
     # Save latest snapshot
     latest_file = os.path.join(OUTPUT_DIR, "trade_signals_latest.json")
     with open(latest_file, "w") as f:
@@ -284,12 +395,13 @@ def generate_signals():
         print(f"\n{'='*70}")
         print(f"💰 TOP TRADES (sorted by confidence)")
         print(f"{'='*70}")
-        print(f"{'Symbol':<18} {'Signal':<12} {'Conf':>5} {'Buy':>10} {'Target':>10} {'SL':>10} {'R:R':>5} {'Horizon':<10}")
-        print(f"{'-'*85}")
+        print(f"{'Symbol':<18} {'Signal':<12} {'Conf':>5} {'Buy':>10} {'Target':>10} {'SL':>10} {'R:R':>5} {'Horizon':<10} {'Liquidity':<10} {'MaxQty':>8}")
+        print(f"{'-'*105}")
         for t in output["actionable_trades"]:
             print(f"{t['symbol']:<18} {t['signal']:<12} {t['confidence']:>4.0f}% "
                   f"₹{t['trade']['buy_price']:>8.2f} ₹{t['trade']['target_price']:>8.2f} "
-                  f"₹{t['trade']['stop_loss']:>8.2f} {t['trade']['risk_reward'] or 0:>4.1f}x {t['model']['horizon']:<10}")
+                  f"₹{t['trade']['stop_loss']:>8.2f} {t['trade']['risk_reward'] or 0:>4.1f}x {t['model']['horizon']:<10} "
+                  f"{t['position']['liquidity']:<10} {t['position']['max_qty_per_user']:>7}")
     
     return latest_file
 

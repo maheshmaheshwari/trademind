@@ -144,6 +144,28 @@ def verify_data_integrity_job():
         logger.error(f"Data integrity check failed: {e}")
 
 
+def generate_trade_signals_job():
+    """Daily job: generate AI trade signals from trained models."""
+    logger.info("⏰ Running trade signal generation...")
+    try:
+        from generate_trades import generate_signals
+        result = generate_signals()
+        logger.info(f"Trade signals generated: {result}")
+    except Exception as e:
+        logger.error(f"Trade signal generation failed: {e}")
+
+
+def sync_to_turso_job():
+    """Daily EOD job: sync local trade_signals to Turso cloud."""
+    logger.info("⏰ Running EOD Turso sync...")
+    try:
+        from database.db import sync_trade_signals_to_turso
+        count = sync_trade_signals_to_turso()
+        logger.info(f"EOD sync done: {count} trade signals pushed to Turso")
+    except Exception as e:
+        logger.error(f"EOD Turso sync failed: {e}")
+
+
 def start_scheduler() -> None:
     """
     Start the APScheduler with all configured jobs.
@@ -229,6 +251,28 @@ def start_scheduler() -> None:
         id="integrity",
         name="Weekly Data Integrity Check",
         misfire_grace_time=7200,
+    )
+
+    # ==========================================
+    # TRADE SIGNAL JOBS
+    # ==========================================
+    scheduler.add_job(
+        generate_trade_signals_job,
+        CronTrigger(hour=17, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="trade_signals",
+        name="Generate Trade Signals",
+        misfire_grace_time=3600,
+    )
+
+    # ==========================================
+    # EOD TURSO SYNC
+    # ==========================================
+    scheduler.add_job(
+        sync_to_turso_job,
+        CronTrigger(hour=20, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="eod_turso_sync",
+        name="EOD Turso Cloud Sync",
+        misfire_grace_time=3600,
     )
 
     # Print schedule

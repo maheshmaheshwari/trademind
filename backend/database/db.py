@@ -37,6 +37,9 @@ TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "")
 # Detect if Turso is configured
 USE_TURSO = bool(TURSO_DATABASE_URL and TURSO_AUTH_TOKEN)
 
+# Environment: 'local' writes to local DB only, 'production' syncs with Turso
+ENV = os.getenv("ENV", "local").lower()
+
 
 def get_connection(sync_on_connect: bool = True):
     """
@@ -69,6 +72,32 @@ def get_connection(sync_on_connect: bool = True):
             conn.sync()
     else:
         conn = libsql.connect(DB_PATH)
+    return conn
+
+
+def get_local_connection():
+    """
+    Get a local-only database connection (no Turso sync).
+    Used when ENV=local to avoid syncing on every write.
+    """
+    return libsql.connect(DB_PATH)
+
+
+def get_turso_connection(sync_on_connect: bool = True):
+    """
+    Get a Turso-synced database connection.
+    Used for EOD sync to push local data to Turso cloud.
+    """
+    if not USE_TURSO:
+        logger.warning("Turso not configured, returning local connection")
+        return libsql.connect(DB_PATH)
+    conn = libsql.connect(
+        DB_PATH,
+        sync_url=TURSO_DATABASE_URL,
+        auth_token=TURSO_AUTH_TOKEN,
+    )
+    if sync_on_connect:
+        conn.sync()
     return conn
 
 
@@ -446,6 +475,202 @@ def insert_ai_signal(
             db_conn.close()
 
 
+def insert_trade_signals_batch(
+    trades: List[Dict],
+    generated_date: str,
+    generated_at: str,
+    sync: bool = True,
+) -> int:
+    """
+    Bulk-upsert trade signals into the trade_signals table.
+    Uses INSERT OR REPLACE to deduplicate on (symbol, generated_date).
+
+    Args:
+        trades: List of trade dicts from generate_trades.py
+        generated_date: YYYY-MM-DD date string
+        generated_at: Full timestamp string
+        sync: Whether to sync to Turso after inserting
+
+    Returns:
+        Number of trades stored.
+    """
+    if not trades:
+        return 0
+
+    # Use local-only connection in local env to avoid per-write Turso sync
+    if ENV == "local":
+        conn = get_local_connection()
+    else:
+        conn = get_connection(sync_on_connect=False)
+
+    try:
+        count = 0
+        for t in trades:
+            conn.execute(
+                """INSERT OR REPLACE INTO trade_signals
+                (symbol, name, signal, confidence, trade_type,
+                 buy_price, target_price, stop_loss, risk_reward, expected_return_pct,
+                 current_price, atr_14, atr_pct,
+                 avg_daily_volume, daily_turnover_cr, liquidity,
+                 max_safe_qty, max_qty_per_user, max_investment_per_user, min_qty,
+                 model_name, model_horizon, model_accuracy, model_precision,
+                 top_drivers, sentiment,
+                 generated_date, generated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    t["symbol"],
+                    t.get("name", ""),
+                    t["signal"],
+                    t.get("confidence"),
+                    t.get("trade", {}).get("type"),
+                    t.get("trade", {}).get("buy_price"),
+                    t.get("trade", {}).get("target_price"),
+                    t.get("trade", {}).get("stop_loss"),
+                    t.get("trade", {}).get("risk_reward"),
+                    t.get("trade", {}).get("expected_return_pct"),
+                    t.get("price", {}).get("current"),
+                    t.get("price", {}).get("atr_14"),
+                    t.get("price", {}).get("atr_pct"),
+                    t.get("position", {}).get("avg_daily_volume"),
+                    t.get("position", {}).get("daily_turnover_cr"),
+                    t.get("position", {}).get("liquidity"),
+                    t.get("position", {}).get("max_safe_qty"),
+                    t.get("position", {}).get("max_qty_per_user"),
+                    t.get("position", {}).get("max_investment_per_user"),
+                    t.get("position", {}).get("min_qty"),
+                    t.get("model", {}).get("name"),
+                    t.get("model", {}).get("horizon"),
+                    t.get("model", {}).get("accuracy"),
+                    t.get("model", {}).get("precision"),
+                    json.dumps(t.get("top_drivers", [])),
+                    json.dumps(t.get("sentiment", {})),
+                    generated_date,
+                    generated_at,
+                ),
+            )
+            count += 1
+
+        conn.commit()
+        if sync and ENV != "local" and USE_TURSO:
+            conn.sync()
+        logger.info(f"Stored {count} trade signals for {generated_date}")
+        return count
+    except Exception as e:
+        logger.error(f"Error inserting trade signals: {e}")
+        return 0
+    finally:
+        conn.close()
+
+
+def get_trade_signals(
+    date: Optional[str] = None,
+    signal_type: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict]:
+    """
+    Query trade signals with optional filters.
+
+    Args:
+        date: Filter by generated_date (YYYY-MM-DD). None = latest date.
+        signal_type: Filter by signal (e.g. "BUY", "STRONG BUY").
+        limit: Max number of results.
+
+    Returns:
+        List of trade signal dicts sorted by confidence descending.
+    """
+    conn = get_connection(sync_on_connect=False)
+    try:
+        if date is None:
+            # Get the latest date
+            row = conn.execute(
+                "SELECT MAX(generated_date) FROM trade_signals"
+            ).fetchone()
+            date = row[0] if row and row[0] else datetime.now().strftime("%Y-%m-%d")
+
+        if signal_type:
+            cur = conn.execute(
+                """SELECT * FROM trade_signals
+                WHERE generated_date = ? AND signal LIKE ?
+                ORDER BY confidence DESC
+                LIMIT ?""",
+                (date, f"%{signal_type}%", limit),
+            )
+        else:
+            cur = conn.execute(
+                """SELECT * FROM trade_signals
+                WHERE generated_date = ?
+                ORDER BY confidence DESC
+                LIMIT ?""",
+                (date, limit),
+            )
+        return _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+
+def sync_trade_signals_to_turso() -> int:
+    """
+    Sync trade_signals from local DB to Turso cloud.
+    Called by the EOD sync scheduler job.
+
+    Reads unsent trade signals from local DB and pushes them
+    to Turso via a synced connection.
+
+    Returns:
+        Number of rows synced.
+    """
+    if not USE_TURSO:
+        logger.warning("Turso not configured — skipping sync")
+        return 0
+
+    # Read from local
+    local_conn = get_local_connection()
+    try:
+        rows = local_conn.execute(
+            "SELECT * FROM trade_signals"
+        ).fetchall()
+        cols = [d[0] for d in local_conn.execute(
+            "SELECT * FROM trade_signals LIMIT 1"
+        ).description]
+    finally:
+        local_conn.close()
+
+    if not rows:
+        logger.info("No trade signals to sync")
+        return 0
+
+    # Push to Turso
+    turso_conn = get_turso_connection(sync_on_connect=True)
+    try:
+        # Ensure table exists
+        from database.models import CREATE_TRADE_SIGNALS_TABLE
+        turso_conn.execute(CREATE_TRADE_SIGNALS_TABLE)
+        turso_conn.commit()
+
+        cols_no_id = [c for c in cols if c != "id"]
+        id_idx = cols.index("id") if "id" in cols else None
+
+        count = 0
+        for row in rows:
+            values = [row[i] for i in range(len(cols)) if cols[i] != "id"]
+            placeholders = ",".join(["?" for _ in cols_no_id])
+            turso_conn.execute(
+                f"INSERT OR REPLACE INTO trade_signals ({','.join(cols_no_id)}) VALUES ({placeholders})",
+                values,
+            )
+            count += 1
+
+        turso_conn.commit()
+        turso_conn.sync()
+        logger.info(f"Synced {count} trade signals to Turso")
+        return count
+    except Exception as e:
+        logger.error(f"Error syncing trade signals to Turso: {e}")
+        return 0
+    finally:
+        turso_conn.close()
+
+
 # ==========================================
 # QUERY HELPER FUNCTIONS
 # ==========================================
@@ -662,7 +887,7 @@ def get_db_stats() -> Dict[str, int]:
         print(f"Prices: {stats['prices']} rows")
         print(f"Indicators: {stats['technical_indicators']} rows")
     """
-    tables = ["prices", "technical_indicators", "news_sentiment", "market_overview", "ai_signals"]
+    tables = ["prices", "technical_indicators", "news_sentiment", "market_overview", "ai_signals", "trade_signals"]
     conn = get_connection()
     try:
         stats = {}

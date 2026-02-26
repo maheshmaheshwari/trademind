@@ -170,6 +170,10 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_portfolio_stocks_portfolio ON portfolio_stocks(portfolio_id);",
     "CREATE INDEX IF NOT EXISTS idx_portfolio_stocks_symbol ON portfolio_stocks(symbol);",
     "CREATE INDEX IF NOT EXISTS idx_portfolio_sectors_portfolio ON portfolio_sectors(portfolio_id);",
+    "CREATE INDEX IF NOT EXISTS idx_trade_signals_symbol ON trade_signals(symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_trade_signals_date ON trade_signals(generated_date);",
+    "CREATE INDEX IF NOT EXISTS idx_trade_signals_signal ON trade_signals(signal);",
+    "CREATE INDEX IF NOT EXISTS idx_trade_signals_confidence ON trade_signals(confidence);",
 ]
 
 # ==========================================
@@ -227,6 +231,46 @@ CREATE TABLE IF NOT EXISTS portfolio_stocks (
 );
 """
 
+# ==========================================
+# Table: trade_signals
+# Full trade signal details with position sizing
+# One entry per stock per day (deduplication)
+# ==========================================
+CREATE_TRADE_SIGNALS_TABLE = """
+CREATE TABLE IF NOT EXISTS trade_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    name TEXT,
+    signal TEXT NOT NULL,
+    confidence REAL,
+    trade_type TEXT,
+    buy_price REAL,
+    target_price REAL,
+    stop_loss REAL,
+    risk_reward REAL,
+    expected_return_pct REAL,
+    current_price REAL,
+    atr_14 REAL,
+    atr_pct REAL,
+    avg_daily_volume INTEGER,
+    daily_turnover_cr REAL,
+    liquidity TEXT,
+    max_safe_qty INTEGER,
+    max_qty_per_user INTEGER,
+    max_investment_per_user REAL,
+    min_qty INTEGER,
+    model_name TEXT,
+    model_horizon TEXT,
+    model_accuracy REAL,
+    model_precision REAL,
+    top_drivers TEXT,
+    sentiment TEXT,
+    generated_date TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    UNIQUE(symbol, generated_date)
+);
+"""
+
 # All table creation statements in order
 ALL_TABLES = [
     CREATE_PRICES_TABLE,
@@ -238,5 +282,6 @@ ALL_TABLES = [
     CREATE_PORTFOLIOS_TABLE,
     CREATE_PORTFOLIO_SECTORS_TABLE,
     CREATE_PORTFOLIO_STOCKS_TABLE,
+    CREATE_TRADE_SIGNALS_TABLE,
 ]
 

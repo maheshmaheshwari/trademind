@@ -38,8 +38,11 @@ Thumbs.db
 # Data backups (too large for git)
 data/backups/*.csv
 
-# ML Models (downloaded at runtime)
+# ML Models (downloaded at runtime or trained locally)
 models/
+final_models/
+*.pkl
+*.db-shm
 
 # Logs
 *.log

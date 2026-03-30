@@ -9,8 +9,6 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
-import libsql_experimental as libsql
-
 from database.db import get_trade_signals_formatted, get_connection
 
 router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])

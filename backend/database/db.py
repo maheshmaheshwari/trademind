@@ -1,128 +1,102 @@
 """
-Nifty 500 AI — Database Connection & Helper Functions
+TradeMind AI — Database Connection & Helper Functions
 
-Database setup, CRUD operations, and query helpers.
-Uses libsql with Turso cloud sync (embedded replicas).
-Falls back to local-only SQLite if Turso credentials are not set.
+Uses TimescaleDB (PostgreSQL via psycopg2).
+Falls back to local SQLite if PGHOST is not configured.
 
 Usage:
     from database.db import init_database, get_connection, get_prices
-    init_database()  # Creates tables if they don't exist
+    init_database()
 """
 
 import json
 import logging
 import os
-import libsql_experimental as libsql
+import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
-from database.models import ALL_TABLES, CREATE_INDEXES
-
-# Load environment variables
 load_dotenv()
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
-# Database file path (local embedded replica)
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nifty500.db")
 
-# Turso cloud credentials
-TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "")
-TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "")
+PGHOST     = os.getenv("PGHOST", "localhost")
+PGPORT     = int(os.getenv("PGPORT", "5433"))
+PGDATABASE = os.getenv("PGDATABASE", "trademind")
+PGUSER     = os.getenv("PGUSER", "trademind")
+PGPASSWORD = os.getenv("PGPASSWORD", "trademind")
 
-# Detect if Turso is configured
-USE_TURSO = bool(TURSO_DATABASE_URL and TURSO_AUTH_TOKEN)
+# Use PostgreSQL when PGHOST is explicitly set, else fall back to SQLite
+USE_PG = bool(os.getenv("PGHOST"))
 
-# Environment: 'local' writes to local DB only, 'production' syncs with Turso
-ENV = os.getenv("ENV", "local").lower()
 
+# ---------------------------------------------------------------------------
+# Connection helpers
+# ---------------------------------------------------------------------------
 
 def get_connection(sync_on_connect: bool = True):
     """
-    Get a database connection based on the ENV setting.
-
-    - ENV=local  → local-only SQLite, no Turso sync (fast, offline-capable)
-    - ENV=production → Turso-synced embedded replica (reads from local, writes sync to cloud)
-
-    If ENV=production but Turso credentials are missing, falls back to local.
-
-    Args:
-        sync_on_connect: Whether to sync from cloud on connection.
-            Set False during bulk inserts for better performance.
-
-    Returns:
-        Database connection (libsql). Compatible with sqlite3 API.
-
-    Example:
-        conn = get_connection()
-        cursor = conn.execute("SELECT * FROM prices LIMIT 5")
-        rows = cursor.fetchall()
-        conn.close()
+    Return a database connection.
+    - PostgreSQL (psycopg2) when PGHOST is set in .env
+    - SQLite fallback when PGHOST is not set
     """
-    if ENV == "local" or not USE_TURSO:
-        # Local-only: no Turso sync
-        import sqlite3
-        return sqlite3.connect(DB_PATH, timeout=15.0)
-    else:
-        # Production: Turso-synced embedded replica
-        conn = libsql.connect(
-            DB_PATH,
-            sync_url=TURSO_DATABASE_URL,
-            auth_token=TURSO_AUTH_TOKEN,
+    if USE_PG:
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(
+            host=PGHOST, port=PGPORT, dbname=PGDATABASE,
+            user=PGUSER, password=PGPASSWORD,
         )
-        if sync_on_connect:
-            conn.sync()
-    return conn
+        conn.autocommit = False
+        return conn
+    else:
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def get_local_connection():
-    """
-    Get a local-only database connection using standard sqlite3.
-    Used for local data collection to avoid libsql WAL corruption issues.
-    """
-    import sqlite3
-    return sqlite3.connect(DB_PATH, timeout=15.0)
+    """Alias — always returns the active connection (PG or SQLite)."""
+    return get_connection()
 
 
 def get_turso_connection(sync_on_connect: bool = True):
-    """
-    Get a Turso-synced database connection.
-    Used for EOD sync to push local data to Turso cloud.
-    """
-    if not USE_TURSO:
-        logger.warning("Turso not configured, returning local connection")
-        return libsql.connect(DB_PATH)
-    conn = libsql.connect(
-        DB_PATH,
-        sync_url=TURSO_DATABASE_URL,
-        auth_token=TURSO_AUTH_TOKEN,
-    )
-    if sync_on_connect:
-        conn.sync()
-    return conn
+    """Kept for backward compatibility."""
+    return get_connection()
+
+
+def get_remote_turso_connection():
+    """Kept for backward compatibility."""
+    return get_connection()
+
+
+def _placeholder() -> str:
+    """Return the correct SQL placeholder for the active backend."""
+    return "%s" if USE_PG else "?"
 
 
 def _rows_to_dicts(cursor) -> List[Dict]:
-    """
-    Convert cursor results to a list of dicts using cursor.description.
-    libsql returns tuples, not sqlite3.Row objects.
-    """
+    """Convert cursor results to a list of dicts."""
     rows = cursor.fetchall()
-    if not rows or not cursor.description:
+    if not rows:
         return []
-    cols = [d[0] for d in cursor.description]
-    return [dict(zip(cols, row)) for row in rows]
+    if cursor.description:
+        cols = [d[0] for d in cursor.description]
+        return [dict(zip(cols, row)) for row in rows]
+    return []
 
 
 def _row_to_dict(cursor) -> Optional[Dict]:
-    """
-    Convert a single cursor result to a dict.
-    Returns None if no row found.
-    """
+    """Convert a single cursor result to a dict."""
     row = cursor.fetchone()
     if not row or not cursor.description:
         return None
@@ -130,48 +104,94 @@ def _row_to_dict(cursor) -> Optional[Dict]:
     return dict(zip(cols, row))
 
 
+def _execute(conn, sql: str, params: tuple = ()):
+    """
+    Execute a SQL statement with correct placeholder syntax.
+    Translates ? → %s automatically when USE_PG is True.
+    Returns the cursor.
+    """
+    if USE_PG:
+        sql = sql.replace("?", "%s")
+        # Translate SQLite-specific syntax to PostgreSQL
+        sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+        sql = sql.replace("INSERT OR REPLACE INTO", "INSERT INTO")
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return cur
+    else:
+        return conn.execute(sql, params)
+
+
+def _executemany(conn, sql: str, params_list):
+    """Execute a statement for multiple parameter sets."""
+    if USE_PG:
+        import psycopg2.extras
+        sql = sql.replace("?", "%s")
+        sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+        sql = sql.replace("INSERT OR REPLACE INTO", "INSERT INTO")
+        cur = conn.cursor()
+        psycopg2.extras.execute_batch(cur, sql, params_list, page_size=2000)
+        return cur
+    else:
+        return conn.executemany(sql, params_list)
+
+
+def _on_conflict_ignore(sql: str, unique_cols: List[str]) -> str:
+    """
+    Append ON CONFLICT DO NOTHING for PostgreSQL.
+    For SQLite the INSERT OR IGNORE is already in the sql string.
+    """
+    if USE_PG:
+        return sql + " ON CONFLICT DO NOTHING"
+    return sql
+
+
+def _on_conflict_replace(sql: str, unique_cols: List[str], update_cols: List[str]) -> str:
+    """
+    Append ON CONFLICT (...) DO UPDATE for PostgreSQL.
+    For SQLite the INSERT OR REPLACE is already in the sql string.
+    """
+    if USE_PG:
+        conflict = ", ".join(unique_cols)
+        updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+        return sql + f" ON CONFLICT ({conflict}) DO UPDATE SET {updates}"
+    return sql
+
+
+# ---------------------------------------------------------------------------
+# Schema init
+# ---------------------------------------------------------------------------
+
 def init_database() -> None:
     """
-    Initialize the database: create all tables and indexes if they don't exist.
-
-    This is safe to call multiple times — uses CREATE TABLE IF NOT EXISTS.
-
-    Example:
-        from database.db import init_database
-        init_database()
-        print("Database ready!")
+    Create all tables, hypertables, indexes (idempotent).
+    PostgreSQL: uses schema_pg.py
+    SQLite: uses models.py
     """
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-
-        # Create all tables
-        for table_sql in ALL_TABLES:
-            cursor.execute(table_sql)
-
-        # Create indexes
-        for index_sql in CREATE_INDEXES:
-            cursor.execute(index_sql)
-
-        conn.commit()
-        if ENV != "local" and USE_TURSO:
-            conn.sync()
-            logger.info(f"Database initialized — synced to Turso cloud")
-            print(f"☁️  Database initialized — synced to Turso ({TURSO_DATABASE_URL})")
-        else:
-            logger.info(f"Database initialized at {DB_PATH}")
-            print(f"✅ Database initialized at {DB_PATH} (local only)")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        raise
-    finally:
-        conn.close()
+    if USE_PG:
+        from database.schema_pg import init_timescale
+        conn = get_connection()
+        try:
+            init_timescale(conn)
+        finally:
+            conn.close()
+    else:
+        from database.models import ALL_TABLES, CREATE_INDEXES
+        conn = get_connection()
+        try:
+            for sql in ALL_TABLES:
+                conn.execute(sql)
+            for sql in CREATE_INDEXES:
+                conn.execute(sql)
+            conn.commit()
+            print(f"✅ Database initialized at {DB_PATH} (SQLite)")
+        finally:
+            conn.close()
 
 
-# ==========================================
-# INSERT / UPSERT FUNCTIONS
-# ==========================================
-
+# ---------------------------------------------------------------------------
+# INSERT helpers
+# ---------------------------------------------------------------------------
 
 def insert_price(
     symbol: str,
@@ -185,74 +205,43 @@ def insert_price(
     time_val: Optional[str] = None,
     exchange: str = "NSE",
 ) -> bool:
-    """
-    Insert a price row. Skips if duplicate (same symbol + date + time + interval).
-
-    Args:
-        symbol: Stock symbol, e.g. "TCS.NS"
-        date: ISO date string, e.g. "2024-01-15"
-        open_price: Opening price
-        high: Day's high
-        low: Day's low
-        close: Closing price
-        volume: Trading volume
-        interval: Data interval ("1d", "1h", "5m")
-        time_val: Time string for intraday, None for daily
-        exchange: Exchange name, default "NSE"
-
-    Returns:
-        True if inserted, False if duplicate skipped.
-    """
     conn = get_connection()
     try:
-        conn.execute(
-            """INSERT OR IGNORE INTO prices
-            (symbol, exchange, date, time, open, high, low, close, volume, interval)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (symbol, exchange, date, time_val, open_price, high, low, close, volume, interval),
+        sql = _on_conflict_ignore(
+            """INSERT INTO prices
+               (symbol, exchange, date, time, open, high, low, close, volume, interval)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ["symbol", "date", "time", "interval"],
         )
+        _execute(conn, sql, (symbol, exchange, date, time_val, open_price, high, low, close, volume, interval))
         conn.commit()
-        if ENV != "local" and USE_TURSO:
-            conn.sync()
         return True
     except Exception as e:
-        logger.error(f"Error inserting price for {symbol} on {date}: {e}")
+        conn.rollback() if USE_PG else None
+        logger.error(f"insert_price {symbol} {date}: {e}")
         return False
     finally:
         conn.close()
 
 
 def insert_prices_batch(rows: List[Tuple], sync: bool = True) -> int:
-    """
-    Insert multiple price rows at once for better performance.
-    Only syncs to Turso ONCE at the end (not per-row).
-
-    Args:
-        rows: List of tuples (symbol, exchange, date, time, open, high, low, close, volume, interval)
-        sync: Whether to sync to Turso after inserting (set False for mid-pipeline calls)
-
-    Returns:
-        Number of rows inserted (duplicates skipped).
-    """
     if not rows:
         return 0
-
-    conn = get_connection(sync_on_connect=False)
+    conn = get_connection()
     try:
-        for row in rows:
-            conn.execute(
-                """INSERT OR IGNORE INTO prices
-                (symbol, exchange, date, time, open, high, low, close, volume, interval)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                row,
-            )
+        sql = _on_conflict_ignore(
+            """INSERT INTO prices
+               (symbol, exchange, date, time, open, high, low, close, volume, interval)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ["symbol", "date", "time", "interval"],
+        )
+        _executemany(conn, sql, rows)
         conn.commit()
-        if sync and ENV != "local" and USE_TURSO:
-            conn.sync()
         logger.info(f"Batch inserted {len(rows)} price rows")
         return len(rows)
     except Exception as e:
-        logger.error(f"Error in batch insert: {e}")
+        conn.rollback() if USE_PG else None
+        logger.error(f"insert_prices_batch: {e}")
         return 0
     finally:
         conn.close()
@@ -264,22 +253,9 @@ def insert_indicators(
     indicators: Dict[str, Any],
     conn: Optional[Any] = None,
 ) -> bool:
-    """
-    Insert or replace technical indicators for a stock on a date.
-
-    Args:
-        symbol: Stock symbol
-        date: ISO date string
-        indicators: Dict with keys matching column names (rsi_14, macd, etc.)
-        conn: Optional existing DB connection to reuse
-
-    Returns:
-        True if successful.
-    """
     db_conn = conn or get_connection()
     try:
-        db_conn.execute(
-            """INSERT OR REPLACE INTO technical_indicators
+        base_sql = """INSERT INTO technical_indicators
             (symbol, date, rsi_14, macd, macd_signal, macd_hist,
              bb_upper, bb_middle, bb_lower,
              sma_20, sma_50, sma_200, ema_9, ema_21,
@@ -287,42 +263,38 @@ def insert_indicators(
              support_1, support_2, support_3,
              resistance_1, resistance_2, resistance_3,
              signal, signal_strength)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                symbol, date,
-                indicators.get("rsi_14"),
-                indicators.get("macd"),
-                indicators.get("macd_signal"),
-                indicators.get("macd_hist"),
-                indicators.get("bb_upper"),
-                indicators.get("bb_middle"),
-                indicators.get("bb_lower"),
-                indicators.get("sma_20"),
-                indicators.get("sma_50"),
-                indicators.get("sma_200"),
-                indicators.get("ema_9"),
-                indicators.get("ema_21"),
-                indicators.get("atr_14"),
-                indicators.get("adx_14"),
-                indicators.get("stoch_k"),
-                indicators.get("stoch_d"),
-                indicators.get("obv"),
-                indicators.get("support_1"),
-                indicators.get("support_2"),
-                indicators.get("support_3"),
-                indicators.get("resistance_1"),
-                indicators.get("resistance_2"),
-                indicators.get("resistance_3"),
-                indicators.get("signal"),
-                indicators.get("signal_strength"),
-            ),
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        sql = _on_conflict_replace(
+            base_sql, ["symbol", "date"],
+            ["rsi_14", "macd", "macd_signal", "macd_hist",
+             "bb_upper", "bb_middle", "bb_lower",
+             "sma_20", "sma_50", "sma_200", "ema_9", "ema_21",
+             "atr_14", "adx_14", "stoch_k", "stoch_d", "obv",
+             "support_1", "support_2", "support_3",
+             "resistance_1", "resistance_2", "resistance_3",
+             "signal", "signal_strength"],
         )
-        db_conn.commit()
-        if not conn and ENV != "local" and USE_TURSO:
-            db_conn.sync()
+        params = (
+            symbol, date,
+            indicators.get("rsi_14"), indicators.get("macd"),
+            indicators.get("macd_signal"), indicators.get("macd_hist"),
+            indicators.get("bb_upper"), indicators.get("bb_middle"), indicators.get("bb_lower"),
+            indicators.get("sma_20"), indicators.get("sma_50"), indicators.get("sma_200"),
+            indicators.get("ema_9"), indicators.get("ema_21"),
+            indicators.get("atr_14"), indicators.get("adx_14"),
+            indicators.get("stoch_k"), indicators.get("stoch_d"), indicators.get("obv"),
+            indicators.get("support_1"), indicators.get("support_2"), indicators.get("support_3"),
+            indicators.get("resistance_1"), indicators.get("resistance_2"), indicators.get("resistance_3"),
+            indicators.get("signal"), indicators.get("signal_strength"),
+        )
+        _execute(db_conn, sql, params)
+        if not conn:
+            db_conn.commit()
         return True
     except Exception as e:
-        logger.error(f"Error inserting indicators for {symbol} on {date}: {e}")
+        if not conn:
+            db_conn.rollback() if USE_PG else None
+        logger.error(f"insert_indicators {symbol} {date}: {e}")
         return False
     finally:
         if not conn:
@@ -338,85 +310,53 @@ def insert_news(
     confidence: Optional[float] = None,
     url: Optional[str] = None,
 ) -> bool:
-    """
-    Insert a news headline with sentiment score.
-
-    Args:
-        headline: News headline text
-        source: News source name
-        published_at: Publication datetime string
-        symbol: Stock symbol (None for market-wide news)
-        sentiment: "positive", "negative", or "neutral"
-        confidence: Confidence score 0.0 to 1.0
-        url: URL of the article
-
-    Returns:
-        True if successful.
-    """
     conn = get_connection()
     try:
-        conn.execute(
+        _execute(conn,
             """INSERT INTO news_sentiment
-            (headline, source, published_at, symbol, sentiment, confidence, url)
-            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (headline, source, published_at, symbol, sentiment, confidence, url)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (headline, source, published_at, symbol, sentiment, confidence, url),
         )
         conn.commit()
-        if ENV != "local" and USE_TURSO:
-            conn.sync()
         return True
     except Exception as e:
-        logger.error(f"Error inserting news: {e}")
+        conn.rollback() if USE_PG else None
+        logger.error(f"insert_news: {e}")
         return False
     finally:
         conn.close()
 
 
 def insert_market_overview(data: Dict[str, Any]) -> bool:
-    """
-    Insert or replace daily market overview data.
-
-    Args:
-        data: Dict with keys matching column names (date, nifty500_close, etc.)
-
-    Returns:
-        True if successful.
-    """
     conn = get_connection()
     try:
-        conn.execute(
-            """INSERT OR REPLACE INTO market_overview
+        base_sql = """INSERT INTO market_overview
             (date, nifty500_close, nifty500_change_pct,
-             nifty50_close, nifty50_change_pct,
-             sensex_close, india_vix,
-             advances, declines, unchanged,
-             total_volume, fii_net, dii_net,
+             nifty50_close, nifty50_change_pct, sensex_close, india_vix,
+             advances, declines, unchanged, total_volume, fii_net, dii_net,
              overall_sentiment_score, fear_greed_label)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                data["date"],
-                data.get("nifty500_close"),
-                data.get("nifty500_change_pct"),
-                data.get("nifty50_close"),
-                data.get("nifty50_change_pct"),
-                data.get("sensex_close"),
-                data.get("india_vix"),
-                data.get("advances"),
-                data.get("declines"),
-                data.get("unchanged"),
-                data.get("total_volume"),
-                data.get("fii_net"),
-                data.get("dii_net"),
-                data.get("overall_sentiment_score"),
-                data.get("fear_greed_label"),
-            ),
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        sql = _on_conflict_replace(
+            base_sql, ["date"],
+            ["nifty500_close", "nifty500_change_pct", "nifty50_close",
+             "nifty50_change_pct", "sensex_close", "india_vix",
+             "advances", "declines", "unchanged", "total_volume",
+             "fii_net", "dii_net", "overall_sentiment_score", "fear_greed_label"],
         )
+        _execute(conn, sql, (
+            data["date"], data.get("nifty500_close"), data.get("nifty500_change_pct"),
+            data.get("nifty50_close"), data.get("nifty50_change_pct"),
+            data.get("sensex_close"), data.get("india_vix"),
+            data.get("advances"), data.get("declines"), data.get("unchanged"),
+            data.get("total_volume"), data.get("fii_net"), data.get("dii_net"),
+            data.get("overall_sentiment_score"), data.get("fear_greed_label"),
+        ))
         conn.commit()
-        if ENV != "local" and USE_TURSO:
-            conn.sync()
         return True
     except Exception as e:
-        logger.error(f"Error inserting market overview: {e}")
+        conn.rollback() if USE_PG else None
+        logger.error(f"insert_market_overview: {e}")
         return False
     finally:
         conn.close()
@@ -433,47 +373,24 @@ def insert_ai_signal(
     features_used: Optional[Dict] = None,
     conn: Optional[Any] = None,
 ) -> bool:
-    """
-    Insert an AI-generated trading signal.
-
-    Args:
-        symbol: Stock symbol
-        signal: "STRONG BUY", "BUY", "HOLD", "SELL", "STRONG SELL"
-        confidence: Confidence score 0 to 100
-        model_version: Version string of the model
-        target_price: Suggested target price
-        stop_loss: Suggested stop loss price
-        reasoning: List of reason strings
-        features_used: Dict of feature values used
-        conn: Optional existing DB connection to reuse
-
-    Returns:
-        True if successful.
-    """
     db_conn = conn or get_connection()
     try:
-        db_conn.execute(
+        _execute(db_conn,
             """INSERT INTO ai_signals
-            (symbol, signal, confidence, model_version,
-             target_price, stop_loss, reasoning, features_used)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                symbol,
-                signal,
-                confidence,
-                model_version,
-                target_price,
-                stop_loss,
-                json.dumps(reasoning) if reasoning else None,
-                json.dumps(features_used) if features_used else None,
-            ),
+               (symbol, signal, confidence, model_version,
+                target_price, stop_loss, reasoning, features_used)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (symbol, signal, confidence, model_version, target_price, stop_loss,
+             json.dumps(reasoning) if reasoning else None,
+             json.dumps(features_used) if features_used else None),
         )
-        db_conn.commit()
-        if not conn and ENV != "local" and USE_TURSO:
-            db_conn.sync()
+        if not conn:
+            db_conn.commit()
         return True
     except Exception as e:
-        logger.error(f"Error inserting AI signal for {symbol}: {e}")
+        if not conn:
+            db_conn.rollback() if USE_PG else None
+        logger.error(f"insert_ai_signal {symbol}: {e}")
         return False
     finally:
         if not conn:
@@ -486,256 +403,80 @@ def insert_trade_signals_batch(
     generated_at: str,
     sync: bool = True,
 ) -> int:
-    """
-    Bulk-upsert trade signals into the trade_signals table.
-    Uses INSERT OR REPLACE to deduplicate on (symbol, generated_date).
-
-    Args:
-        trades: List of trade dicts from generate_trades.py
-        generated_date: YYYY-MM-DD date string
-        generated_at: Full timestamp string
-        sync: Whether to sync to Turso after inserting
-
-    Returns:
-        Number of trades stored.
-    """
     if not trades:
         return 0
-
-    # Use local-only connection in local env to avoid per-write Turso sync
-    if ENV == "local":
-        conn = get_local_connection()
-    else:
-        conn = get_connection(sync_on_connect=False)
-
+    conn = get_connection()
     try:
+        base_sql = """INSERT INTO trade_signals
+            (symbol, name, signal, confidence, trade_type,
+             buy_price, target_price, stop_loss, risk_reward, expected_return_pct,
+             current_price, atr_14, atr_pct,
+             avg_daily_volume, daily_turnover_cr, liquidity,
+             max_safe_qty, max_qty_per_user, max_investment_per_user, min_qty,
+             recommended_volume, consumed_volume,
+             model_name, model_horizon, model_accuracy, model_precision,
+             top_drivers, sentiment, generated_date, generated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        sql = _on_conflict_replace(
+            base_sql, ["symbol", "generated_date"],
+            ["signal", "confidence", "trade_type", "buy_price", "target_price",
+             "stop_loss", "risk_reward", "expected_return_pct", "current_price",
+             "atr_14", "atr_pct", "model_name", "model_horizon",
+             "model_accuracy", "model_precision", "top_drivers", "sentiment", "generated_at"],
+        )
         count = 0
         for t in trades:
-            conn.execute(
-                """INSERT OR REPLACE INTO trade_signals
-                (symbol, name, signal, confidence, trade_type,
-                 buy_price, target_price, stop_loss, risk_reward, expected_return_pct,
-                 current_price, atr_14, atr_pct,
-                 avg_daily_volume, daily_turnover_cr, liquidity,
-                 max_safe_qty, max_qty_per_user, max_investment_per_user, min_qty,
-                 recommended_volume, consumed_volume,
-                 model_name, model_horizon, model_accuracy, model_precision,
-                 top_drivers, sentiment,
-                 generated_date, generated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    t["symbol"],
-                    t.get("name", ""),
-                    t["signal"],
-                    t.get("confidence"),
-                    t.get("trade", {}).get("type"),
-                    t.get("trade", {}).get("buy_price"),
-                    t.get("trade", {}).get("target_price"),
-                    t.get("trade", {}).get("stop_loss"),
-                    t.get("trade", {}).get("risk_reward"),
-                    t.get("trade", {}).get("expected_return_pct"),
-                    t.get("price", {}).get("current"),
-                    t.get("price", {}).get("atr_14"),
-                    t.get("price", {}).get("atr_pct"),
-                    t.get("position", {}).get("avg_daily_volume"),
-                    t.get("position", {}).get("daily_turnover_cr"),
-                    t.get("position", {}).get("liquidity"),
-                    t.get("position", {}).get("max_safe_qty"),
-                    t.get("position", {}).get("max_qty_per_user"),
-                    t.get("position", {}).get("max_investment_per_user"),
-                    t.get("position", {}).get("min_qty"),
-                    t.get("position", {}).get("recommended_volume"),
-                    0,  # consumed_volume resets to 0 for fresh signals
-                    t.get("model", {}).get("name"),
-                    t.get("model", {}).get("horizon"),
-                    t.get("model", {}).get("accuracy"),
-                    t.get("model", {}).get("precision"),
-                    json.dumps(t.get("top_drivers", [])),
-                    json.dumps(t.get("sentiment", {})),
-                    generated_date,
-                    generated_at,
-                ),
-            )
+            _execute(conn, sql, (
+                t["symbol"], t.get("name", ""), t["signal"], t.get("confidence"),
+                t.get("trade", {}).get("type"),
+                t.get("trade", {}).get("buy_price"), t.get("trade", {}).get("target_price"),
+                t.get("trade", {}).get("stop_loss"), t.get("trade", {}).get("risk_reward"),
+                t.get("trade", {}).get("expected_return_pct"),
+                t.get("price", {}).get("current"),
+                t.get("price", {}).get("atr_14"), t.get("price", {}).get("atr_pct"),
+                t.get("position", {}).get("avg_daily_volume"),
+                t.get("position", {}).get("daily_turnover_cr"),
+                t.get("position", {}).get("liquidity"),
+                t.get("position", {}).get("max_safe_qty"),
+                t.get("position", {}).get("max_qty_per_user"),
+                t.get("position", {}).get("max_investment_per_user"),
+                t.get("position", {}).get("min_qty"),
+                t.get("position", {}).get("recommended_volume"), 0,
+                t.get("model", {}).get("name"), t.get("model", {}).get("horizon"),
+                t.get("model", {}).get("accuracy"), t.get("model", {}).get("precision"),
+                json.dumps(t.get("top_drivers", [])),
+                json.dumps(t.get("sentiment", {})),
+                generated_date, generated_at,
+            ))
             count += 1
-
         conn.commit()
-        if sync and ENV != "local" and USE_TURSO:
-            conn.sync()
         logger.info(f"Stored {count} trade signals for {generated_date}")
         return count
     except Exception as e:
-        logger.error(f"Error inserting trade signals: {e}")
+        conn.rollback() if USE_PG else None
+        logger.error(f"insert_trade_signals_batch: {e}")
         return 0
-    finally:
-        conn.close()
-
-
-def get_remote_turso_connection():
-    """
-    Get a pure remote Turso connection over HTTP.
-    Does NOT use a local SQLite replica, avoiding WAL sync issues.
-    Used by the API server to read trade signals directly from cloud.
-    """
-    if not USE_TURSO:
-        logger.warning("Turso not configured, returning local connection")
-        return libsql.connect(DB_PATH)
-    return libsql.connect(
-        database=TURSO_DATABASE_URL,
-        auth_token=TURSO_AUTH_TOKEN
-    )
-
-
-def get_trade_signals(
-    date: Optional[str] = None,
-    signal_type: Optional[str] = None,
-    limit: int = 100,
-) -> List[Dict]:
-    """
-    Query trade signals with optional filters from local database.
-
-    Args:
-        date: Filter by generated_date (YYYY-MM-DD). None = latest date.
-        signal_type: Filter by signal (e.g. "BUY", "STRONG BUY").
-        limit: Max number of results.
-
-    Returns:
-        List of trade signal dicts sorted by confidence descending.
-    """
-    # Use local DB connection (Turso quota exceeded)
-    conn = get_local_connection()
-    try:
-        if date is None:
-            # Get the latest date
-            row = conn.execute(
-                "SELECT MAX(generated_date) FROM trade_signals"
-            ).fetchone()
-            date = row[0] if row and row[0] else datetime.now().strftime("%Y-%m-%d")
-
-        # Volume filter: hide signals where consumed_volume >= recommended_volume
-        vol_filter = "AND (consumed_volume < recommended_volume OR recommended_volume IS NULL OR consumed_volume IS NULL)"
-
-        if signal_type:
-            cur = conn.execute(
-                f"""SELECT * FROM trade_signals
-                WHERE generated_date = ? AND signal LIKE ? {vol_filter}
-                ORDER BY confidence DESC
-                LIMIT ?""",
-                (date, f"%{signal_type}%", limit),
-            )
-        else:
-            cur = conn.execute(
-                f"""SELECT * FROM trade_signals
-                WHERE generated_date = ? {vol_filter}
-                ORDER BY confidence DESC
-                LIMIT ?""",
-                (date, limit),
-            )
-        return _rows_to_dicts(cur)
-    except Exception as e:
-        logger.error(f"Error fetching trade signals: {e}")
-        return []
     finally:
         conn.close()
 
 
 def sync_trade_signals_to_turso() -> int:
-    """
-    Sync trade_signals from local DB to Turso cloud.
-    Called by the EOD sync scheduler job.
-
-    Reads unsent trade signals from local DB and pushes them
-    to Turso via a synced connection.
-
-    Returns:
-        Number of rows synced.
-    """
-    if not USE_TURSO:
-        logger.warning("Turso not configured — skipping sync")
-        return 0
-
-    # Read from local
-    local_conn = get_local_connection()
-    try:
-        rows = local_conn.execute(
-            "SELECT * FROM trade_signals"
-        ).fetchall()
-        cols = [d[0] for d in local_conn.execute(
-            "SELECT * FROM trade_signals LIMIT 1"
-        ).description]
-    finally:
-        local_conn.close()
-
-    if not rows:
-        logger.info("No trade signals to sync")
-        return 0
-
-    # Push to Turso
-    turso_conn = get_turso_connection(sync_on_connect=True)
-    try:
-        # Ensure table exists
-        from database.models import CREATE_TRADE_SIGNALS_TABLE
-        turso_conn.execute(CREATE_TRADE_SIGNALS_TABLE)
-        turso_conn.commit()
-
-        cols_no_id = [c for c in cols if c != "id"]
-        id_idx = cols.index("id") if "id" in cols else None
-
-        count = 0
-        for row in rows:
-            values = [row[i] for i in range(len(cols)) if cols[i] != "id"]
-            placeholders = ",".join(["?" for _ in cols_no_id])
-            turso_conn.execute(
-                f"INSERT OR REPLACE INTO trade_signals ({','.join(cols_no_id)}) VALUES ({placeholders})",
-                tuple(values),
-            )
-            count += 1
-
-        turso_conn.commit()
-        turso_conn.sync()
-        logger.info(f"Synced {count} trade signals to Turso")
-        return count
-    except Exception as e:
-        logger.error(f"Error syncing trade signals to Turso: {e}")
-        return 0
-    finally:
-        turso_conn.close()
+    """No-op — kept for scheduler compatibility."""
+    return 0
 
 
-# ==========================================
-# QUERY HELPER FUNCTIONS
-# ==========================================
+# ---------------------------------------------------------------------------
+# QUERY helpers
+# ---------------------------------------------------------------------------
 
-
-def get_prices(
-    symbol: str,
-    days: int = 90,
-    interval: str = "1d",
-) -> List[Dict]:
-    """
-    Get price history for a stock.
-
-    Args:
-        symbol: Stock symbol, e.g. "TCS.NS"
-        days: Number of days to look back (default 90)
-        interval: Data interval ("1d", "1h", "5m")
-
-    Returns:
-        List of dicts with date, open, high, low, close, volume keys.
-
-    Example:
-        prices = get_prices("TCS.NS", days=30)
-        for p in prices:
-            print(f"{p['date']}: Close={p['close']}")
-    """
+def get_prices(symbol: str, days: int = 90, interval: str = "1d") -> List[Dict]:
     start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-
     conn = get_connection()
     try:
-        cur = conn.execute(
-            """SELECT date, open, high, low, close, volume
-            FROM prices
-            WHERE symbol = ? AND interval = ? AND date >= ?
-            ORDER BY date ASC""",
+        cur = _execute(conn,
+            """SELECT date, open, high, low, close, volume FROM prices
+               WHERE symbol = ? AND interval = ? AND date >= ?
+               ORDER BY date ASC""",
             (symbol, interval, start_date),
         )
         return _rows_to_dicts(cur)
@@ -744,25 +485,13 @@ def get_prices(
 
 
 def get_all_prices_df(symbol: str, days: int = 365) -> List[Dict]:
-    """
-    Get all OHLCV data for a symbol as a list of dicts (for DataFrame creation).
-
-    Args:
-        symbol: Stock symbol
-        days: Number of days to look back
-
-    Returns:
-        List of dicts with all price columns.
-    """
     start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-
     conn = get_connection()
     try:
-        cur = conn.execute(
-            """SELECT date, open, high, low, close, volume
-            FROM prices
-            WHERE symbol = ? AND interval = '1d' AND date >= ?
-            ORDER BY date ASC""",
+        cur = _execute(conn,
+            """SELECT date, open, high, low, close, volume FROM prices
+               WHERE symbol = ? AND interval = '1d' AND date >= ?
+               ORDER BY date ASC""",
             (symbol, start_date),
         )
         return _rows_to_dicts(cur)
@@ -771,27 +500,11 @@ def get_all_prices_df(symbol: str, days: int = 365) -> List[Dict]:
 
 
 def get_latest_indicators(symbol: str) -> Optional[Dict]:
-    """
-    Get the most recent technical indicators for a stock.
-
-    Args:
-        symbol: Stock symbol
-
-    Returns:
-        Dict with all indicator values, or None if not found.
-
-    Example:
-        indicators = get_latest_indicators("TCS.NS")
-        if indicators:
-            print(f"RSI: {indicators['rsi_14']}, Signal: {indicators['signal']}")
-    """
     conn = get_connection()
     try:
-        cur = conn.execute(
+        cur = _execute(conn,
             """SELECT * FROM technical_indicators
-            WHERE symbol = ?
-            ORDER BY date DESC
-            LIMIT 1""",
+               WHERE symbol = ? ORDER BY date DESC LIMIT 1""",
             (symbol,),
         )
         return _row_to_dict(cur)
@@ -799,35 +512,17 @@ def get_latest_indicators(symbol: str) -> Optional[Dict]:
         conn.close()
 
 
-def get_recent_news(
-    limit: int = 20,
-    symbol: Optional[str] = None,
-) -> List[Dict]:
-    """
-    Get recent news headlines with sentiment.
-
-    Args:
-        limit: Maximum number of articles to return
-        symbol: Filter by stock symbol (None for all news)
-
-    Returns:
-        List of dicts with headline, source, sentiment, confidence, etc.
-    """
+def get_recent_news(limit: int = 20, symbol: Optional[str] = None) -> List[Dict]:
     conn = get_connection()
     try:
         if symbol:
-            cur = conn.execute(
-                """SELECT * FROM news_sentiment
-                WHERE symbol = ?
-                ORDER BY published_at DESC
-                LIMIT ?""",
+            cur = _execute(conn,
+                "SELECT * FROM news_sentiment WHERE symbol = ? ORDER BY published_at DESC LIMIT ?",
                 (symbol, limit),
             )
         else:
-            cur = conn.execute(
-                """SELECT * FROM news_sentiment
-                ORDER BY published_at DESC
-                LIMIT ?""",
+            cur = _execute(conn,
+                "SELECT * FROM news_sentiment ORDER BY published_at DESC LIMIT ?",
                 (limit,),
             )
         return _rows_to_dicts(cur)
@@ -836,23 +531,11 @@ def get_recent_news(
 
 
 def get_market_overview(days: int = 30) -> List[Dict]:
-    """
-    Get market overview history.
-
-    Args:
-        days: Number of days to look back
-
-    Returns:
-        List of dicts with daily market overview data.
-    """
     start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-
     conn = get_connection()
     try:
-        cur = conn.execute(
-            """SELECT * FROM market_overview
-            WHERE date >= ?
-            ORDER BY date DESC""",
+        cur = _execute(conn,
+            "SELECT * FROM market_overview WHERE date >= ? ORDER BY date DESC",
             (start_date,),
         )
         return _rows_to_dicts(cur)
@@ -860,118 +543,169 @@ def get_market_overview(days: int = 30) -> List[Dict]:
         conn.close()
 
 
-def get_top_signals(
-    signal_type: str = "BUY",
-    limit: int = 10,
-) -> List[Dict]:
-    """
-    Get top AI trade signals sorted by confidence from local DB.
-
-    Args:
-        signal_type: Filter by signal type ("BUY", "STRONG BUY", "SELL", etc.)
-        limit: Maximum number of results
-
-    Returns:
-        List of dicts with signal data.
-    """
-    conn = get_local_connection()
+def get_top_signals(signal_type: str = "BUY", limit: int = 10) -> List[Dict]:
+    conn = get_connection()
     try:
-        # Get today's date
         today = datetime.now().strftime("%Y-%m-%d")
-
-        cur = conn.execute(
-            """SELECT * FROM trade_signals
-            WHERE signal LIKE ?
-            AND generated_date = ?
-            ORDER BY confidence DESC
-            LIMIT ?""",
-            (f"%{signal_type}%", today, limit),
+        like_val = f"%{signal_type}%"
+        cur = _execute(conn,
+            """SELECT * FROM trade_signals WHERE signal LIKE ? AND generated_date = ?
+               ORDER BY confidence DESC LIMIT ?""",
+            (like_val, today, limit),
         )
         results = _rows_to_dicts(cur)
-
-        # If no signals today, get the most recent ones
         if not results:
-            cur = conn.execute(
-                """SELECT * FROM trade_signals
-                WHERE signal LIKE ?
-                ORDER BY generated_date DESC, confidence DESC
-                LIMIT ?""",
-                (f"%{signal_type}%", limit),
+            cur = _execute(conn,
+                """SELECT * FROM trade_signals WHERE signal LIKE ?
+                   ORDER BY generated_date DESC, confidence DESC LIMIT ?""",
+                (like_val, limit),
             )
             results = _rows_to_dicts(cur)
-
         return results
     finally:
         conn.close()
 
 
+def get_trade_signals(
+    date: Optional[str] = None,
+    signal_type: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict]:
+    conn = get_connection()
+    try:
+        if date is None:
+            cur = _execute(conn, "SELECT MAX(generated_date) FROM trade_signals", ())
+            row = cur.fetchone()
+            date = row[0] if row and row[0] else datetime.now().strftime("%Y-%m-%d")
+
+        vol_filter = "AND (consumed_volume < recommended_volume OR recommended_volume IS NULL OR consumed_volume IS NULL)"
+
+        if signal_type:
+            cur = _execute(conn,
+                f"SELECT * FROM trade_signals WHERE generated_date = ? AND signal LIKE ? {vol_filter} ORDER BY confidence DESC LIMIT ?",
+                (date, f"%{signal_type}%", limit),
+            )
+        else:
+            cur = _execute(conn,
+                f"SELECT * FROM trade_signals WHERE generated_date = ? {vol_filter} ORDER BY confidence DESC LIMIT ?",
+                (date, limit),
+            )
+        return _rows_to_dicts(cur)
+    except Exception as e:
+        logger.error(f"get_trade_signals: {e}")
+        return []
+    finally:
+        conn.close()
+
+
 def get_db_stats() -> Dict[str, int]:
-    """
-    Get row counts for all tables — useful for status checks.
-
-    Returns:
-        Dict mapping table name to row count.
-
-    Example:
-        stats = get_db_stats()
-        print(f"Prices: {stats['prices']} rows")
-        print(f"Indicators: {stats['technical_indicators']} rows")
-    """
-    tables = ["prices", "technical_indicators", "news_sentiment", "market_overview", "ai_signals", "trade_signals"]
+    tables = ["prices", "technical_indicators", "news_sentiment",
+              "market_overview", "ai_signals", "trade_signals"]
     conn = get_connection()
     try:
         stats = {}
         for table in tables:
-            count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            stats[table] = count
+            cur = _execute(conn, f"SELECT COUNT(*) FROM {table}", ())
+            stats[table] = cur.fetchone()[0]
         return stats
     finally:
         conn.close()
 
 
 def get_all_symbols() -> List[str]:
-    """
-    Get all unique stock symbols that have price data in the database.
-
-    Returns:
-        List of symbol strings.
-    """
     conn = get_connection()
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT symbol FROM prices WHERE interval = '1d' ORDER BY symbol"
-        ).fetchall()
-        return [row[0] for row in rows]
+        cur = _execute(conn,
+            "SELECT DISTINCT symbol FROM prices WHERE interval = '1d' ORDER BY symbol", (),
+        )
+        return [row[0] for row in cur.fetchall()]
     finally:
         conn.close()
 
 
 def get_latest_date(symbol: str) -> Optional[str]:
-    """
-    Get the most recent date for which we have price data for a symbol.
-
-    Args:
-        symbol: Stock symbol
-
-    Returns:
-        Date string or None if no data exists.
-    """
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT MAX(date) as latest FROM prices WHERE symbol = ? AND interval = '1d'",
+        cur = _execute(conn,
+            "SELECT MAX(date) FROM prices WHERE symbol = ? AND interval = '1d'",
             (symbol,),
-        ).fetchone()
-        return row[0] if row and row[0] else None
+        )
+        row = cur.fetchone()
+        val = row[0] if row and row[0] else None
+        # psycopg2 returns date objects; convert to string
+        return str(val) if val else None
+    finally:
+        conn.close()
+
+
+def get_trade_signals_formatted(
+    signal_filter: Optional[List[str]] = None,
+    date: Optional[str] = None,
+) -> Dict:
+    conn = get_connection()
+    try:
+        if date is None:
+            cur = _execute(conn, "SELECT MAX(generated_date) FROM trade_signals", ())
+            row = cur.fetchone()
+            date = str(row[0]) if row and row[0] else datetime.now().strftime("%Y-%m-%d")
+
+        cur = _execute(conn,
+            "SELECT * FROM trade_signals WHERE generated_date = ? ORDER BY confidence DESC",
+            (date,),
+        )
+        rows = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    formatted = [_format_trade_signal(r) for r in rows]
+    if signal_filter:
+        formatted = [t for t in formatted if t.get("signal") in signal_filter]
+
+    actionable, avoid, hold = [], [], []
+    for t in formatted:
+        sig = t.get("signal", "")
+        if "BUY" in sig:
+            actionable.append(t)
+        elif "SELL" in sig:
+            avoid.append(t)
+        else:
+            hold.append(t)
+
+    return {
+        "date": str(date),
+        "trades": formatted,
+        "actionable_trades": actionable,
+        "avoid_list": avoid,
+        "hold_list": hold,
+        "summary": {
+            "total": len(formatted),
+            "actionable": len(actionable),
+            "avoid": len(avoid),
+            "hold": len(hold),
+            "generated_date": str(date),
+        },
+    }
+
+
+def get_signal_history(limit: int = 30) -> List[Dict]:
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            """SELECT generated_date, MAX(generated_at) as generated_at,
+               COUNT(*) as total_signals,
+               SUM(CASE WHEN signal LIKE '%BUY%' THEN 1 ELSE 0 END) as buy_count,
+               SUM(CASE WHEN signal LIKE '%SELL%' THEN 1 ELSE 0 END) as sell_count
+               FROM trade_signals
+               GROUP BY generated_date
+               ORDER BY generated_date DESC LIMIT ?""",
+            (limit,),
+        )
+        return _rows_to_dicts(cur)
     finally:
         conn.close()
 
 
 def _format_trade_signal(row: Dict) -> Dict:
-    """
-    Reshape a flat trade_signals DB row into the nested format
-    the frontend expects (matching the old JSON file structure).
-    """
     return {
         "symbol": row.get("symbol"),
         "name": row.get("name"),
@@ -999,7 +733,7 @@ def _format_trade_signal(row: Dict) -> Dict:
             "max_investment_per_user": row.get("max_investment_per_user"),
             "min_qty": row.get("min_qty"),
             "recommended_volume": row.get("recommended_volume"),
-            "consumed_volume": row.get("consumed_volume", 0),
+            "consumed_volume": row.get("consumed_volume"),
         },
         "model": {
             "name": row.get("model_name"),
@@ -1007,117 +741,8 @@ def _format_trade_signal(row: Dict) -> Dict:
             "accuracy": row.get("model_accuracy"),
             "precision": row.get("model_precision"),
         },
-        "top_drivers": json.loads(row["top_drivers"]) if row.get("top_drivers") else [],
-        "sentiment": json.loads(row["sentiment"]) if row.get("sentiment") else {},
-        "generated_at": row.get("generated_at"),
+        "top_drivers": json.loads(row.get("top_drivers") or "[]"),
+        "sentiment": json.loads(row.get("sentiment") or "{}"),
+        "generated_date": str(row.get("generated_date") or ""),
+        "generated_at": str(row.get("generated_at") or ""),
     }
-
-
-def get_trade_signals_formatted(
-    date: Optional[str] = None,
-    signal_filter: Optional[List[str]] = None,
-    limit: int = 200,
-) -> Dict:
-    """
-    Query trade signals from DB and return in the nested format
-    matching the old JSON file structure.
-
-    Args:
-        date: Filter by generated_date (None = latest date).
-        signal_filter: List of signal types to include, e.g. ["STRONG BUY", "BUY"].
-        limit: Max results.
-
-    Returns:
-        Dict with generated_at, trades, actionable_trades, avoid_list, hold_list, summary.
-    """
-    conn = get_connection(sync_on_connect=False)
-    try:
-        # Determine the date to query
-        if date is None:
-            row = conn.execute(
-                "SELECT MAX(generated_date) FROM trade_signals"
-            ).fetchone()
-            date = row[0] if row and row[0] else datetime.now().strftime("%Y-%m-%d")
-
-        # Volume filter: hide signals where consumed_volume >= recommended_volume
-        vol_filter = "AND (consumed_volume < recommended_volume OR recommended_volume IS NULL OR consumed_volume IS NULL)"
-
-        # Build query
-        if signal_filter:
-            placeholders = ",".join(["?" for _ in signal_filter])
-            cur = conn.execute(
-                f"""SELECT * FROM trade_signals
-                WHERE generated_date = ? AND signal IN ({placeholders}) {vol_filter}
-                ORDER BY confidence DESC
-                LIMIT ?""",
-                (date, *signal_filter, limit),
-            )
-        else:
-            cur = conn.execute(
-                f"""SELECT * FROM trade_signals
-                WHERE generated_date = ? {vol_filter}
-                ORDER BY confidence DESC
-                LIMIT ?""",
-                (date, limit),
-            )
-
-        rows = _rows_to_dicts(cur)
-        trades = [_format_trade_signal(r) for r in rows]
-
-        # Categorize
-        actionable = [t for t in trades if t["signal"] in ("STRONG BUY", "BUY")]
-        avoid = [t for t in trades if t["signal"] in ("SELL", "STRONG SELL")]
-        hold = [t for t in trades if t["signal"] == "HOLD"]
-
-        # Summary counts
-        summary = {
-            "total": len(trades),
-            "strong_buy": sum(1 for t in trades if t["signal"] == "STRONG BUY"),
-            "buy": sum(1 for t in trades if t["signal"] == "BUY"),
-            "hold": sum(1 for t in trades if t["signal"] == "HOLD"),
-            "sell": sum(1 for t in trades if t["signal"] == "SELL"),
-            "strong_sell": sum(1 for t in trades if t["signal"] == "STRONG SELL"),
-        }
-
-        # Get generated_at from first row
-        generated_at = rows[0].get("generated_at") if rows else None
-
-        return {
-            "generated_at": generated_at,
-            "generated_date": date,
-            "total_signals": len(trades),
-            "summary": summary,
-            "trades": trades,
-            "actionable_trades": actionable,
-            "avoid_list": avoid,
-            "hold_list": hold,
-        }
-    finally:
-        conn.close()
-
-
-def get_signal_history(limit: int = 30) -> List[Dict]:
-    """
-    Get trade signal runs grouped by generated_date.
-
-    Returns:
-        List of dicts with date, total signals, and breakdown.
-    """
-    conn = get_connection(sync_on_connect=False)
-    try:
-        cur = conn.execute(
-            """SELECT generated_date,
-                      COUNT(*) as total,
-                      SUM(CASE WHEN signal IN ('STRONG BUY','BUY') THEN 1 ELSE 0 END) as buys,
-                      SUM(CASE WHEN signal IN ('SELL','STRONG SELL') THEN 1 ELSE 0 END) as sells,
-                      SUM(CASE WHEN signal = 'HOLD' THEN 1 ELSE 0 END) as holds,
-                      MAX(generated_at) as generated_at
-               FROM trade_signals
-               GROUP BY generated_date
-               ORDER BY generated_date DESC
-               LIMIT ?""",
-            (limit,),
-        )
-        return _rows_to_dicts(cur)
-    finally:
-        conn.close()

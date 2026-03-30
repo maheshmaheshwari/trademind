@@ -38,12 +38,14 @@ logger = logging.getLogger(__name__)
 
 
 def collect_eod_data_job():
-    """Daily job: collect end-of-day prices for all stocks via Angel One."""
+    """Daily job: collect end-of-day prices for all stocks via Angel One (smart date detection)."""
     logger.info("⏰ Running EOD data collection (Angel One)...")
     try:
-        from collectors.angel_collector import collect_eod_angel
-        result = collect_eod_angel(days=5)
-        logger.info(f"EOD collection done: {result}")
+        from update_stocks_angel import main as run_eod
+        import sys
+        sys.argv = ["update_stocks_angel.py", "--days", "2"]
+        run_eod()
+        logger.info("EOD collection done")
     except Exception as e:
         logger.error(f"EOD collection failed: {e}")
 
@@ -190,6 +192,50 @@ def price_monitor_job():
         logger.error(f"Price monitor failed: {e}")
 
 
+def collect_index_data_eod_job():
+    """Daily job: collect NIFTY50, NIFTY500, SENSEX, INDIA VIX via Angel One."""
+    logger.info("⏰ Running index + market overview collection...")
+    try:
+        from collectors.index_collector import collect_index_daily
+        collect_index_daily()
+        logger.info("Index data collection done")
+    except Exception as e:
+        logger.error(f"Index data collection failed: {e}")
+
+
+def collect_intraday_30m_job():
+    """Every 30 min during market hours: fetch 30-min candles for open positions."""
+    logger.info("⏰ Running intraday 30-min collection...")
+    try:
+        from collectors.intraday_collector import collect_intraday
+        count = collect_intraday(interval="THIRTY_MINUTE")
+        logger.info(f"Intraday 30m done: {count} candles saved")
+    except Exception as e:
+        logger.error(f"Intraday 30m collection failed: {e}")
+
+
+def collect_av_news_job():
+    """Daily job: fetch Alpha Vantage news sentiment (25 stocks/day free tier)."""
+    logger.info("⏰ Running Alpha Vantage news collection...")
+    try:
+        from collectors.alphavantage_collector import collect_av_batch
+        result = collect_av_batch()
+        logger.info(f"Alpha Vantage news done: {result}")
+    except Exception as e:
+        logger.error(f"Alpha Vantage news collection failed: {e}")
+
+
+def score_pending_news_job():
+    """Hourly job: run FinBERT on any unscored news articles."""
+    logger.info("⏰ Scoring pending news with FinBERT...")
+    try:
+        from collectors.gdelt_collector import score_pending_news
+        count = score_pending_news(batch_limit=500)
+        logger.info(f"FinBERT scoring done: {count} articles scored")
+    except Exception as e:
+        logger.error(f"News scoring failed: {e}")
+
+
 def sync_gtt_status_job():
     """Every 5 min: sync GTT rule statuses from Angel One to local DB."""
     logger.info("⏰ Syncing GTT statuses from Angel One...")
@@ -285,131 +331,8 @@ def start_scheduler() -> None:
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
     scheduler.add_listener(before_job, EVENT_JOB_SUBMITTED)
 
-    # ==========================================
-    # DAILY JOBS — 4:00 PM IST (after market close)
-    # ==========================================
-    scheduler.add_job(
-        collect_eod_data_job,
-        CronTrigger(hour=16, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="eod_data",
-        name="EOD Price Collection",
-        misfire_grace_time=3600,
-    )
-
-    scheduler.add_job(
-        collect_index_data_job,
-        CronTrigger(hour=16, minute=5, day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="index_data",
-        name="Index Data Collection",
-        misfire_grace_time=3600,
-    )
-
-    scheduler.add_job(
-        calculate_indicators_job,
-        CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="indicators",
-        name="Calculate Indicators",
-        misfire_grace_time=3600,
-    )
-
-    scheduler.add_job(
-        collect_news_job,
-        CronTrigger(hour=16, minute=45, day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="daily_news",
-        name="Daily News Collection",
-        misfire_grace_time=3600,
-    )
-
-    scheduler.add_job(
-        collect_fii_data_job,
-        CronTrigger(hour=17, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="fii_dii",
-        name="FII/DII Data",
-        misfire_grace_time=3600,
-    )
-
-    # ==========================================
-    # HOURLY JOBS — 9 AM to 4 PM IST, weekdays
-    # ==========================================
-    scheduler.add_job(
-        collect_news_job,
-        CronTrigger(hour="9-16", minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="hourly_news",
-        name="Hourly News Refresh",
-        misfire_grace_time=1800,
-    )
-
-    # ==========================================
-    # INTRADAY JOBS — Market Hours (9:15 AM – 3:30 PM)
-    # ==========================================
-
-    # Every 30 min: fetch 30-min candle data for positions
-    scheduler.add_job(
-        intraday_price_fetch_job,
-        CronTrigger(hour="9-15", minute="15,45", day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="intraday_30min",
-        name="Intraday 30-Min Candle Fetch",
-        misfire_grace_time=600,
-    )
-
-    # Every 5 min: check SL/Target triggers with live LTP (paper positions)
-    scheduler.add_job(
-        price_monitor_job,
-        CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="price_monitor",
-        name="Price Monitor (SL/Target)",
-        misfire_grace_time=300,
-    )
-
-    # Every 5 min: sync GTT statuses from Angel One (live positions)
-    scheduler.add_job(
-        sync_gtt_status_job,
-        CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="gtt_sync",
-        name="GTT Status Sync (Angel One)",
-        misfire_grace_time=300,
-    )
-
-    # ==========================================
-    # WEEKLY JOBS — Sunday 8 PM IST
-    # ==========================================
-    scheduler.add_job(
-        cleanup_old_data_job,
-        CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="Asia/Kolkata"),
-        id="cleanup",
-        name="Weekly Data Cleanup",
-        misfire_grace_time=7200,
-    )
-
-    scheduler.add_job(
-        verify_data_integrity_job,
-        CronTrigger(day_of_week="sun", hour=20, minute=30, timezone="Asia/Kolkata"),
-        id="integrity",
-        name="Weekly Data Integrity Check",
-        misfire_grace_time=7200,
-    )
-
-    # ==========================================
-    # TRADE SIGNAL JOBS
-    # ==========================================
-    scheduler.add_job(
-        generate_trade_signals_job,
-        CronTrigger(hour=17, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="trade_signals",
-        name="Generate Trade Signals",
-        misfire_grace_time=3600,
-    )
-
-    # ==========================================
-    # EOD TURSO SYNC
-    # ==========================================
-    scheduler.add_job(
-        sync_to_turso_job,
-        CronTrigger(hour=20, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"),
-        id="eod_turso_sync",
-        name="EOD Turso Cloud Sync",
-        misfire_grace_time=3600,
-    )
+    # Delegate to _add_all_jobs so blocking and background schedulers stay in sync
+    _add_all_jobs(scheduler)
 
     # ==========================================
     # PRINT SCHEDULE TABLE WITH NEXT RUN TIMES
@@ -444,28 +367,45 @@ _bg_scheduler: BackgroundScheduler | None = None
 
 def _add_all_jobs(scheduler):
     """Add all scheduled jobs to any scheduler instance (shared between blocking and background)."""
-    # DAILY JOBS — 4:00 PM IST
-    scheduler.add_job(collect_eod_data_job, CronTrigger(hour=16, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="eod_data", name="EOD Price Collection", misfire_grace_time=3600, replace_existing=True)
-    scheduler.add_job(collect_index_data_job, CronTrigger(hour=16, minute=5, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="index_data", name="Index Data Collection", misfire_grace_time=3600, replace_existing=True)
-    scheduler.add_job(calculate_indicators_job, CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="indicators", name="Calculate Indicators", misfire_grace_time=3600, replace_existing=True)
-    scheduler.add_job(collect_news_job, CronTrigger(hour=16, minute=45, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="daily_news", name="Daily News Collection", misfire_grace_time=3600, replace_existing=True)
+    # DAILY JOBS — after market close (IST)
+    # 15:35 — EOD prices (smart date detection, ~17 min for 499 stocks)
+    scheduler.add_job(collect_eod_data_job, CronTrigger(hour=15, minute=35, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="eod_data", name="EOD Price Collection", misfire_grace_time=3600, replace_existing=True)
+    # 16:00 — Index data (NIFTY50/500, SENSEX, VIX via Angel One)
+    scheduler.add_job(collect_index_data_eod_job, CronTrigger(hour=16, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="index_data_eod", name="Index & Market Overview", misfire_grace_time=3600, replace_existing=True)
+    # 16:05 — Legacy index collector (price_collector.py fallback)
+    scheduler.add_job(collect_index_data_job, CronTrigger(hour=16, minute=5, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="index_data", name="Index Data Collection (legacy)", misfire_grace_time=3600, replace_existing=True)
+    # 16:15 — Technical indicators
+    scheduler.add_job(calculate_indicators_job, CronTrigger(hour=16, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="indicators", name="Calculate Indicators", misfire_grace_time=3600, replace_existing=True)
+    # 16:30 — RSS + NewsAPI live news
+    scheduler.add_job(collect_news_job, CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="daily_news", name="Daily News Collection", misfire_grace_time=3600, replace_existing=True)
+    # 16:45 — Alpha Vantage news (25 stocks/day free tier)
+    scheduler.add_job(collect_av_news_job, CronTrigger(hour=16, minute=45, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="av_news", name="Alpha Vantage News", misfire_grace_time=3600, replace_existing=True)
+    # 17:00 — FII/DII data
     scheduler.add_job(collect_fii_data_job, CronTrigger(hour=17, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="fii_dii", name="FII/DII Data", misfire_grace_time=3600, replace_existing=True)
+    # 17:15 — Trade signal generation
+    scheduler.add_job(generate_trade_signals_job, CronTrigger(hour=17, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="trade_signals", name="Generate Trade Signals", misfire_grace_time=3600, replace_existing=True)
+    # 20:00 — Turso cloud sync
+    scheduler.add_job(sync_to_turso_job, CronTrigger(hour=20, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="eod_turso_sync", name="EOD Turso Cloud Sync", misfire_grace_time=3600, replace_existing=True)
 
-    # HOURLY JOBS — 9-16 IST
+    # HOURLY JOBS — 9 AM–4 PM IST weekdays
+    # Every hour: RSS news refresh
     scheduler.add_job(collect_news_job, CronTrigger(hour="9-16", minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="hourly_news", name="Hourly News Refresh", misfire_grace_time=1800, replace_existing=True)
+    # Every hour: score unscored news with FinBERT
+    scheduler.add_job(score_pending_news_job, CronTrigger(hour="9-20", minute=5, timezone="Asia/Kolkata"), id="score_news", name="FinBERT News Scoring", misfire_grace_time=1800, replace_existing=True)
 
-    # INTRADAY JOBS — Market Hours
+    # INTRADAY JOBS — market hours (9:15–15:30 IST)
+    # Every 30 min: 30m candles for open positions (new dedicated collector)
+    scheduler.add_job(collect_intraday_30m_job, CronTrigger(hour="9-15", minute="*/30", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="intraday_30min_new", name="Intraday 30m (positions)", misfire_grace_time=600, replace_existing=True)
+    # Every 30 min: legacy 30m candle fetch
     scheduler.add_job(intraday_price_fetch_job, CronTrigger(hour="9-15", minute="15,45", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="intraday_30min", name="Intraday 30-Min Candle Fetch", misfire_grace_time=600, replace_existing=True)
+    # Every 5 min: SL/Target price monitor
     scheduler.add_job(price_monitor_job, CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="price_monitor", name="Price Monitor (SL/Target)", misfire_grace_time=300, replace_existing=True)
+    # Every 5 min: GTT status sync
     scheduler.add_job(sync_gtt_status_job, CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="gtt_sync", name="GTT Status Sync (Angel One)", misfire_grace_time=300, replace_existing=True)
 
     # WEEKLY JOBS — Sunday 8 PM IST
     scheduler.add_job(cleanup_old_data_job, CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="Asia/Kolkata"), id="cleanup", name="Weekly Data Cleanup", misfire_grace_time=7200, replace_existing=True)
     scheduler.add_job(verify_data_integrity_job, CronTrigger(day_of_week="sun", hour=20, minute=30, timezone="Asia/Kolkata"), id="integrity", name="Weekly Data Integrity Check", misfire_grace_time=7200, replace_existing=True)
-
-    # TRADE SIGNAL + SYNC JOBS
-    scheduler.add_job(generate_trade_signals_job, CronTrigger(hour=17, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="trade_signals", name="Generate Trade Signals", misfire_grace_time=3600, replace_existing=True)
-    scheduler.add_job(sync_to_turso_job, CronTrigger(hour=20, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="eod_turso_sync", name="EOD Turso Cloud Sync", misfire_grace_time=3600, replace_existing=True)
 
 
 def start_background_scheduler() -> BackgroundScheduler | None:

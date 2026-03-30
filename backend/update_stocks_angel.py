@@ -7,8 +7,8 @@ and upserts into the local database.
 
 Usage:
     cd backend && source venv/bin/activate
-    python update_stocks_angel.py            # default: 5 days
-    python update_stocks_angel.py --days 30  # 30 days history
+    python update_stocks_angel.py            # default: 5 days (per-symbol gap detection)
+    python update_stocks_angel.py --days 30  # 30 days history fallback for new stocks
 """
 
 import argparse
@@ -17,6 +17,7 @@ import logging
 import os
 import sys
 import time
+from datetime import date as date_type
 from datetime import datetime, timedelta
 from typing import Dict, List
 
@@ -26,9 +27,9 @@ from SmartApi import SmartConnect
 
 from database.db import (
     get_connection,
+    get_latest_date,
     init_database,
     insert_prices_batch,
-    get_latest_date,
 )
 
 load_dotenv()
@@ -123,7 +124,7 @@ def fetch_candles(
 
 def main():
     parser = argparse.ArgumentParser(description="Update stock data via Angel One")
-    parser.add_argument("--days", type=int, default=5, help="Days of history to fetch (default: 5)")
+    parser.add_argument("--days", type=int, default=5, help="Days of history to fetch for new stocks (default: 5)")
     args = parser.parse_args()
 
     init_database()
@@ -132,7 +133,7 @@ def main():
     token_map = load_token_map()
     total = len(token_map)
     print(f"\n📊 Nifty 500 stocks in token map: {total}")
-    print(f"📅 Fetching {args.days} days of candles...\n")
+    print(f"📅 Fetching candles (smart gap detection, fallback: {args.days} days)...\n")
 
     # Login
     smart_api = angel_login()
@@ -144,33 +145,59 @@ def main():
 
     for idx, (symbol, info) in enumerate(token_map.items(), 1):
         pct = (idx / total) * 100
+
+        # --- Change 1: Smart date detection ---
+        ns_symbol = f"{symbol}.NS"
+        latest_str = get_latest_date(ns_symbol)
+        if latest_str:
+            latest = datetime.strptime(latest_str, "%Y-%m-%d").date()
+            days_missing = (date_type.today() - latest).days + 1
+            if days_missing <= 0:
+                success += 1
+                continue  # already up to date
+        else:
+            days_missing = args.days  # fallback for new stocks
+
+        # --- Change 2: Fetch with session reconnect on token/session errors ---
         try:
-            rows = fetch_candles(
-                smart_api,
-                symbol=symbol,
-                token=info["token"],
-                exchange="NSE",
-                days=args.days,
-            )
-
-            if rows:
-                inserted = insert_prices_batch(rows, sync=False)
-                total_rows += inserted
-                success += 1
-                if inserted > 0:
-                    logger.info(f"[{idx}/{total}] {symbol:15s} +{inserted} rows")
-            else:
-                # No data returned (could be a holiday or very recent listing)
-                success += 1
-
-            # Progress every 50 stocks
-            if idx % 50 == 0:
-                print(f"  ⏳ Progress: {idx}/{total} ({pct:.0f}%) — {total_rows} new rows so far")
-
+            rows = fetch_candles(smart_api, symbol=symbol, token=info["token"], exchange="NSE", days=days_missing)
         except Exception as e:
-            failed += 1
-            failed_symbols.append(symbol)
-            logger.warning(f"[{idx}/{total}] {symbol:15s} FAILED: {e}")
+            err_msg = str(e).lower()
+            if any(x in err_msg for x in ["token", "session", "invalid", "unauthorized"]):
+                logger.warning(f"Session expired, reconnecting...")
+                try:
+                    smart_api.terminateSession(os.getenv("ANGEL_CLIENT_ID", ""))
+                except Exception:
+                    pass
+                smart_api = angel_login()
+                try:
+                    rows = fetch_candles(smart_api, symbol=symbol, token=info["token"], exchange="NSE", days=days_missing)
+                except Exception as retry_e:
+                    failed += 1
+                    failed_symbols.append(symbol)
+                    logger.error(f"[{idx}/{total}] {symbol} failed after reconnect: {retry_e}")
+                    time.sleep(RATE_LIMIT_SECS)
+                    continue
+            else:
+                failed += 1
+                failed_symbols.append(symbol)
+                logger.warning(f"[{idx}/{total}] {symbol} FAILED: {e}")
+                time.sleep(RATE_LIMIT_SECS)
+                continue
+
+        if rows:
+            inserted = insert_prices_batch(rows, sync=False)
+            total_rows += inserted
+            success += 1
+            if inserted > 0:
+                logger.info(f"[{idx}/{total}] {symbol:15s} +{inserted} rows")
+        else:
+            # No data returned (could be a holiday or very recent listing)
+            success += 1
+
+        # Progress every 50 stocks
+        if idx % 50 == 0:
+            print(f"  ⏳ Progress: {idx}/{total} ({pct:.0f}%) — {total_rows} new rows so far")
 
         time.sleep(RATE_LIMIT_SECS)
 

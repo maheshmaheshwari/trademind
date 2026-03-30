@@ -64,10 +64,15 @@ app.include_router(indicators.router, prefix="/api", tags=["Indicators"])
 app.include_router(sentiment.router, prefix="/api", tags=["Sentiment"])
 app.include_router(signals.router, prefix="/api", tags=["Signals"])
 
+from api.routes import stocks as stocks_routes
+app.include_router(stocks_routes.router, prefix="/api", tags=["Stocks"])
+
 from api.routes import portfolio as portfolio_routes
 from api.routes import trades as trades_routes
+from api.routes.trading import router as trading_router
 app.include_router(portfolio_routes.router)
 app.include_router(trades_routes.router)
+app.include_router(trading_router)
 
 
 # ==========================================
@@ -105,12 +110,32 @@ def set_cached(key: str, data: Any, category: str = "prices"):
 # ==========================================
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup."""
+    """Initialize database and start background scheduler on startup."""
     try:
         init_database()
         logger.info("Database initialized on startup")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
+
+    # Start the scheduler in background (runs in a daemon thread)
+    try:
+        from scheduler.jobs import start_background_scheduler
+        sched = start_background_scheduler()
+        if sched:
+            logger.info("✅ Background scheduler started with API server")
+    except Exception as e:
+        logger.error(f"Background scheduler failed to start: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop background scheduler on shutdown."""
+    try:
+        from scheduler.jobs import stop_background_scheduler
+        stop_background_scheduler()
+        logger.info("Background scheduler stopped")
+    except Exception as e:
+        logger.error(f"Error stopping scheduler: {e}")
 
 
 # ==========================================

@@ -197,12 +197,22 @@ def generate_signals():
             
             # Load latest data
             df = load_data_for_symbol(symbol)
-            if df.empty or len(df) < 60:
+            if df.empty:
+                print(f"Skipping {symbol}: df is empty")
+                continue
+            if len(df) < 60:
+                print(f"Skipping {symbol}: df length {len(df)} < 60")
                 continue
             
             # Engineer features
-            X, _ = engineer_features_and_target(df, forward_days=5, target_pct=0.5)
+            try:
+                X, _ = engineer_features_and_target(df, forward_days=5, target_pct=0.5)
+            except Exception as e:
+                print(f"Skipping {symbol}: Error in engineer_features_and_target: {e}")
+                continue
+                
             if X.empty:
+                print(f"Skipping {symbol}: X is empty")
                 continue
             
             latest = X.iloc[-1:]
@@ -272,6 +282,7 @@ def generate_signals():
                     "max_qty_per_user": position["max_qty_per_user"],
                     "max_investment_per_user": position["max_investment_per_user"],
                     "min_qty": position["min_qty"],
+                    "recommended_volume": position["max_safe_qty_total"],
                 },
                 "price": {
                     "current": levels["current_price"],

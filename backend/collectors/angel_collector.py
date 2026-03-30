@@ -29,8 +29,10 @@ Usage:
         angel.logout()
 """
 
+import json
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -42,6 +44,18 @@ from database.db import insert_prices_batch, init_database
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+# ==========================================
+# Load full Nifty 500 token map from JSON
+# ==========================================
+_TOKENS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "angel_tokens.json")
+try:
+    with open(_TOKENS_FILE) as _f:
+        ANGEL_TOKENS_FULL = json.load(_f)  # 499 stocks
+    logger.info(f"Loaded {len(ANGEL_TOKENS_FULL)} Angel One tokens from {_TOKENS_FILE}")
+except FileNotFoundError:
+    ANGEL_TOKENS_FULL = {}
+    logger.warning(f"angel_tokens.json not found at {_TOKENS_FILE} — run map_tokens.py first")
 
 # ==========================================
 # Angel One symbol token mapping
@@ -250,10 +264,19 @@ class AngelCollector:
             logger.error("Not logged in. Call login() first.")
             return []
 
+        # Check hardcoded dict first, then fall back to full JSON map
         token_info = ANGEL_TOKENS.get(stock_name.upper())
         if not token_info:
-            logger.error(f"Unknown stock: {stock_name}")
-            return []
+            full_info = ANGEL_TOKENS_FULL.get(stock_name.upper())
+            if full_info:
+                token_info = {
+                    "token": full_info["token"],
+                    "exchange": "NSE",
+                    "symbol": full_info.get("trading_symbol", f"{stock_name}-EQ"),
+                }
+            else:
+                logger.error(f"Unknown stock: {stock_name}")
+                return []
 
         try:
             from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d 09:15")
@@ -360,6 +383,71 @@ def collect_live_prices() -> Dict[str, float]:
 
     finally:
         angel.logout()
+
+
+def collect_eod_angel(days: int = 5) -> dict:
+    """
+    End-of-day data collection via Angel One for ALL Nifty 500 stocks.
+    Uses the full angel_tokens.json map instead of the hardcoded 30-stock dict.
+
+    Args:
+        days: Number of days of history to fetch (default 5).
+
+    Returns:
+        Summary dict with success_count, fail_count, total_rows.
+    """
+    init_database()
+    angel = AngelCollector()
+    if not angel.login():
+        return {"success_count": 0, "fail_count": 0, "total_rows": 0, "error": "Login failed"}
+
+    token_map = ANGEL_TOKENS_FULL
+    if not token_map:
+        logger.error("No tokens loaded — cannot run EOD collection")
+        return {"success_count": 0, "fail_count": 0, "total_rows": 0, "error": "No tokens"}
+
+    total = len(token_map)
+    success = 0
+    failed = 0
+    total_rows = 0
+    failed_symbols = []
+
+    print(f"\n🌅 Angel One EOD Collection — {total} stocks, {days} days...\n")
+
+    for idx, (symbol, info) in enumerate(token_map.items(), 1):
+        try:
+            candles = angel.get_historical(
+                stock_name=symbol,
+                interval="ONE_DAY",
+                days=days,
+                save_to_db=True,
+            )
+            success += 1
+            total_rows += len(candles)
+
+            if idx % 50 == 0:
+                pct = (idx / total) * 100
+                print(f"  ⏳ {idx}/{total} ({pct:.0f}%) — {total_rows} candles")
+
+        except Exception as e:
+            failed += 1
+            failed_symbols.append(symbol)
+            logger.warning(f"[{idx}/{total}] {symbol} FAILED: {e}")
+
+        # Increased from 0.35s to 0.5s to avoid Angel One rate limits
+        time.sleep(0.5)
+
+    angel.logout()
+
+    print(f"\n✅ EOD Update: {success}/{total} stocks, {total_rows} candles")
+    if failed_symbols:
+        print(f"   ⚠️  Failed: {failed_symbols[:10]}")
+
+    return {
+        "success_count": success,
+        "fail_count": failed,
+        "total_rows": total_rows,
+    }
 
 
 # ==========================================

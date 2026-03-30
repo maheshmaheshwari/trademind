@@ -11,11 +11,12 @@ from pydantic import BaseModel
 from typing import Optional, List
 import libsql_experimental as libsql
 
+from database.db import get_trade_signals_formatted, get_connection
+
 router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])
 
 DB_PATH = "nifty500.db"
 TOKENS_PATH = "data/angel_tokens.json"
-SIGNALS_PATH = "data/trade_signals_latest.json"
 
 
 # ==========================================
@@ -38,10 +39,8 @@ class SectorUpdate(BaseModel):
 # ==========================================
 
 def load_signals():
-    if os.path.exists(SIGNALS_PATH):
-        with open(SIGNALS_PATH) as f:
-            return json.load(f)
-    return {"trades": [], "actionable_trades": [], "avoid_list": [], "hold_list": []}
+    """Load trade signals from the local database."""
+    return get_trade_signals_formatted()
 
 
 def load_tokens():
@@ -55,8 +54,7 @@ def get_sector_map():
     return {f"{sym}.NS": info.get("sector", "Unknown") for sym, info in tokens.items()}
 
 
-def get_conn():
-    return libsql.connect(DB_PATH)
+
 
 
 # ==========================================
@@ -241,7 +239,7 @@ async def create_portfolio(body: PortfolioCreate):
     )
     
     # Save to DB
-    conn = get_conn()
+    conn = get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -291,7 +289,7 @@ async def create_portfolio(body: PortfolioCreate):
 @router.get("/{portfolio_id}")
 async def get_portfolio(portfolio_id: int):
     """Get portfolio details with sectors and stocks."""
-    conn = get_conn()
+    conn = get_connection()
     try:
         row = conn.execute("SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
         if not row:
@@ -327,7 +325,7 @@ async def get_portfolio(portfolio_id: int):
 @router.get("")
 async def list_portfolios():
     """List all portfolios."""
-    conn = get_conn()
+    conn = get_connection()
     try:
         rows = conn.execute("SELECT id, name, investment_amount, time_horizon, risk_profile, created_at FROM portfolios ORDER BY created_at DESC").fetchall()
         cols = ["id", "name", "investment_amount", "time_horizon", "risk_profile", "created_at"]
@@ -340,7 +338,7 @@ async def list_portfolios():
 @router.put("/{portfolio_id}/sectors")
 async def update_sectors(portfolio_id: int, body: SectorUpdate):
     """Update sector allocations (user customization)."""
-    conn = get_conn()
+    conn = get_connection()
     try:
         # Verify portfolio exists
         row = conn.execute("SELECT id FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
@@ -370,7 +368,7 @@ async def update_sectors(portfolio_id: int, body: SectorUpdate):
 @router.post("/{portfolio_id}/rebalance")
 async def rebalance_portfolio(portfolio_id: int):
     """Re-run AI allocation with current signals."""
-    conn = get_conn()
+    conn = get_connection()
     try:
         row = conn.execute("SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
         if not row:
@@ -424,7 +422,7 @@ async def rebalance_portfolio(portfolio_id: int):
 @router.delete("/{portfolio_id}")
 async def delete_portfolio(portfolio_id: int):
     """Delete a portfolio."""
-    conn = get_conn()
+    conn = get_connection()
     try:
         conn.execute("DELETE FROM portfolio_stocks WHERE portfolio_id = ?", (portfolio_id,))
         conn.execute("DELETE FROM portfolio_sectors WHERE portfolio_id = ?", (portfolio_id,))

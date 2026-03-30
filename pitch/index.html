@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440, initial-scale=1">
+<title>TradeMind AI — Investor Pitch Deck</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-primary: #0a0e1a;
+    --bg-card: #111827;
+    --accent-blue: #3b82f6;
+    --accent-cyan: #06b6d4;
+    --accent-green: #10b981;
+    --accent-purple: #8b5cf6;
+    --accent-orange: #f59e0b;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --gradient-hero: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+    --gradient-accent: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    --gradient-green: linear-gradient(135deg, #10b981, #06b6d4);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+  }
+
+  /* ============ SLIDE CONTAINER ============ */
+  .deck {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+  }
+
+  .slide {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0; left: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 60px 80px;
+    opacity: 0;
+    transform: translateX(100px);
+    transition: all 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+    pointer-events: none;
+  }
+
+  .slide.active {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .slide.prev {
+    opacity: 0;
+    transform: translateX(-100px);
+  }
+
+  /* ============ NAVIGATION ============ */
+  .nav-bar {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+    background: rgba(17, 24, 39, 0.9);
+    backdrop-filter: blur(20px);
+    padding: 10px 20px;
+    border-radius: 50px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .nav-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .nav-dot.active {
+    background: var(--accent-blue);
+    width: 30px;
+    border-radius: 5px;
+  }
+
+  .slide-counter {
+    position: fixed;
+    bottom: 35px;
+    right: 40px;
+    font-size: 14px;
+    color: var(--text-muted);
+    z-index: 100;
+  }
+
+  .arrow {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 50px; height: 50px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 100;
+    transition: all 0.3s;
+    color: var(--text-secondary);
+    font-size: 20px;
+  }
+
+  .arrow:hover { background: rgba(255,255,255,0.15); color: white; }
+  .arrow-left { left: 20px; }
+  .arrow-right { right: 20px; }
+
+  /* ============ SLIDE 1: HERO ============ */
+  .hero-slide {
+    background: var(--gradient-hero);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero-slide::before {
+    content: '';
+    position: absolute;
+    width: 800px; height: 800px;
+    background: radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%);
+    top: -200px; right: -200px;
+  }
+
+  .hero-slide::after {
+    content: '';
+    position: absolute;
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%);
+    bottom: -150px; left: -150px;
+  }
+
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    padding: 8px 20px;
+    border-radius: 50px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-green);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 30px;
+    z-index: 1;
+  }
+
+  .hero-title {
+    font-size: 72px;
+    font-weight: 900;
+    line-height: 1.1;
+    margin-bottom: 24px;
+    z-index: 1;
+  }
+
+  .hero-title span { 
+    background: var(--gradient-accent);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-subtitle {
+    font-size: 22px;
+    color: var(--text-secondary);
+    max-width: 700px;
+    line-height: 1.6;
+    margin-bottom: 40px;
+    z-index: 1;
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: 60px;
+    z-index: 1;
+  }
+
+  .hero-stat {
+    text-align: center;
+  }
+
+  .hero-stat-value {
+    font-size: 42px;
+    font-weight: 800;
+    background: var(--gradient-green);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-stat-label {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ============ SLIDE COMMON ============ */
+  .slide-header {
+    width: 100%;
+    margin-bottom: 40px;
+  }
+
+  .slide-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-blue);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+  }
+
+  .slide-title {
+    font-size: 44px;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+
+  .slide-subtitle {
+    font-size: 18px;
+    color: var(--text-secondary);
+    margin-top: 10px;
+    line-height: 1.5;
+  }
+
+  /* ============ LAYOUTS ============ */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 50px;
+    width: 100%;
+    align-items: center;
+  }
+
+  .three-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 30px;
+    width: 100%;
+  }
+
+  .four-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 24px;
+    width: 100%;
+  }
+
+  /* ============ CARDS ============ */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 30px;
+    transition: all 0.3s;
+  }
+
+  .card:hover {
+    border-color: rgba(59,130,246,0.3);
+    transform: translateY(-4px);
+  }
+
+  .card-icon {
+    width: 48px; height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: 16px;
+  }
+
+  .card-icon.blue { background: rgba(59,130,246,0.15); }
+  .card-icon.green { background: rgba(16,185,129,0.15); }
+  .card-icon.purple { background: rgba(139,92,246,0.15); }
+  .card-icon.orange { background: rgba(245,158,11,0.15); }
+  .card-icon.cyan { background: rgba(6,182,212,0.15); }
+
+  .card h3 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .card p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  /* ============ APP SCREENSHOTS ============ */
+  .app-frame {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(59,130,246,0.1);
+    max-height: 70vh;
+  }
+
+  .app-frame img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  /* ============ METRICS ============ */
+  .metric-card {
+    background: var(--bg-card);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 28px;
+    text-align: center;
+  }
+
+  .metric-value {
+    font-size: 36px;
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+
+  .metric-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ============ TIMELINE ============ */
+  .timeline {
+    width: 100%;
+    display: flex;
+    gap: 0;
+    position: relative;
+  }
+
+  .timeline::before {
+    content: '';
+    position: absolute;
+    top: 28px;
+    left: 60px;
+    right: 60px;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent-green), var(--accent-blue), var(--accent-purple), var(--accent-orange));
+  }
+
+  .timeline-item {
+    flex: 1;
+    text-align: center;
+    position: relative;
+    padding-top: 50px;
+  }
+
+  .timeline-dot {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    position: absolute;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 3px solid var(--bg-primary);
+  }
+
+  .timeline-dot.green { background: var(--accent-green); box-shadow: 0 0 15px rgba(16,185,129,0.4); }
+  .timeline-dot.blue { background: var(--accent-blue); }
+  .timeline-dot.purple { background: var(--accent-purple); }
+  .timeline-dot.orange { background: var(--accent-orange); }
+
+  .timeline-phase {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+    margin-top: 10px;
+  }
+
+  .timeline-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .timeline-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    padding: 0 10px;
+  }
+
+  .phase-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .phase-badge.complete { background: rgba(16,185,129,0.15); color: var(--accent-green); }
+  .phase-badge.current { background: rgba(59,130,246,0.15); color: var(--accent-blue); }
+  .phase-badge.upcoming { background: rgba(139,92,246,0.15); color: var(--accent-purple); }
+
+  /* ============ TABLE ============ */
+  .tech-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0 8px;
+  }
+
+  .tech-table th {
+    padding: 12px 20px;
+    text-align: left;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+  }
+
+  .tech-table td {
+    padding: 14px 20px;
+    font-size: 15px;
+    background: var(--bg-card);
+  }
+
+  .tech-table tr td:first-child { border-radius: 10px 0 0 10px; }
+  .tech-table tr td:last-child { border-radius: 0 10px 10px 0; }
+
+  /* ============ ASK SLIDE ============ */
+  .ask-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    width: 100%;
+  }
+
+  .ask-item {
+    background: var(--bg-card);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 30px;
+  }
+
+  .ask-item h3 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .ask-item p {
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+
+  .ask-amount {
+    font-size: 32px;
+    font-weight: 800;
+    margin-bottom: 16px;
+  }
+
+  .contact-card {
+    margin-top: 30px;
+    text-align: center;
+  }
+
+  .contact-card a {
+    color: var(--accent-blue);
+    text-decoration: none;
+  }
+
+  /* responsive text */
+  .highlight { color: var(--accent-blue); font-weight: 700; }
+  .highlight-green { color: var(--accent-green); font-weight: 700; }
+
+  /* ============ PRINT / PDF ============ */
+  @media print {
+    .nav-bar, .arrow, .slide-counter { display: none; }
+    body { overflow: visible; }
+    .slide {
+      position: relative;
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
+      page-break-after: always;
+      height: 100vh;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+  <!-- ============ SLIDE 1: HERO ============ -->
+  <div class="slide hero-slide active" data-slide="0">
+    <div class="hero-badge">📊 Phase 1 Complete — Live Product Demo</div>
+    <h1 class="hero-title">TradeMind <span>AI</span></h1>
+    <p class="hero-subtitle">
+      AI-powered stock market intelligence for Indian equities.<br>
+      ML-generated trade signals, one-click execution, and automated risk management for Nifty 500 stocks.
+    </p>
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="hero-stat-value">500</div>
+        <div class="hero-stat-label">Stocks Analyzed</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-value">6</div>
+        <div class="hero-stat-label">ML Models</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-value">24/7</div>
+        <div class="hero-stat-label">Automated Pipeline</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-value">₹0</div>
+        <div class="hero-stat-label">Cost to Start</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 2: PROBLEM ============ -->
+  <div class="slide" data-slide="1">
+    <div class="slide-header">
+      <div class="slide-label">The Problem</div>
+      <h2 class="slide-title">Retail Investors Are Losing Money</h2>
+      <p class="slide-subtitle">93% of individual traders in India lose money (SEBI study, 2023). The odds are stacked against them.</p>
+    </div>
+    <div class="three-col">
+      <div class="card">
+        <div class="card-icon orange">😰</div>
+        <h3>Emotional Trading</h3>
+        <p>Fear and greed drive 80% of retail decisions, leading to buying high and panic selling low.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon blue">📊</div>
+        <h3>Information Overload</h3>
+        <p>500+ stocks, dozens of indicators, breaking news — retail investors can't process it all in real time.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon purple">🎯</div>
+        <h3>No Risk Management</h3>
+        <p>Most retail traders don't set stop-losses, leading to catastrophic losses on single trades.</p>
+      </div>
+    </div>
+    <div class="four-col" style="margin-top: 30px">
+      <div class="metric-card">
+        <div class="metric-value highlight" style="color: #ef4444">93%</div>
+        <div class="metric-label">Traders Lose Money</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value">₹1.8L Cr</div>
+        <div class="metric-label">Retail Losses (FY23)</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value">14Cr+</div>
+        <div class="metric-label">Demat Accounts</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value">42%</div>
+        <div class="metric-label">New in Last 2 Years</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 3: SOLUTION ============ -->
+  <div class="slide" data-slide="2">
+    <div class="slide-header">
+      <div class="slide-label">Our Solution</div>
+      <h2 class="slide-title">AI That Thinks, You Just Click</h2>
+      <p class="slide-subtitle">TradeMind AI replaces emotional decisions with data-driven intelligence.</p>
+    </div>
+    <div class="three-col">
+      <div class="card">
+        <div class="card-icon green">🧠</div>
+        <h3>AI Signal Engine</h3>
+        <p>6 ML models analyze 500 stocks daily — technical indicators, sentiment analysis (FinBERT), and pattern recognition generate BUY/SELL signals with <span class="highlight-green">up to 92% accuracy</span>.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon blue">⚡</div>
+        <h3>One-Click Execution</h3>
+        <p>Click "Trade" on any AI signal → auto-generates a complete bracket order with Entry + Stop Loss + Target. <span class="highlight">Zero emotional decisions.</span></p>
+      </div>
+      <div class="card">
+        <div class="card-icon purple">🛡️</div>
+        <h3>Built-in Risk Manager</h3>
+        <p>6 pre-trade safety checks: balance, daily loss limits, position concentration, volume safety, and trade frequency caps. <span style="color: var(--accent-purple); font-weight: 700;">Protects your capital.</span></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 4: PRODUCT — DASHBOARD ============ -->
+  <div class="slide" data-slide="3">
+    <div class="two-col">
+      <div>
+        <div class="slide-label">Product Demo</div>
+        <h2 class="slide-title" style="font-size: 36px">Portfolio Dashboard</h2>
+        <p class="slide-subtitle">₹10,00,000 virtual trading account. Track positions, P&L, and AI top picks — all in real time.</p>
+        <div style="margin-top: 30px">
+          <div style="display: flex; gap: 12px; flex-wrap: wrap">
+            <span class="phase-badge complete">✓ Paper Trading</span>
+            <span class="phase-badge complete">✓ Live P&L</span>
+            <span class="phase-badge complete">✓ AI Top Picks</span>
+          </div>
+        </div>
+      </div>
+      <div class="app-frame">
+        <img src="dashboard.png" alt="TradeMind Dashboard">
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 5: PRODUCT — AI SIGNALS ============ -->
+  <div class="slide" data-slide="4">
+    <div class="two-col">
+      <div class="app-frame">
+        <img src="signals.png" alt="AI Trade Signals">
+      </div>
+      <div>
+        <div class="slide-label">Core Feature</div>
+        <h2 class="slide-title" style="font-size: 36px">AI Trade Signals</h2>
+        <p class="slide-subtitle">ML analyzes 500 NSE stocks daily. Each signal includes buy price, target, stop-loss, and confidence score.</p>
+        <div style="margin-top: 24px">
+          <div class="metric-card" style="text-align: left; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="metric-label">Signals Generated</span>
+              <span class="metric-value" style="font-size: 24px;">200+</span>
+            </div>
+          </div>
+          <div class="metric-card" style="text-align: left; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="metric-label">Max Confidence</span>
+              <span class="metric-value highlight-green" style="font-size: 24px;">99%</span>
+            </div>
+          </div>
+          <div class="metric-card" style="text-align: left;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="metric-label">Model Accuracy</span>
+              <span class="metric-value" style="font-size: 24px; color: var(--accent-blue);">92%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 6: PRODUCT — TRADE EXECUTION ============ -->
+  <div class="slide" data-slide="5">
+    <div class="two-col">
+      <div>
+        <div class="slide-label">One-Click Trading</div>
+        <h2 class="slide-title" style="font-size: 36px">Auto Bracket Orders</h2>
+        <p class="slide-subtitle">Click once → system creates 3 orders automatically: Entry (BUY), Stop Loss, and Target. No manual intervention needed.</p>
+        <div style="margin-top: 24px; display: grid; gap: 12px;">
+          <div class="card" style="padding: 16px 20px; display: flex; align-items: center; gap: 12px;">
+            <span style="color: var(--accent-green); font-size: 20px;">●</span>
+            <div><strong>Entry Order</strong> — Executed at AI buy price</div>
+          </div>
+          <div class="card" style="padding: 16px 20px; display: flex; align-items: center; gap: 12px;">
+            <span style="color: #ef4444; font-size: 20px;">●</span>
+            <div><strong>Stop Loss</strong> — Auto-triggers at SL price</div>
+          </div>
+          <div class="card" style="padding: 16px 20px; display: flex; align-items: center; gap: 12px;">
+            <span style="color: var(--accent-blue); font-size: 20px;">●</span>
+            <div><strong>Target</strong> — Auto-books profit at target</div>
+          </div>
+        </div>
+      </div>
+      <div class="app-frame">
+        <img src="trade.png" alt="Trade Execution">
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 7: TECH STACK ============ -->
+  <div class="slide" data-slide="6">
+    <div class="slide-header">
+      <div class="slide-label">Technology</div>
+      <h2 class="slide-title">Built for Scale</h2>
+      <p class="slide-subtitle">Modern, production-ready architecture with AI/ML at the core.</p>
+    </div>
+    <div class="two-col">
+      <table class="tech-table">
+        <tr><th>Component</th><th>Technology</th></tr>
+        <tr><td>🧠 ML Models</td><td>GradientBoosting, RandomForest, XGBoost</td></tr>
+        <tr><td>🗞️ Sentiment</td><td>FinBERT (transformer-based NLP)</td></tr>
+        <tr><td>📊 Indicators</td><td>RSI, MACD, Bollinger, SMA crossovers</td></tr>
+        <tr><td>⚡ API Server</td><td>FastAPI + Uvicorn (async, 20+ endpoints)</td></tr>
+        <tr><td>🗄️ Database</td><td>libSQL (local) → Turso (cloud sync)</td></tr>
+        <tr><td>🎨 Frontend</td><td>React + TypeScript + Tailwind CSS</td></tr>
+        <tr><td>📰 Data Sources</td><td>Angel One API, yFinance, NewsAPI</td></tr>
+        <tr><td>⏰ Scheduler</td><td>APScheduler (daily automated pipeline)</td></tr>
+      </table>
+      <div>
+        <div class="card" style="margin-bottom: 16px;">
+          <h3 style="margin-bottom: 12px;">🏗️ Architecture</h3>
+          <p style="font-size: 14px; line-height: 1.8;">
+            <strong>Data Layer:</strong> Automated collectors fetch prices, news, and indicators daily at 4 PM IST.<br><br>
+            <strong>AI Layer:</strong> 6 trained ML models score every Nifty 500 stock. Signals are stored with confidence scores.<br><br>
+            <strong>Execution Layer:</strong> Paper trading engine with bracket orders, P&L tracking, and risk management.<br><br>
+            <strong>Database:</strong> ENV-based routing — local SQLite for development, Turso cloud sync for production.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 8: ROADMAP ============ -->
+  <div class="slide" data-slide="7">
+    <div class="slide-header">
+      <div class="slide-label">Roadmap</div>
+      <h2 class="slide-title">Phase 1 → Phase 4</h2>
+      <p class="slide-subtitle">Systematic path from paper trading to live automated wealth management.</p>
+    </div>
+    <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-dot green"></div>
+        <div class="timeline-phase" style="color: var(--accent-green);">Phase 1</div>
+        <div class="phase-badge complete">✓ Complete</div>
+        <div class="timeline-title" style="margin-top: 8px;">AI Paper Trading</div>
+        <div class="timeline-desc">
+          500 stock analysis<br>
+          ML signal generation<br>
+          Paper trading engine<br>
+          Bracket orders + risk mgmt<br>
+          Full React dashboard
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-dot blue"></div>
+        <div class="timeline-phase" style="color: var(--accent-blue);">Phase 2</div>
+        <div class="phase-badge current">Q2 2026</div>
+        <div class="timeline-title" style="margin-top: 8px;">Live Trading</div>
+        <div class="timeline-desc">
+          Angel One broker integration<br>
+          Real money execution<br>
+          Advanced backtesting<br>
+          Model performance tracking<br>
+          Mobile-responsive UI
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-dot purple"></div>
+        <div class="timeline-phase" style="color: var(--accent-purple);">Phase 3</div>
+        <div class="phase-badge upcoming">Q3 2026</div>
+        <div class="timeline-title" style="margin-top: 8px;">Social + Community</div>
+        <div class="timeline-desc">
+          Copy-trading feature<br>
+          Leaderboards & rankings<br>
+          WhatsApp signal alerts<br>
+          Community portfolios<br>
+          Multi-broker support
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-dot orange"></div>
+        <div class="timeline-phase" style="color: var(--accent-orange);">Phase 4</div>
+        <div class="phase-badge upcoming">Q4 2026</div>
+        <div class="timeline-title" style="margin-top: 8px;">AI Wealth Engine</div>
+        <div class="timeline-desc">
+          Fully automated trading<br>
+          Options & derivatives<br>
+          Crypto & global markets<br>
+          SEBI RIA registration<br>
+          B2B API for fintechs
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 9: BUSINESS MODEL ============ -->
+  <div class="slide" data-slide="8">
+    <div class="slide-header">
+      <div class="slide-label">Business Model</div>
+      <h2 class="slide-title">Multiple Revenue Streams</h2>
+    </div>
+    <div class="three-col">
+      <div class="card">
+        <div class="card-icon green">💎</div>
+        <h3>Freemium SaaS</h3>
+        <p><strong>Free:</strong> Paper trading, 10 signals/day<br><br>
+           <strong>Pro (₹999/mo):</strong> All 500 signals, 1-click execution, advanced analytics<br><br>
+           <strong>Elite (₹2,499/mo):</strong> Automated trading, priority signals, API access</p>
+      </div>
+      <div class="card">
+        <div class="card-icon blue">🤝</div>
+        <h3>Broker Partnership</h3>
+        <p>Revenue share with Angel One, Zerodha, and other discount brokers.<br><br>
+           Every trade executed through our platform earns brokerage commission share.<br><br>
+           <strong>Target:</strong> ₹5-15 per executed trade</p>
+      </div>
+      <div class="card">
+        <div class="card-icon purple">🏢</div>
+        <h3>B2B API (Phase 4)</h3>
+        <p>License the signal engine to:<br><br>
+           • Wealth management firms<br>
+           • Portfolio management services<br>
+           • Fintech apps & robo-advisors<br><br>
+           <strong>₹50K-5L/month per client</strong></p>
+      </div>
+    </div>
+    <div class="four-col" style="margin-top: 24px;">
+      <div class="metric-card">
+        <div class="metric-value highlight-green">₹0</div>
+        <div class="metric-label">Customer Acq. Cost</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value">85%</div>
+        <div class="metric-label">Gross Margin</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" style="color: var(--accent-blue);">₹10Cr</div>
+        <div class="metric-label">Y3 ARR Target</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value">14Cr</div>
+        <div class="metric-label">TAM (Demat Users)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 10: THE ASK ============ -->
+  <div class="slide" data-slide="9" style="background: var(--gradient-hero);">
+    <div class="slide-header" style="text-align: center;">
+      <div class="slide-label">The Ask</div>
+      <h2 class="slide-title">Partner With Us</h2>
+      <p class="slide-subtitle" style="max-width: 600px; margin: 10px auto 0;">Phase 1 is live. We need fuel to scale.</p>
+    </div>
+    <div class="ask-grid" style="max-width: 900px;">
+      <div class="ask-item">
+        <div class="ask-amount highlight-green">₹50L</div>
+        <h3>Pre-Seed Round</h3>
+        <p>12-18 months runway to reach Phase 2 (live trading) and 10K users.</p>
+      </div>
+      <div class="ask-item">
+        <h3 style="margin-bottom: 12px;">Use of Funds</h3>
+        <p style="line-height: 2;">
+          🧑‍💻 40% — Engineering (2 hires)<br>
+          🚀 30% — Marketing & Growth<br>
+          ☁️ 15% — Cloud & Infrastructure<br>
+          ⚖️ 15% — Legal & Compliance (SEBI)
+        </p>
+      </div>
+    </div>
+    <div class="contact-card">
+      <p style="font-size: 28px; font-weight: 800; margin-bottom: 10px;">
+        📊 TradeMind <span style="background: var(--gradient-accent); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">AI</span>
+      </p>
+      <p style="color: var(--text-muted); font-size: 16px;">
+        Live demo available • <a href="http://localhost:5173">trademind.ai</a> • Built with ❤️ for Indian markets
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============ NAVIGATION ============ -->
+<div class="arrow arrow-left" onclick="prevSlide()">◂</div>
+<div class="arrow arrow-right" onclick="nextSlide()">▸</div>
+<div class="nav-bar" id="navBar"></div>
+<div class="slide-counter" id="counter"></div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const navBar = document.getElementById('navBar');
+  const counter = document.getElementById('counter');
+  let current = 0;
+
+  // Build nav dots
+  slides.forEach((_, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'nav-dot' + (i === 0 ? ' active' : '');
+    dot.onclick = () => goTo(i);
+    navBar.appendChild(dot);
+  });
+
+  function goTo(n) {
+    if (n < 0 || n >= slides.length) return;
+    slides[current].classList.remove('active');
+    slides[current].classList.add(n > current ? 'prev' : '');
+    current = n;
+    slides.forEach(s => s.classList.remove('prev'));
+    slides[current].classList.add('active');
+    document.querySelectorAll('.nav-dot').forEach((d, i) =>
+      d.classList.toggle('active', i === current));
+    counter.textContent = `${current + 1} / ${slides.length}`;
+  }
+
+  function nextSlide() { goTo(current + 1); }
+  function prevSlide() { goTo(current - 1); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+    if (e.key === 'ArrowLeft') prevSlide();
+  });
+
+  counter.textContent = `1 / ${slides.length}`;
+</script>
+</body>
+</html>

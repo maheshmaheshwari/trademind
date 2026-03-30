@@ -1,0 +1,704 @@
+{
+	"info": {
+		"_postman_id": "trademind-ai-collection",
+		"name": "TradeMind AI - Complete API Collection",
+		"description": "All API endpoints for the TradeMind AI trading platform.\n\nBase URL: http://localhost:8000\n\nAuthentication: Bearer token (obtained from /api/trading/login)",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "2",
+			"type": "string"
+		},
+		{
+			"key": "symbol",
+			"value": "TCS.NS",
+			"type": "string"
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{token}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "🏠 Health & Root",
+			"item": [
+				{
+					"name": "Root",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/",
+							"host": ["{{base_url}}"],
+							"path": [""]
+						},
+						"description": "Root endpoint — returns app info and status."
+					}
+				},
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/health",
+							"host": ["{{base_url}}"],
+							"path": ["api", "health"]
+						},
+						"description": "Health check — returns DB status, stock count, and latest data date."
+					}
+				}
+			]
+		},
+		{
+			"name": "🔐 Auth & Users",
+			"item": [
+				{
+					"name": "Register User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.token) {",
+									"    pm.collectionVariables.set('token', jsonData.token);",
+									"    pm.collectionVariables.set('user_id', jsonData.user.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"newuser\",\n    \"password\": \"password123\",\n    \"display_name\": \"New User\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trading/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "register"]
+						},
+						"description": "Register a new user. Returns JWT token and user object."
+					}
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.token) {",
+									"    pm.collectionVariables.set('token', jsonData.token);",
+									"    pm.collectionVariables.set('user_id', jsonData.user.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"maheshmaheshwari\",\n    \"password\": \"mahesh\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trading/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "login"]
+						},
+						"description": "Login with username/password. Returns JWT token."
+					}
+				},
+				{
+					"name": "Get Current User (Me)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trading/me",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "me"]
+						},
+						"description": "Get the currently authenticated user profile."
+					}
+				},
+				{
+					"name": "Get User by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trading/user/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "user", "{{user_id}}"]
+						},
+						"description": "Get user details by user ID."
+					}
+				},
+				{
+					"name": "Get User by Username",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trading/user/by-username/maheshmaheshwari",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "user", "by-username", "maheshmaheshwari"]
+						},
+						"description": "Get user details by username."
+					}
+				},
+				{
+					"name": "Create User (legacy)",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"testuser\",\n    \"display_name\": \"Test User\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trading/user",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "user"]
+						},
+						"description": "Create a new trading user (legacy endpoint, prefer /register)."
+					}
+				}
+			]
+		},
+		{
+			"name": "📊 Market Data",
+			"item": [
+				{
+					"name": "Get All Stocks (Nifty 500)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/stocks?search=&sector=",
+							"host": ["{{base_url}}"],
+							"path": ["api", "stocks"],
+							"query": [
+								{ "key": "search", "value": "", "description": "Search by symbol or name" },
+								{ "key": "sector", "value": "", "description": "Filter by sector" }
+							]
+						},
+						"description": "List all 499 Nifty 500 stocks with latest price, change %, volume, and sector."
+					}
+				},
+				{
+					"name": "Search Stocks",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/stocks?search=TCS",
+							"host": ["{{base_url}}"],
+							"path": ["api", "stocks"],
+							"query": [
+								{ "key": "search", "value": "TCS" }
+							]
+						},
+						"description": "Search stocks by symbol or name."
+					}
+				},
+				{
+					"name": "Market Overview",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/market/overview",
+							"host": ["{{base_url}}"],
+							"path": ["api", "market", "overview"]
+						},
+						"description": "Market overview — gainers, losers, sector performance."
+					}
+				},
+				{
+					"name": "Sector Heatmap",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/heatmap/sectors",
+							"host": ["{{base_url}}"],
+							"path": ["api", "heatmap", "sectors"]
+						},
+						"description": "Sector-wise heatmap data with gainers/losers per sector."
+					}
+				},
+				{
+					"name": "Watchlist for Symbol",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/watchlist/{{symbol}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "watchlist", "{{symbol}}"]
+						},
+						"description": "Get watchlist data for a specific stock."
+					}
+				}
+			]
+		},
+		{
+			"name": "💹 Prices",
+			"item": [
+				{
+					"name": "Price History (Default 90 days)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/prices/{{symbol}}?days=90&interval=1d",
+							"host": ["{{base_url}}"],
+							"path": ["api", "prices", "{{symbol}}"],
+							"query": [
+								{ "key": "days", "value": "90", "description": "Number of days (1-3650)" },
+								{ "key": "interval", "value": "1d", "description": "Interval: 1d, 1h, 5m" }
+							]
+						},
+						"description": "OHLCV price history for a stock."
+					}
+				},
+				{
+					"name": "Price History (1 Year)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/prices/{{symbol}}?days=365&interval=1d",
+							"host": ["{{base_url}}"],
+							"path": ["api", "prices", "{{symbol}}"],
+							"query": [
+								{ "key": "days", "value": "365" },
+								{ "key": "interval", "value": "1d" }
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "📈 Technical Indicators",
+			"item": [
+				{
+					"name": "Get Indicators for Symbol",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/indicators/{{symbol}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "indicators", "{{symbol}}"]
+						},
+						"description": "RSI, MACD, Bollinger Bands, SMA, EMA, ATR, ADX, Stochastic, OBV, Support/Resistance, and signal."
+					}
+				}
+			]
+		},
+		{
+			"name": "💬 Sentiment",
+			"item": [
+				{
+					"name": "Market Sentiment",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/sentiment/market",
+							"host": ["{{base_url}}"],
+							"path": ["api", "sentiment", "market"]
+						},
+						"description": "Overall market sentiment scores."
+					}
+				},
+				{
+					"name": "Stock Sentiment",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/sentiment/{{symbol}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "sentiment", "{{symbol}}"]
+						},
+						"description": "Sentiment score for a specific stock."
+					}
+				}
+			]
+		},
+		{
+			"name": "🤖 AI Trade Signals",
+			"item": [
+				{
+					"name": "Latest Signals (All)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/signals/latest",
+							"host": ["{{base_url}}"],
+							"path": ["api", "signals", "latest"]
+						},
+						"description": "All latest AI trade signals with confidence, trade levels, and volume tracking."
+					}
+				},
+				{
+					"name": "Signal History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/signals/history",
+							"host": ["{{base_url}}"],
+							"path": ["api", "signals", "history"]
+						},
+						"description": "Historical signal generation runs."
+					}
+				},
+				{
+					"name": "Actionable Signals (BUY only)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/signals/actionable",
+							"host": ["{{base_url}}"],
+							"path": ["api", "signals", "actionable"]
+						},
+						"description": "Only actionable BUY/STRONG BUY signals."
+					}
+				},
+				{
+					"name": "Avoid List (SELL signals)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/signals/avoid",
+							"host": ["{{base_url}}"],
+							"path": ["api", "signals", "avoid"]
+						},
+						"description": "Stocks to avoid — SELL and STRONG SELL signals."
+					}
+				},
+				{
+					"name": "Top Buys",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/signals/top-buys?limit=10",
+							"host": ["{{base_url}}"],
+							"path": ["api", "signals", "top-buys"],
+							"query": [
+								{ "key": "limit", "value": "10", "description": "Number of signals (default 10)" }
+							]
+						},
+						"description": "Top BUY signals ranked by confidence."
+					}
+				},
+				{
+					"name": "Top Sells",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/signals/top-sells?limit=10",
+							"host": ["{{base_url}}"],
+							"path": ["api", "signals", "top-sells"],
+							"query": [
+								{ "key": "limit", "value": "10" }
+							]
+						},
+						"description": "Top SELL signals ranked by confidence."
+					}
+				}
+			]
+		},
+		{
+			"name": "⚡ Trade Execution",
+			"item": [
+				{
+					"name": "Execute Signal (Place Trade)",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_id\": {{user_id}},\n    \"symbol\": \"TCS.NS\",\n    \"name\": \"Tata Consultancy Services\",\n    \"investment_amount\": 50000,\n    \"buy_price\": 2637.40,\n    \"target_price\": 2800.00,\n    \"stop_loss\": 2500.00,\n    \"signal\": \"BUY\",\n    \"confidence\": 85,\n    \"horizon\": \"1 Month\",\n    \"max_safe_qty\": 100\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trading/execute-signal",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "execute-signal"]
+						},
+						"description": "Execute an AI signal — creates bracket order (BUY + SL + Target). Increments consumed_volume on the signal."
+					}
+				},
+				{
+					"name": "Square Off Position",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"sell_price\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trading/square-off/{{user_id}}/{{symbol}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "square-off", "{{user_id}}", "{{symbol}}"]
+						},
+						"description": "Square off (sell) a specific position. Pass sell_price or null for market price."
+					}
+				},
+				{
+					"name": "Square Off All Positions",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trading/square-off-all/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "square-off-all", "{{user_id}}"]
+						},
+						"description": "Square off all open positions for a user."
+					}
+				}
+			]
+		},
+		{
+			"name": "📋 Orders & Positions",
+			"item": [
+				{
+					"name": "Get Open Positions",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trading/positions/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "positions", "{{user_id}}"]
+						},
+						"description": "All open positions for a user with current P&L."
+					}
+				},
+				{
+					"name": "Get Order History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trading/orders/{{user_id}}?limit=50",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "orders", "{{user_id}}"],
+							"query": [
+								{ "key": "limit", "value": "50", "description": "Max orders to return" }
+							]
+						},
+						"description": "Order history for a user — all executed, pending, and cancelled orders."
+					}
+				}
+			]
+		},
+		{
+			"name": "💼 Portfolio",
+			"item": [
+				{
+					"name": "Portfolio Summary",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trading/portfolio/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "portfolio", "{{user_id}}"]
+						},
+						"description": "Portfolio summary — balance, invested, P&L, win/loss stats."
+					}
+				},
+				{
+					"name": "Today's P&L",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trading/pnl/today/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "pnl", "today", "{{user_id}}"]
+						},
+						"description": "Today's profit & loss for a user."
+					}
+				},
+				{
+					"name": "List All Portfolios",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/portfolio",
+							"host": ["{{base_url}}"],
+							"path": ["api", "portfolio"]
+						},
+						"description": "List all sector-based portfolios."
+					}
+				},
+				{
+					"name": "Get Portfolio by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/portfolio/1",
+							"host": ["{{base_url}}"],
+							"path": ["api", "portfolio", "1"]
+						},
+						"description": "Get details of a sector portfolio by ID."
+					}
+				},
+				{
+					"name": "Get Sectors",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/portfolio/sectors",
+							"host": ["{{base_url}}"],
+							"path": ["api", "portfolio", "sectors"]
+						},
+						"description": "Get available sectors for portfolio creation."
+					}
+				},
+				{
+					"name": "Create Portfolio",
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Tech Portfolio\",\n    \"description\": \"Technology sector stocks\",\n    \"sectors\": [\"Information Technology\"],\n    \"investment_amount\": 500000\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/portfolio/create",
+							"host": ["{{base_url}}"],
+							"path": ["api", "portfolio", "create"]
+						},
+						"description": "Create a new sector-based portfolio."
+					}
+				},
+				{
+					"name": "Update Portfolio Sectors",
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"sectors\": [\"Information Technology\", \"Financial Services\"]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/portfolio/1/sectors",
+							"host": ["{{base_url}}"],
+							"path": ["api", "portfolio", "1", "sectors"]
+						},
+						"description": "Update sectors for an existing portfolio."
+					}
+				},
+				{
+					"name": "Rebalance Portfolio",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/portfolio/1/rebalance",
+							"host": ["{{base_url}}"],
+							"path": ["api", "portfolio", "1", "rebalance"]
+						},
+						"description": "Trigger portfolio rebalancing based on latest signals."
+					}
+				},
+				{
+					"name": "Delete Portfolio",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/portfolio/1",
+							"host": ["{{base_url}}"],
+							"path": ["api", "portfolio", "1"]
+						},
+						"description": "Delete a portfolio by ID."
+					}
+				}
+			]
+		},
+		{
+			"name": "⚙️ Risk Settings",
+			"item": [
+				{
+					"name": "Get Risk Settings",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trading/risk-settings/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "risk-settings", "{{user_id}}"]
+						},
+						"description": "Get risk management settings for a user."
+					}
+				},
+				{
+					"name": "Update Risk Settings",
+					"request": {
+						"method": "PUT",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"max_investment_per_trade\": 100000,\n    \"max_daily_trades\": 10,\n    \"stop_loss_pct\": 5.0,\n    \"target_pct\": 10.0\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trading/risk-settings/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "risk-settings", "{{user_id}}"]
+						},
+						"description": "Update risk management settings."
+					}
+				}
+			]
+		}
+	]
+}

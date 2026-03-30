@@ -1,28 +1,32 @@
-# 📊 Nifty 500 AI Trading Data Pipeline
+# 🧠 TradeMind AI
 
-AI-powered stock market data pipeline for Indian equities (NSE/BSE).
-Collects price data, calculates technical indicators, scores news sentiment,
-and generates BUY/SELL signals for Nifty 500 stocks.
+AI-powered stock trading platform for Indian equities (NSE). Generates BUY/SELL signals using ML models, executes paper & live trades with auto bracket orders (SL + Target), and monitors positions in real-time via Angel One SmartAPI.
 
-> ⚠️ **Disclaimer**: This is not financial advice. Always do your own research before trading.
+> ⚠️ **Disclaimer**: This is not financial advice. Use live trading at your own risk.
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (After Cloning)
 
 ### Prerequisites
 
-- Python 3.11 or higher
-- pip (Python package manager)
+- **Python 3.11+** (backend)
+- **Node.js 18+** & npm (frontend)
+- Angel One SmartAPI account (optional, for live trading)
+
+---
 
 ### 1. Backend Setup
 
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate   # macOS/Linux
-# venv\Scripts\activate    # Windows
 
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate       # macOS/Linux
+# venv\Scripts\activate        # Windows
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
@@ -30,154 +34,167 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Edit .env with your API keys (see "Getting API Keys" below)
+# Edit .env with your keys
 ```
 
-### 3. First Run (Setup)
+**Required `.env` variables:**
+
+```env
+# News API (free: https://newsapi.org/register)
+NEWSAPI_KEY=your_newsapi_key
+
+# Angel One SmartAPI (https://smartapi.angelone.in)
+ANGEL_API_KEY=your_api_key
+ANGEL_SECRET_KEY=your_secret_key
+ANGEL_CLIENT_ID=your_client_id
+ANGEL_PASSWORD=your_pin
+ANGEL_TOTP_SECRET=your_totp_secret
+
+# Database (local SQLite by default, Turso for production)
+# TURSO_DATABASE_URL=libsql://your-db.turso.io
+# TURSO_AUTH_TOKEN=your_token
+ENV=local
+
+# App Config
+PORT=8000
+LOG_LEVEL=INFO
+JWT_SECRET=your-secret-key-change-this
+```
+
+### 3. Initialize Database
 
 ```bash
 python main.py setup
 ```
 
-This will:
+This creates the SQLite DB, downloads 2 years of price data, calculates indicators, and generates signals (~15 min).
 
-- Create the SQLite database (`nifty500.db`)
-- Download 2 years of price data for 50 stocks (~15 min)
-- Calculate all technical indicators
-- Generate BUY/SELL signals
-
-### 4. Start the API Server
+### 4. Start Backend Server
 
 ```bash
-python main.py server
+source venv/bin/activate
+uvicorn api.server:app --reload --port 8000
 ```
 
-Open http://localhost:8000/docs to see all API endpoints.
-
-### 5. Start Automated Collection
-
-```bash
-python main.py schedule
-```
-
-This runs data collection daily at 4 PM IST after market close.
+API docs: http://localhost:8000/docs
 
 ---
 
-## 🔑 Getting Free API Keys
+### 5. Frontend Setup
 
-### NewsAPI (for news data)
+Open a **new terminal**:
 
-1. Go to https://newsapi.org/register
-2. Sign up for a free account
-3. Copy your API key to `.env` → `NEWSAPI_KEY`
-4. Free tier: 100 requests/day
+```bash
+cd frontend
 
-### Angel One SmartAPI (optional, for live data)
+# Install dependencies
+npm install
 
-1. Open an Angel One account: https://www.angelone.in/
-2. Enable SmartAPI from your account settings
-3. Copy credentials to `.env`
+# Start dev server
+npm run dev
+```
+
+App: http://localhost:5173
 
 ---
 
-## 💻 CLI Commands
+## 🔧 Run Commands Cheatsheet
 
-| Command                   | Description                                       |
-| ------------------------- | ------------------------------------------------- |
-| `python main.py setup`    | First-time setup — creates DB, downloads 2yr data |
-| `python main.py collect`  | Run one manual collection cycle                   |
-| `python main.py server`   | Start FastAPI server on port 8000                 |
-| `python main.py schedule` | Start automated daily scheduler                   |
-| `python main.py status`   | Show database statistics                          |
-| `python main.py signals`  | Print today's top BUY/SELL signals                |
+| What          | Command                                                                                 | Terminal   |
+| ------------- | --------------------------------------------------------------------------------------- | ---------- |
+| **Backend**   | `cd backend && source venv/bin/activate && uvicorn api.server:app --reload --port 8000` | Terminal 1 |
+| **Frontend**  | `cd frontend && npm run dev`                                                            | Terminal 2 |
+| **Scheduler** | `cd backend && source venv/bin/activate && python main.py schedule`                     | Terminal 3 |
+| **DB Status** | `cd backend && source venv/bin/activate && python main.py status`                       | Any        |
+| **Signals**   | `cd backend && source venv/bin/activate && python main.py signals`                      | Any        |
 
 ---
 
 ## 📡 API Endpoints
 
-Base URL: `http://localhost:8000`
-
-| Endpoint                           | Description                   |
-| ---------------------------------- | ----------------------------- |
-| `GET /api/health`                  | Health check + market status  |
-| `GET /api/market/overview`         | Today's market overview       |
-| `GET /api/prices/{symbol}?days=90` | Price history (OHLCV)         |
-| `GET /api/indicators/{symbol}`     | Technical indicators + signal |
-| `GET /api/sentiment/market`        | Market Fear & Greed score     |
-| `GET /api/sentiment/{symbol}`      | Stock-specific sentiment      |
-| `GET /api/signals/top-buys`        | Top BUY signals today         |
-| `GET /api/signals/top-sells`       | Top SELL signals today        |
-| `GET /api/watchlist/{symbol}`      | Combined stock data           |
-| `GET /api/heatmap/sectors`         | Sector performance heatmap    |
-
-Interactive docs: http://localhost:8000/docs
+| Endpoint                                          | Description                   |
+| ------------------------------------------------- | ----------------------------- |
+| `GET /api/health`                                 | Health check + market status  |
+| `GET /api/stocks?page=0&size=25`                  | Paginated stock list          |
+| `GET /api/prices/{symbol}?days=90`                | Price history (OHLCV)         |
+| `GET /api/indicators/{symbol}`                    | Technical indicators + signal |
+| `GET /api/signals/latest?page=0&size=25`          | AI trade signals (paginated)  |
+| `GET /api/watchlist/{symbol}`                     | Combined stock data           |
+| `POST /api/auth/register`                         | Create account                |
+| `POST /api/auth/login`                            | Login → JWT token             |
+| `POST /api/trading/execute-signal`                | Execute trade (Paper or Live) |
+| `GET /api/trading/positions/{user_id}`            | Open positions                |
+| `GET /api/trading/orders/{user_id}`               | Order history                 |
+| `POST /api/trading/square-off/{user_id}/{symbol}` | Sell position                 |
 
 ---
 
-## 📁 Project Structure
+## 🏗️ Project Structure
 
 ```
 trademind/
-├── frontend/               ← React application
-└── backend/                ← Python FastAPI application
-    ├── main.py             ← CLI entry point
-    ├── requirements.txt    ← All Python packages
-    ├── .env                ← Your API keys (local only)
-    ├── nifty500.db         ← SQLite database (created on setup)
-    ├── database/
-    │   ├── db.py           ← Database connection + CRUD helpers
-    │   └── models.py       ← SQL table definitions
-    ├── collectors/
-    │   ├── price_collector.py
-    │   ├── news_collector.py
-    │   └── fii_collector.py
-    ├── analysis/
-    │   ├── indicators.py   ← Technical indicators
-    │   ├── signals.py      ← Signal generator
-    │   └── sentiment.py    ← FinBERT news sentiment
+├── frontend/                  ← React + Vite + TypeScript
+│   ├── src/
+│   │   ├── pages/             ← Dashboard, Market, Signals, Trade, Portfolio, Orders
+│   │   ├── components/        ← Navbar, Pagination, Layout
+│   │   ├── api.ts             ← API client with auth
+│   │   └── AuthContext.tsx     ← JWT auth context
+│   └── package.json
+│
+└── backend/                   ← Python FastAPI
+    ├── main.py                ← CLI (setup/collect/server/schedule)
+    ├── requirements.txt
+    ├── .env                   ← API keys (gitignored)
+    ├── nifty500.db            ← SQLite DB (created on setup)
     ├── api/
-    │   ├── server.py       ← FastAPI application
-    │   └── routes/         ← API route handlers
+    │   ├── server.py          ← FastAPI app
+    │   ├── auth.py            ← JWT authentication
+    │   └── routes/            ← API route handlers
+    ├── trading/
+    │   ├── trading_engine.py  ← Paper & Live trade execution
+    │   ├── gtt_manager.py     ← Angel One GTT orders (SL/Target)
+    │   ├── price_monitor.py   ← Intraday SL/Target checker
+    │   └── risk_manager.py    ← Risk checks before trade
+    ├── collectors/
+    │   ├── price_collector.py ← yfinance daily prices
+    │   ├── angel_collector.py ← Angel One historical data
+    │   ├── ltp_fetcher.py     ← Live LTP from Angel One
+    │   └── news_collector.py  ← NewsAPI headlines
+    ├── analysis/
+    │   ├── indicators.py      ← RSI, MACD, Bollinger, etc.
+    │   ├── signals.py         ← ML signal generator
+    │   └── sentiment.py       ← FinBERT news sentiment
     ├── scheduler/
-    │   └── jobs.py         ← APScheduler automated tasks
-    └── data/
-        └── stocks_list.py  ← Nifty 50 stock symbols
+    │   └── jobs.py            ← APScheduler (daily/hourly/intraday)
+    └── database/
+        ├── db.py              ← DB connection + helpers
+        └── models.py          ← SQL schema
 ```
 
 ---
 
-## 🔧 Common Errors
+## 📊 Key Features
 
-| Error                                       | Fix                                                                     |
-| ------------------------------------------- | ----------------------------------------------------------------------- |
-| `ModuleNotFoundError: No module named 'ta'` | `pip install ta`                                                        |
-| `No price data returned for XYZ.NS`         | Stock may be delisted or yfinance issue. Will be skipped.               |
-| `NEWSAPI_KEY not configured`                | Add your NewsAPI key to `.env`                                          |
-| `Address already in use (port 8000)`        | Change PORT in `.env` or kill the other process                         |
-| `FinBERT model download slow`               | First run downloads ~400MB. Use `score_sentiment_simple()` as fallback. |
-
----
-
-## 🗂️ Database
-
-- **Development**: SQLite (`nifty500.db` — zero setup)
-- **Production**: [Turso](https://turso.tech/) (cloud SQLite, 5GB free)
-  - Just change `DATABASE_URL` in `.env` to `libsql://your-db.turso.io`
+- **AI Trade Signals** — ML models generate BUY/SELL with confidence scores, target, and SL
+- **Paper Trading** — Virtual ₹10L account, auto bracket orders
+- **Live Trading** — Real orders on Angel One with GTT (Good Till Triggered) for SL/Target
+- **Risk Management** — 6 checks before every trade (balance, concentration, daily limits)
+- **Server-Side Pagination** — All list pages paginated via backend APIs
+- **Dark Theme UI** — Premium React dashboard with charting
 
 ---
 
 ## 📊 Tech Stack
 
-| Component          | Technology                        |
-| ------------------ | --------------------------------- |
-| Language           | Python 3.11+                      |
-| Data Collection    | yfinance, requests, BeautifulSoup |
-| Technical Analysis | ta library                        |
-| AI Sentiment       | ProsusAI/FinBERT (transformers)   |
-| Database           | SQLite → Turso (production)       |
-| API Server         | FastAPI + Uvicorn                 |
-| Scheduler          | APScheduler                       |
+| Component | Technology                              |
+| --------- | --------------------------------------- |
+| Frontend  | React 19, Vite, TypeScript, TailwindCSS |
+| Backend   | Python 3.11+, FastAPI, Uvicorn          |
+| Database  | SQLite (dev) → Turso (prod)             |
+| Data      | yfinance, Angel One SmartAPI            |
+| AI/ML     | scikit-learn, FinBERT (sentiment)       |
+| Scheduler | APScheduler                             |
+| Auth      | JWT (Bearer tokens)                     |
 
 ---
 

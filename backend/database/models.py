@@ -174,6 +174,12 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_trade_signals_date ON trade_signals(generated_date);",
     "CREATE INDEX IF NOT EXISTS idx_trade_signals_signal ON trade_signals(signal);",
     "CREATE INDEX IF NOT EXISTS idx_trade_signals_confidence ON trade_signals(confidence);",
+    "CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);",
+    "CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_orders_bracket ON orders(bracket_id);",
+    "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);",
+    "CREATE INDEX IF NOT EXISTS idx_positions_user ON positions(user_id);",
+    "CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol);",
 ]
 
 # ==========================================
@@ -259,6 +265,8 @@ CREATE TABLE IF NOT EXISTS trade_signals (
     max_qty_per_user INTEGER,
     max_investment_per_user REAL,
     min_qty INTEGER,
+    recommended_volume INTEGER,
+    consumed_volume INTEGER DEFAULT 0,
     model_name TEXT,
     model_horizon TEXT,
     model_accuracy REAL,
@@ -268,6 +276,104 @@ CREATE TABLE IF NOT EXISTS trade_signals (
     generated_date TEXT NOT NULL,
     generated_at TEXT NOT NULL,
     UNIQUE(symbol, generated_date)
+);
+"""
+
+# ==========================================
+# Table: users
+# Virtual trading accounts with wallet
+# ==========================================
+CREATE_USERS_TABLE = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    email TEXT UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name TEXT,
+    virtual_balance REAL DEFAULT 1000000,
+    virtual_invested REAL DEFAULT 0,
+    total_pnl REAL DEFAULT 0,
+    win_count INTEGER DEFAULT 0,
+    loss_count INTEGER DEFAULT 0,
+    mode TEXT DEFAULT 'PAPER',
+    angel_client_id TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+"""
+
+# ==========================================
+# Table: orders
+# All orders — BUY/SL/TARGET bracket
+# ==========================================
+CREATE_ORDERS_TABLE = """
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    bracket_id TEXT,
+    order_id TEXT,
+    symbol TEXT NOT NULL,
+    name TEXT,
+    exchange TEXT DEFAULT 'NSE',
+    order_type TEXT NOT NULL,
+    order_purpose TEXT DEFAULT 'ENTRY',
+    quantity INTEGER NOT NULL,
+    price REAL NOT NULL,
+    trigger_price REAL,
+    status TEXT DEFAULT 'PENDING',
+    mode TEXT DEFAULT 'PAPER',
+    signal TEXT,
+    confidence REAL,
+    horizon TEXT,
+    fill_price REAL,
+    fees REAL DEFAULT 0,
+    pnl REAL,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+"""
+
+# ==========================================
+# Table: positions
+# Active holdings from executed orders
+# ==========================================
+CREATE_POSITIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    name TEXT,
+    quantity INTEGER NOT NULL,
+    avg_buy_price REAL NOT NULL,
+    current_price REAL,
+    target_price REAL,
+    stop_loss REAL,
+    unrealized_pnl REAL,
+    unrealized_pnl_pct REAL,
+    invested_amount REAL,
+    current_value REAL,
+    mode TEXT DEFAULT 'PAPER',
+    bracket_id TEXT,
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(user_id, symbol)
+);
+"""
+
+# ==========================================
+# Table: risk_settings
+# Per-user risk management settings
+# ==========================================
+CREATE_RISK_SETTINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS risk_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE,
+    max_daily_loss REAL DEFAULT 5000,
+    max_daily_trades INTEGER DEFAULT 10,
+    max_position_pct REAL DEFAULT 20,
+    auto_stop_loss INTEGER DEFAULT 1,
+    auto_target INTEGER DEFAULT 1,
+    FOREIGN KEY (user_id) REFERENCES users(id)
 );
 """
 
@@ -283,5 +389,9 @@ ALL_TABLES = [
     CREATE_PORTFOLIO_SECTORS_TABLE,
     CREATE_PORTFOLIO_STOCKS_TABLE,
     CREATE_TRADE_SIGNALS_TABLE,
+    CREATE_USERS_TABLE,
+    CREATE_ORDERS_TABLE,
+    CREATE_POSITIONS_TABLE,
+    CREATE_RISK_SETTINGS_TABLE,
 ]
 

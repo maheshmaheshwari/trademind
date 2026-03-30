@@ -6,6 +6,9 @@
 *.db
 *.db-journal
 *.db-wal
+# Accidental literal ":memory:" SQLite files (not true in-memory DB)
+backend/:memory:
+backend/:memory:-*
 
 # Python
 __pycache__/

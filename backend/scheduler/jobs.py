@@ -31,17 +31,18 @@ import logging
 from datetime import datetime
 
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
 
 
 def collect_eod_data_job():
-    """Daily job: collect end-of-day prices for all stocks."""
-    logger.info("⏰ Running EOD data collection...")
+    """Daily job: collect end-of-day prices for all stocks via Angel One."""
+    logger.info("⏰ Running EOD data collection (Angel One)...")
     try:
-        from collectors.price_collector import collect_eod_data
-        result = collect_eod_data()
+        from collectors.angel_collector import collect_eod_angel
+        result = collect_eod_angel(days=5)
         logger.info(f"EOD collection done: {result}")
     except Exception as e:
         logger.error(f"EOD collection failed: {e}")
@@ -166,6 +167,44 @@ def sync_to_turso_job():
         logger.error(f"EOD Turso sync failed: {e}")
 
 
+def intraday_price_fetch_job():
+    """Every 30 min: fetch intraday 30-min candle data for stocks with open positions."""
+    logger.info("⏰ Fetching intraday 30-min candle data...")
+    try:
+        from collectors.ltp_fetcher import fetch_intraday_30min
+        count = fetch_intraday_30min()
+        logger.info(f"Intraday fetch done: {count} candles saved")
+    except Exception as e:
+        logger.error(f"Intraday price fetch failed: {e}")
+
+
+def price_monitor_job():
+    """Every 5 min: check SL/Target triggers using live LTP from Angel One."""
+    logger.info("⏰ Running price monitor (SL/Target check)...")
+    try:
+        from trading.price_monitor import run_monitor
+        triggered = run_monitor()
+        if triggered:
+            logger.warning(f"⚡ {len(triggered)} positions auto-closed!")
+    except Exception as e:
+        logger.error(f"Price monitor failed: {e}")
+
+
+def sync_gtt_status_job():
+    """Every 5 min: sync GTT rule statuses from Angel One to local DB."""
+    logger.info("⏰ Syncing GTT statuses from Angel One...")
+    try:
+        from trading.gtt_manager import sync_gtt_statuses
+        triggered = sync_gtt_statuses()
+        if triggered:
+            for t in triggered:
+                logger.warning(f"⚡ GTT triggered: {t['symbol']} {t.get('trigger')} → P&L: ₹{t['pnl']:+,.2f}")
+        else:
+            logger.info("No GTT triggers detected")
+    except Exception as e:
+        logger.error(f"GTT sync failed: {e}")
+
+
 def start_scheduler() -> None:
     """
     Start the APScheduler with all configured jobs.
@@ -178,7 +217,73 @@ def start_scheduler() -> None:
         - Hourly 9-16 IST weekdays: intraday + news refresh
         - Weekly Sunday 20:00 IST: cleanup + integrity check
     """
+    import os
+    import time as _time
+    from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, EVENT_JOB_MISSED
+
+    # ==========================================
+    # CONFIGURE FILE + CONSOLE LOGGING
+    # ==========================================
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "scheduler.log")
+
+    # Root logger config
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # Remove existing handlers
+    for h in root_logger.handlers[:]:
+        root_logger.removeHandler(h)
+
+    fmt = logging.Formatter(
+        "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(fmt)
+    root_logger.addHandler(console_handler)
+
+    # File handler (rotates implicitly by appending)
+    file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    file_handler.setFormatter(fmt)
+    root_logger.addHandler(file_handler)
+
+    logger.info("=" * 60)
+    logger.info("🚀 TradeMind AI — Scheduler Starting")
+    logger.info(f"📁 Log file: {log_file}")
+    logger.info(f"🕐 Current time (IST): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
+
     scheduler = BlockingScheduler(timezone="Asia/Kolkata")
+
+    # ==========================================
+    # EVENT LISTENER — log every job execution
+    # ==========================================
+    _job_start_times: dict = {}
+
+    def job_listener(event):
+        job_id = event.job_id
+        job = scheduler.get_job(job_id)
+        job_name = job.name if job else job_id
+
+        if event.code == EVENT_JOB_EXECUTED:
+            elapsed = _time.time() - _job_start_times.pop(job_id, _time.time())
+            logger.info(f"✅ {job_name} completed in {elapsed:.1f}s")
+        elif event.code == EVENT_JOB_ERROR:
+            logger.error(f"❌ {job_name} FAILED: {event.exception}")
+            logger.error(f"   Traceback: {event.traceback}")
+        elif event.code == EVENT_JOB_MISSED:
+            logger.warning(f"⏭️  {job_name} MISSED (scheduled time passed)")
+
+    def before_job(event):
+        _job_start_times[event.job_id] = _time.time()
+
+    from apscheduler.events import EVENT_JOB_SUBMITTED
+    scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
+    scheduler.add_listener(before_job, EVENT_JOB_SUBMITTED)
 
     # ==========================================
     # DAILY JOBS — 4:00 PM IST (after market close)
@@ -235,6 +340,37 @@ def start_scheduler() -> None:
     )
 
     # ==========================================
+    # INTRADAY JOBS — Market Hours (9:15 AM – 3:30 PM)
+    # ==========================================
+
+    # Every 30 min: fetch 30-min candle data for positions
+    scheduler.add_job(
+        intraday_price_fetch_job,
+        CronTrigger(hour="9-15", minute="15,45", day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="intraday_30min",
+        name="Intraday 30-Min Candle Fetch",
+        misfire_grace_time=600,
+    )
+
+    # Every 5 min: check SL/Target triggers with live LTP (paper positions)
+    scheduler.add_job(
+        price_monitor_job,
+        CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="price_monitor",
+        name="Price Monitor (SL/Target)",
+        misfire_grace_time=300,
+    )
+
+    # Every 5 min: sync GTT statuses from Angel One (live positions)
+    scheduler.add_job(
+        sync_gtt_status_job,
+        CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="gtt_sync",
+        name="GTT Status Sync (Angel One)",
+        misfire_grace_time=300,
+    )
+
+    # ==========================================
     # WEEKLY JOBS — Sunday 8 PM IST
     # ==========================================
     scheduler.add_job(
@@ -275,16 +411,160 @@ def start_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
-    # Print schedule
-    print("\n📅 Scheduler Jobs:")
-    print("=" * 60)
-    for job in scheduler.get_jobs():
-        print(f"  ⏰ {job.name:30s} — {job.trigger}")
-    print("=" * 60)
-    print("\n🚀 Scheduler started. Press Ctrl+C to stop.\n")
+    # ==========================================
+    # PRINT SCHEDULE TABLE WITH NEXT RUN TIMES
+    # ==========================================
+    logger.info("")
+    logger.info("📅 Scheduled Jobs:")
+    logger.info("-" * 75)
+    logger.info(f"  {'Job Name':<35s} {'Schedule':<25s} {'Next Run':<15s}")
+    logger.info("-" * 75)
+    for job in sorted(scheduler.get_jobs(), key=lambda j: j.next_run_time or datetime.max):
+        next_run = job.next_run_time.strftime("%H:%M:%S") if job.next_run_time else "N/A"
+        trigger_str = str(job.trigger)[:24]
+        logger.info(f"  ⏰ {job.name:<33s} {trigger_str:<25s} {next_run}")
+    logger.info("-" * 75)
+    logger.info(f"  Total: {len(scheduler.get_jobs())} jobs")
+    logger.info("")
+    logger.info("🟢 Scheduler running. Press Ctrl+C to stop.")
+    logger.info("")
 
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
-        print("\n⏹  Scheduler stopped.")
+        logger.info("⏹  Scheduler stopped by user.")
         scheduler.shutdown()
+
+
+# ==========================================
+# Global reference for background scheduler
+# ==========================================
+_bg_scheduler: BackgroundScheduler | None = None
+
+
+def _add_all_jobs(scheduler):
+    """Add all scheduled jobs to any scheduler instance (shared between blocking and background)."""
+    # DAILY JOBS — 4:00 PM IST
+    scheduler.add_job(collect_eod_data_job, CronTrigger(hour=16, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="eod_data", name="EOD Price Collection", misfire_grace_time=3600, replace_existing=True)
+    scheduler.add_job(collect_index_data_job, CronTrigger(hour=16, minute=5, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="index_data", name="Index Data Collection", misfire_grace_time=3600, replace_existing=True)
+    scheduler.add_job(calculate_indicators_job, CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="indicators", name="Calculate Indicators", misfire_grace_time=3600, replace_existing=True)
+    scheduler.add_job(collect_news_job, CronTrigger(hour=16, minute=45, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="daily_news", name="Daily News Collection", misfire_grace_time=3600, replace_existing=True)
+    scheduler.add_job(collect_fii_data_job, CronTrigger(hour=17, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="fii_dii", name="FII/DII Data", misfire_grace_time=3600, replace_existing=True)
+
+    # HOURLY JOBS — 9-16 IST
+    scheduler.add_job(collect_news_job, CronTrigger(hour="9-16", minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="hourly_news", name="Hourly News Refresh", misfire_grace_time=1800, replace_existing=True)
+
+    # INTRADAY JOBS — Market Hours
+    scheduler.add_job(intraday_price_fetch_job, CronTrigger(hour="9-15", minute="15,45", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="intraday_30min", name="Intraday 30-Min Candle Fetch", misfire_grace_time=600, replace_existing=True)
+    scheduler.add_job(price_monitor_job, CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="price_monitor", name="Price Monitor (SL/Target)", misfire_grace_time=300, replace_existing=True)
+    scheduler.add_job(sync_gtt_status_job, CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="gtt_sync", name="GTT Status Sync (Angel One)", misfire_grace_time=300, replace_existing=True)
+
+    # WEEKLY JOBS — Sunday 8 PM IST
+    scheduler.add_job(cleanup_old_data_job, CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="Asia/Kolkata"), id="cleanup", name="Weekly Data Cleanup", misfire_grace_time=7200, replace_existing=True)
+    scheduler.add_job(verify_data_integrity_job, CronTrigger(day_of_week="sun", hour=20, minute=30, timezone="Asia/Kolkata"), id="integrity", name="Weekly Data Integrity Check", misfire_grace_time=7200, replace_existing=True)
+
+    # TRADE SIGNAL + SYNC JOBS
+    scheduler.add_job(generate_trade_signals_job, CronTrigger(hour=17, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="trade_signals", name="Generate Trade Signals", misfire_grace_time=3600, replace_existing=True)
+    scheduler.add_job(sync_to_turso_job, CronTrigger(hour=20, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="eod_turso_sync", name="EOD Turso Cloud Sync", misfire_grace_time=3600, replace_existing=True)
+
+
+def start_background_scheduler() -> BackgroundScheduler | None:
+    """
+    Start a non-blocking BackgroundScheduler inside the API server process.
+
+    Unlike start_scheduler() (which blocks), this runs in a daemon thread
+    and is safe to call from FastAPI's startup event.
+
+    Returns the scheduler instance (or None if already running).
+    """
+    import os
+    import time as _time
+    from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, EVENT_JOB_MISSED, EVENT_JOB_SUBMITTED
+
+    global _bg_scheduler
+
+    if _bg_scheduler and _bg_scheduler.running:
+        logger.warning("Background scheduler already running — skipping")
+        return _bg_scheduler
+
+    # ==========================================
+    # LOGGING SETUP
+    # ==========================================
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "scheduler.log")
+
+    fmt = logging.Formatter(
+        "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    # Add file handler to scheduler logger
+    sched_logger = logging.getLogger("scheduler")
+    sched_logger.setLevel(logging.INFO)
+    if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '').endswith('scheduler.log') for h in sched_logger.handlers):
+        fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+        fh.setFormatter(fmt)
+        sched_logger.addHandler(fh)
+
+    logger.info("=" * 60)
+    logger.info("🚀 TradeMind AI — Background Scheduler Starting (inside API)")
+    logger.info(f"📁 Log file: {log_file}")
+    logger.info(f"🕐 Current time (IST): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
+
+    _bg_scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
+
+    # Event listeners
+    _job_start_times: dict = {}
+
+    def job_listener(event):
+        job_id = event.job_id
+        job = _bg_scheduler.get_job(job_id) if _bg_scheduler else None
+        job_name = job.name if job else job_id
+
+        if event.code == EVENT_JOB_EXECUTED:
+            elapsed = _time.time() - _job_start_times.pop(job_id, _time.time())
+            logger.info(f"✅ {job_name} completed in {elapsed:.1f}s")
+        elif event.code == EVENT_JOB_ERROR:
+            logger.error(f"❌ {job_name} FAILED: {event.exception}")
+        elif event.code == EVENT_JOB_MISSED:
+            logger.warning(f"⏭️  {job_name} MISSED (scheduled time passed)")
+
+    def before_job(event):
+        _job_start_times[event.job_id] = _time.time()
+
+    _bg_scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
+    _bg_scheduler.add_listener(before_job, EVENT_JOB_SUBMITTED)
+
+    # Add all jobs
+    _add_all_jobs(_bg_scheduler)
+
+    # Print schedule table
+    logger.info("")
+    logger.info("📅 Scheduled Jobs (Background Mode):")
+    logger.info("-" * 75)
+    logger.info(f"  {'Job Name':<35s} {'Schedule':<25s} {'Next Run':<15s}")
+    logger.info("-" * 75)
+    # Jobs don't have next_run_time until started, so start first
+    _bg_scheduler.start()
+
+    for job in sorted(_bg_scheduler.get_jobs(), key=lambda j: j.next_run_time or datetime.max):
+        next_run = job.next_run_time.strftime("%H:%M:%S") if job.next_run_time else "N/A"
+        trigger_str = str(job.trigger)[:24]
+        logger.info(f"  ⏰ {job.name:<33s} {trigger_str:<25s} {next_run}")
+    logger.info("-" * 75)
+    logger.info(f"  Total: {len(_bg_scheduler.get_jobs())} jobs")
+    logger.info("")
+    logger.info("🟢 Background scheduler running in API server.")
+
+    return _bg_scheduler
+
+
+def stop_background_scheduler():
+    """Stop the background scheduler gracefully."""
+    global _bg_scheduler
+    if _bg_scheduler and _bg_scheduler.running:
+        _bg_scheduler.shutdown(wait=False)
+        logger.info("⏹  Background scheduler stopped.")
+        _bg_scheduler = None

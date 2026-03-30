@@ -43,11 +43,12 @@ ENV = os.getenv("ENV", "local").lower()
 
 def get_connection(sync_on_connect: bool = True):
     """
-    Get a database connection.
+    Get a database connection based on the ENV setting.
 
-    If Turso credentials are configured in .env, connects to the cloud
-    database with a local embedded replica (reads are instant, writes sync).
-    Otherwise, uses a local-only SQLite file.
+    - ENV=local  → local-only SQLite, no Turso sync (fast, offline-capable)
+    - ENV=production → Turso-synced embedded replica (reads from local, writes sync to cloud)
+
+    If ENV=production but Turso credentials are missing, falls back to local.
 
     Args:
         sync_on_connect: Whether to sync from cloud on connection.
@@ -62,7 +63,12 @@ def get_connection(sync_on_connect: bool = True):
         rows = cursor.fetchall()
         conn.close()
     """
-    if USE_TURSO:
+    if ENV == "local" or not USE_TURSO:
+        # Local-only: no Turso sync
+        import sqlite3
+        return sqlite3.connect(DB_PATH, timeout=15.0)
+    else:
+        # Production: Turso-synced embedded replica
         conn = libsql.connect(
             DB_PATH,
             sync_url=TURSO_DATABASE_URL,
@@ -70,17 +76,16 @@ def get_connection(sync_on_connect: bool = True):
         )
         if sync_on_connect:
             conn.sync()
-    else:
-        conn = libsql.connect(DB_PATH)
     return conn
 
 
 def get_local_connection():
     """
-    Get a local-only database connection (no Turso sync).
-    Used when ENV=local to avoid syncing on every write.
+    Get a local-only database connection using standard sqlite3.
+    Used for local data collection to avoid libsql WAL corruption issues.
     """
-    return libsql.connect(DB_PATH)
+    import sqlite3
+    return sqlite3.connect(DB_PATH, timeout=15.0)
 
 
 def get_turso_connection(sync_on_connect: bool = True):
@@ -149,7 +154,7 @@ def init_database() -> None:
             cursor.execute(index_sql)
 
         conn.commit()
-        if USE_TURSO:
+        if ENV != "local" and USE_TURSO:
             conn.sync()
             logger.info(f"Database initialized — synced to Turso cloud")
             print(f"☁️  Database initialized — synced to Turso ({TURSO_DATABASE_URL})")
@@ -207,7 +212,7 @@ def insert_price(
             (symbol, exchange, date, time_val, open_price, high, low, close, volume, interval),
         )
         conn.commit()
-        if USE_TURSO:
+        if ENV != "local" and USE_TURSO:
             conn.sync()
         return True
     except Exception as e:
@@ -242,7 +247,7 @@ def insert_prices_batch(rows: List[Tuple], sync: bool = True) -> int:
                 row,
             )
         conn.commit()
-        if sync and USE_TURSO:
+        if sync and ENV != "local" and USE_TURSO:
             conn.sync()
         logger.info(f"Batch inserted {len(rows)} price rows")
         return len(rows)
@@ -313,7 +318,7 @@ def insert_indicators(
             ),
         )
         db_conn.commit()
-        if not conn and USE_TURSO:
+        if not conn and ENV != "local" and USE_TURSO:
             db_conn.sync()
         return True
     except Exception as e:
@@ -357,7 +362,7 @@ def insert_news(
             (headline, source, published_at, symbol, sentiment, confidence, url),
         )
         conn.commit()
-        if USE_TURSO:
+        if ENV != "local" and USE_TURSO:
             conn.sync()
         return True
     except Exception as e:
@@ -407,7 +412,7 @@ def insert_market_overview(data: Dict[str, Any]) -> bool:
             ),
         )
         conn.commit()
-        if USE_TURSO:
+        if ENV != "local" and USE_TURSO:
             conn.sync()
         return True
     except Exception as e:
@@ -464,7 +469,7 @@ def insert_ai_signal(
             ),
         )
         db_conn.commit()
-        if not conn and USE_TURSO:
+        if not conn and ENV != "local" and USE_TURSO:
             db_conn.sync()
         return True
     except Exception as e:
@@ -513,10 +518,11 @@ def insert_trade_signals_batch(
                  current_price, atr_14, atr_pct,
                  avg_daily_volume, daily_turnover_cr, liquidity,
                  max_safe_qty, max_qty_per_user, max_investment_per_user, min_qty,
+                 recommended_volume, consumed_volume,
                  model_name, model_horizon, model_accuracy, model_precision,
                  top_drivers, sentiment,
                  generated_date, generated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     t["symbol"],
                     t.get("name", ""),
@@ -538,6 +544,8 @@ def insert_trade_signals_batch(
                     t.get("position", {}).get("max_qty_per_user"),
                     t.get("position", {}).get("max_investment_per_user"),
                     t.get("position", {}).get("min_qty"),
+                    t.get("position", {}).get("recommended_volume"),
+                    0,  # consumed_volume resets to 0 for fresh signals
                     t.get("model", {}).get("name"),
                     t.get("model", {}).get("horizon"),
                     t.get("model", {}).get("accuracy"),
@@ -562,13 +570,28 @@ def insert_trade_signals_batch(
         conn.close()
 
 
+def get_remote_turso_connection():
+    """
+    Get a pure remote Turso connection over HTTP.
+    Does NOT use a local SQLite replica, avoiding WAL sync issues.
+    Used by the API server to read trade signals directly from cloud.
+    """
+    if not USE_TURSO:
+        logger.warning("Turso not configured, returning local connection")
+        return libsql.connect(DB_PATH)
+    return libsql.connect(
+        database=TURSO_DATABASE_URL,
+        auth_token=TURSO_AUTH_TOKEN
+    )
+
+
 def get_trade_signals(
     date: Optional[str] = None,
     signal_type: Optional[str] = None,
     limit: int = 100,
 ) -> List[Dict]:
     """
-    Query trade signals with optional filters.
+    Query trade signals with optional filters from local database.
 
     Args:
         date: Filter by generated_date (YYYY-MM-DD). None = latest date.
@@ -578,7 +601,8 @@ def get_trade_signals(
     Returns:
         List of trade signal dicts sorted by confidence descending.
     """
-    conn = get_connection(sync_on_connect=False)
+    # Use local DB connection (Turso quota exceeded)
+    conn = get_local_connection()
     try:
         if date is None:
             # Get the latest date
@@ -587,23 +611,29 @@ def get_trade_signals(
             ).fetchone()
             date = row[0] if row and row[0] else datetime.now().strftime("%Y-%m-%d")
 
+        # Volume filter: hide signals where consumed_volume >= recommended_volume
+        vol_filter = "AND (consumed_volume < recommended_volume OR recommended_volume IS NULL OR consumed_volume IS NULL)"
+
         if signal_type:
             cur = conn.execute(
-                """SELECT * FROM trade_signals
-                WHERE generated_date = ? AND signal LIKE ?
+                f"""SELECT * FROM trade_signals
+                WHERE generated_date = ? AND signal LIKE ? {vol_filter}
                 ORDER BY confidence DESC
                 LIMIT ?""",
                 (date, f"%{signal_type}%", limit),
             )
         else:
             cur = conn.execute(
-                """SELECT * FROM trade_signals
-                WHERE generated_date = ?
+                f"""SELECT * FROM trade_signals
+                WHERE generated_date = ? {vol_filter}
                 ORDER BY confidence DESC
                 LIMIT ?""",
                 (date, limit),
             )
         return _rows_to_dicts(cur)
+    except Exception as e:
+        logger.error(f"Error fetching trade signals: {e}")
+        return []
     finally:
         conn.close()
 
@@ -656,7 +686,7 @@ def sync_trade_signals_to_turso() -> int:
             placeholders = ",".join(["?" for _ in cols_no_id])
             turso_conn.execute(
                 f"INSERT OR REPLACE INTO trade_signals ({','.join(cols_no_id)}) VALUES ({placeholders})",
-                values,
+                tuple(values),
             )
             count += 1
 
@@ -835,7 +865,7 @@ def get_top_signals(
     limit: int = 10,
 ) -> List[Dict]:
     """
-    Get top AI signals sorted by confidence.
+    Get top AI trade signals sorted by confidence from local DB.
 
     Args:
         signal_type: Filter by signal type ("BUY", "STRONG BUY", "SELL", etc.)
@@ -844,15 +874,15 @@ def get_top_signals(
     Returns:
         List of dicts with signal data.
     """
-    conn = get_connection()
+    conn = get_local_connection()
     try:
         # Get today's date
         today = datetime.now().strftime("%Y-%m-%d")
 
         cur = conn.execute(
-            """SELECT * FROM ai_signals
+            """SELECT * FROM trade_signals
             WHERE signal LIKE ?
-            AND date(generated_at) = ?
+            AND generated_date = ?
             ORDER BY confidence DESC
             LIMIT ?""",
             (f"%{signal_type}%", today, limit),
@@ -862,9 +892,9 @@ def get_top_signals(
         # If no signals today, get the most recent ones
         if not results:
             cur = conn.execute(
-                """SELECT * FROM ai_signals
+                """SELECT * FROM trade_signals
                 WHERE signal LIKE ?
-                ORDER BY generated_at DESC, confidence DESC
+                ORDER BY generated_date DESC, confidence DESC
                 LIMIT ?""",
                 (f"%{signal_type}%", limit),
             )
@@ -933,5 +963,161 @@ def get_latest_date(symbol: str) -> Optional[str]:
             (symbol,),
         ).fetchone()
         return row[0] if row and row[0] else None
+    finally:
+        conn.close()
+
+
+def _format_trade_signal(row: Dict) -> Dict:
+    """
+    Reshape a flat trade_signals DB row into the nested format
+    the frontend expects (matching the old JSON file structure).
+    """
+    return {
+        "symbol": row.get("symbol"),
+        "name": row.get("name"),
+        "signal": row.get("signal"),
+        "confidence": row.get("confidence"),
+        "trade": {
+            "type": row.get("trade_type"),
+            "buy_price": row.get("buy_price"),
+            "target_price": row.get("target_price"),
+            "stop_loss": row.get("stop_loss"),
+            "risk_reward": row.get("risk_reward"),
+            "expected_return_pct": row.get("expected_return_pct"),
+        },
+        "price": {
+            "current": row.get("current_price"),
+            "atr_14": row.get("atr_14"),
+            "atr_pct": row.get("atr_pct"),
+        },
+        "position": {
+            "avg_daily_volume": row.get("avg_daily_volume"),
+            "daily_turnover_cr": row.get("daily_turnover_cr"),
+            "liquidity": row.get("liquidity"),
+            "max_safe_qty": row.get("max_safe_qty"),
+            "max_qty_per_user": row.get("max_qty_per_user"),
+            "max_investment_per_user": row.get("max_investment_per_user"),
+            "min_qty": row.get("min_qty"),
+            "recommended_volume": row.get("recommended_volume"),
+            "consumed_volume": row.get("consumed_volume", 0),
+        },
+        "model": {
+            "name": row.get("model_name"),
+            "horizon": row.get("model_horizon"),
+            "accuracy": row.get("model_accuracy"),
+            "precision": row.get("model_precision"),
+        },
+        "top_drivers": json.loads(row["top_drivers"]) if row.get("top_drivers") else [],
+        "sentiment": json.loads(row["sentiment"]) if row.get("sentiment") else {},
+        "generated_at": row.get("generated_at"),
+    }
+
+
+def get_trade_signals_formatted(
+    date: Optional[str] = None,
+    signal_filter: Optional[List[str]] = None,
+    limit: int = 200,
+) -> Dict:
+    """
+    Query trade signals from DB and return in the nested format
+    matching the old JSON file structure.
+
+    Args:
+        date: Filter by generated_date (None = latest date).
+        signal_filter: List of signal types to include, e.g. ["STRONG BUY", "BUY"].
+        limit: Max results.
+
+    Returns:
+        Dict with generated_at, trades, actionable_trades, avoid_list, hold_list, summary.
+    """
+    conn = get_connection(sync_on_connect=False)
+    try:
+        # Determine the date to query
+        if date is None:
+            row = conn.execute(
+                "SELECT MAX(generated_date) FROM trade_signals"
+            ).fetchone()
+            date = row[0] if row and row[0] else datetime.now().strftime("%Y-%m-%d")
+
+        # Volume filter: hide signals where consumed_volume >= recommended_volume
+        vol_filter = "AND (consumed_volume < recommended_volume OR recommended_volume IS NULL OR consumed_volume IS NULL)"
+
+        # Build query
+        if signal_filter:
+            placeholders = ",".join(["?" for _ in signal_filter])
+            cur = conn.execute(
+                f"""SELECT * FROM trade_signals
+                WHERE generated_date = ? AND signal IN ({placeholders}) {vol_filter}
+                ORDER BY confidence DESC
+                LIMIT ?""",
+                (date, *signal_filter, limit),
+            )
+        else:
+            cur = conn.execute(
+                f"""SELECT * FROM trade_signals
+                WHERE generated_date = ? {vol_filter}
+                ORDER BY confidence DESC
+                LIMIT ?""",
+                (date, limit),
+            )
+
+        rows = _rows_to_dicts(cur)
+        trades = [_format_trade_signal(r) for r in rows]
+
+        # Categorize
+        actionable = [t for t in trades if t["signal"] in ("STRONG BUY", "BUY")]
+        avoid = [t for t in trades if t["signal"] in ("SELL", "STRONG SELL")]
+        hold = [t for t in trades if t["signal"] == "HOLD"]
+
+        # Summary counts
+        summary = {
+            "total": len(trades),
+            "strong_buy": sum(1 for t in trades if t["signal"] == "STRONG BUY"),
+            "buy": sum(1 for t in trades if t["signal"] == "BUY"),
+            "hold": sum(1 for t in trades if t["signal"] == "HOLD"),
+            "sell": sum(1 for t in trades if t["signal"] == "SELL"),
+            "strong_sell": sum(1 for t in trades if t["signal"] == "STRONG SELL"),
+        }
+
+        # Get generated_at from first row
+        generated_at = rows[0].get("generated_at") if rows else None
+
+        return {
+            "generated_at": generated_at,
+            "generated_date": date,
+            "total_signals": len(trades),
+            "summary": summary,
+            "trades": trades,
+            "actionable_trades": actionable,
+            "avoid_list": avoid,
+            "hold_list": hold,
+        }
+    finally:
+        conn.close()
+
+
+def get_signal_history(limit: int = 30) -> List[Dict]:
+    """
+    Get trade signal runs grouped by generated_date.
+
+    Returns:
+        List of dicts with date, total signals, and breakdown.
+    """
+    conn = get_connection(sync_on_connect=False)
+    try:
+        cur = conn.execute(
+            """SELECT generated_date,
+                      COUNT(*) as total,
+                      SUM(CASE WHEN signal IN ('STRONG BUY','BUY') THEN 1 ELSE 0 END) as buys,
+                      SUM(CASE WHEN signal IN ('SELL','STRONG SELL') THEN 1 ELSE 0 END) as sells,
+                      SUM(CASE WHEN signal = 'HOLD' THEN 1 ELSE 0 END) as holds,
+                      MAX(generated_at) as generated_at
+               FROM trade_signals
+               GROUP BY generated_date
+               ORDER BY generated_date DESC
+               LIMIT ?""",
+            (limit,),
+        )
+        return _rows_to_dicts(cur)
     finally:
         conn.close()

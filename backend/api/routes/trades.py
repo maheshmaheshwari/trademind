@@ -95,6 +95,24 @@ async def get_latest_signals(
     return result
 
 
+@router.get("/stock/{symbol}")
+async def get_signal_for_stock(symbol: str):
+    """Get the latest trade signal for a specific stock symbol."""
+    raw = get_trade_signals_formatted()
+    all_trades = raw.get("trades", raw.get("data", []))
+
+    sym_clean = symbol.upper()
+    match = next(
+        (s for s in all_trades if
+         s.get("symbol", "").upper() == sym_clean or
+         s.get("symbol", "").upper().replace(".NS", "") == sym_clean.replace(".NS", "")),
+        None
+    )
+    if not match:
+        return {"signal": None}
+    return {"signal": match}
+
+
 @router.get("/history")
 async def get_signal_history_endpoint():
     """Get all historical signal runs grouped by date."""

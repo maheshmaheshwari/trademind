@@ -9,7 +9,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
-from database.db import get_trade_signals_formatted, get_connection
+from database.db import get_trade_signals_formatted, get_connection, _execute, USE_PG
 
 router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])
 
@@ -239,33 +239,37 @@ async def create_portfolio(body: PortfolioCreate):
     # Save to DB
     conn = get_connection()
     try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO portfolios (name, investment_amount, time_horizon, risk_profile) VALUES (?, ?, ?, ?)",
-            (body.name, body.investment_amount, body.time_horizon, body.risk_profile)
-        )
+        insert_sql = "INSERT INTO portfolios (name, investment_amount, time_horizon, risk_profile) VALUES (?, ?, ?, ?)"
+        params = (body.name, body.investment_amount, body.time_horizon, body.risk_profile)
+        if USE_PG:
+            cur = _execute(conn, insert_sql + " RETURNING id", params)
+            portfolio_id = cur.fetchone()[0]
+        else:
+            cur = _execute(conn, insert_sql, params)
+            portfolio_id = cur.lastrowid
         conn.commit()
-        portfolio_id = cursor.execute("SELECT last_insert_rowid()").fetchone()[0]
-        
+
         # Save sector allocations
         for sector, pct in allocations:
             num = len([p for p in picks if p["sector"] == sector])
-            cursor.execute(
+            _execute(
+                conn,
                 "INSERT INTO portfolio_sectors (portfolio_id, sector, allocation_pct, ai_suggested_pct, num_stocks) VALUES (?, ?, ?, ?, ?)",
                 (portfolio_id, sector, pct, pct, num)
             )
-        
+
         # Save stock picks
         for pick in picks:
-            cursor.execute(
-                """INSERT INTO portfolio_stocks 
+            _execute(
+                conn,
+                """INSERT INTO portfolio_stocks
                 (portfolio_id, symbol, sector, signal, confidence, buy_price, target_price, stop_loss, allocated_amount, quantity)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (portfolio_id, pick["symbol"], pick["sector"], pick["signal"],
                  pick["confidence"], pick["buy_price"], pick["target_price"],
                  pick["stop_loss"], pick["allocated_amount"], pick["quantity"])
             )
-        
+
         conn.commit()
     finally:
         conn.close()
@@ -289,15 +293,16 @@ async def get_portfolio(portfolio_id: int):
     """Get portfolio details with sectors and stocks."""
     conn = get_connection()
     try:
-        row = conn.execute("SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+        row = _execute(conn, "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Portfolio not found")
-        
+
         cols = ["id", "name", "investment_amount", "time_horizon", "risk_profile", "created_at", "updated_at"]
         portfolio = dict(zip(cols, row))
-        
+
         # Sectors
-        sector_rows = conn.execute(
+        sector_rows = _execute(
+            conn,
             "SELECT sector, allocation_pct, ai_suggested_pct, num_stocks FROM portfolio_sectors WHERE portfolio_id = ?",
             (portfolio_id,)
         ).fetchall()
@@ -305,9 +310,10 @@ async def get_portfolio(portfolio_id: int):
             {"sector": r[0], "allocation_pct": r[1], "ai_suggested_pct": r[2], "num_stocks": r[3]}
             for r in sector_rows
         ]
-        
+
         # Stocks
-        stock_rows = conn.execute(
+        stock_rows = _execute(
+            conn,
             "SELECT symbol, sector, signal, confidence, buy_price, target_price, stop_loss, allocated_amount, quantity, status FROM portfolio_stocks WHERE portfolio_id = ?",
             (portfolio_id,)
         ).fetchall()
@@ -325,7 +331,7 @@ async def list_portfolios():
     """List all portfolios."""
     conn = get_connection()
     try:
-        rows = conn.execute("SELECT id, name, investment_amount, time_horizon, risk_profile, created_at FROM portfolios ORDER BY created_at DESC").fetchall()
+        rows = _execute(conn, "SELECT id, name, investment_amount, time_horizon, risk_profile, created_at FROM portfolios ORDER BY created_at DESC").fetchall()
         cols = ["id", "name", "investment_amount", "time_horizon", "risk_profile", "created_at"]
         portfolios = [dict(zip(cols, r)) for r in rows]
         return {"data": portfolios, "total": len(portfolios)}
@@ -339,23 +345,24 @@ async def update_sectors(portfolio_id: int, body: SectorUpdate):
     conn = get_connection()
     try:
         # Verify portfolio exists
-        row = conn.execute("SELECT id FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+        row = _execute(conn, "SELECT id FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Portfolio not found")
-        
+
         # Validate total = 100%
         total = sum(s["allocation_pct"] for s in body.sectors)
         if abs(total - 100) > 1:
             raise HTTPException(400, f"Sector allocations must sum to 100% (got {total}%)")
-        
+
         # Update each sector
         for sector_data in body.sectors:
-            conn.execute(
+            _execute(
+                conn,
                 "UPDATE portfolio_sectors SET allocation_pct = ? WHERE portfolio_id = ? AND sector = ?",
                 (sector_data["allocation_pct"], portfolio_id, sector_data["sector"])
             )
-        
-        conn.execute("UPDATE portfolios SET updated_at = datetime('now') WHERE id = ?", (portfolio_id,))
+
+        _execute(conn, "UPDATE portfolios SET updated_at = NOW() WHERE id = ?", (portfolio_id,)) if USE_PG else _execute(conn, "UPDATE portfolios SET updated_at = datetime('now') WHERE id = ?", (portfolio_id,))
         conn.commit()
         
         return {"data": {"message": "Sectors updated", "portfolio_id": portfolio_id}}
@@ -368,13 +375,13 @@ async def rebalance_portfolio(portfolio_id: int):
     """Re-run AI allocation with current signals."""
     conn = get_connection()
     try:
-        row = conn.execute("SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+        row = _execute(conn, "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Portfolio not found")
-        
+
         cols = ["id", "name", "investment_amount", "time_horizon", "risk_profile", "created_at", "updated_at"]
         portfolio = dict(zip(cols, row))
-        
+
         signals = load_signals()
         allocations, sector_stocks = ai_allocate_sectors(
             signals, portfolio["time_horizon"], portfolio["risk_profile"]
@@ -382,29 +389,31 @@ async def rebalance_portfolio(portfolio_id: int):
         picks = pick_stocks_for_portfolio(
             sector_stocks, allocations, portfolio["investment_amount"], portfolio["time_horizon"]
         )
-        
+
         # Clear old and insert new
-        conn.execute("DELETE FROM portfolio_sectors WHERE portfolio_id = ?", (portfolio_id,))
-        conn.execute("DELETE FROM portfolio_stocks WHERE portfolio_id = ?", (portfolio_id,))
-        
+        _execute(conn, "DELETE FROM portfolio_sectors WHERE portfolio_id = ?", (portfolio_id,))
+        _execute(conn, "DELETE FROM portfolio_stocks WHERE portfolio_id = ?", (portfolio_id,))
+
         for sector, pct in allocations:
             num = len([p for p in picks if p["sector"] == sector])
-            conn.execute(
+            _execute(
+                conn,
                 "INSERT INTO portfolio_sectors (portfolio_id, sector, allocation_pct, ai_suggested_pct, num_stocks) VALUES (?, ?, ?, ?, ?)",
                 (portfolio_id, sector, pct, pct, num)
             )
-        
+
         for pick in picks:
-            conn.execute(
-                """INSERT INTO portfolio_stocks 
+            _execute(
+                conn,
+                """INSERT INTO portfolio_stocks
                 (portfolio_id, symbol, sector, signal, confidence, buy_price, target_price, stop_loss, allocated_amount, quantity)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (portfolio_id, pick["symbol"], pick["sector"], pick["signal"],
                  pick["confidence"], pick["buy_price"], pick["target_price"],
                  pick["stop_loss"], pick["allocated_amount"], pick["quantity"])
             )
-        
-        conn.execute("UPDATE portfolios SET updated_at = datetime('now') WHERE id = ?", (portfolio_id,))
+
+        _execute(conn, "UPDATE portfolios SET updated_at = NOW() WHERE id = ?", (portfolio_id,)) if USE_PG else _execute(conn, "UPDATE portfolios SET updated_at = datetime('now') WHERE id = ?", (portfolio_id,))
         conn.commit()
         
         return {"data": {
@@ -422,9 +431,9 @@ async def delete_portfolio(portfolio_id: int):
     """Delete a portfolio."""
     conn = get_connection()
     try:
-        conn.execute("DELETE FROM portfolio_stocks WHERE portfolio_id = ?", (portfolio_id,))
-        conn.execute("DELETE FROM portfolio_sectors WHERE portfolio_id = ?", (portfolio_id,))
-        conn.execute("DELETE FROM portfolios WHERE id = ?", (portfolio_id,))
+        _execute(conn, "DELETE FROM portfolio_stocks WHERE portfolio_id = ?", (portfolio_id,))
+        _execute(conn, "DELETE FROM portfolio_sectors WHERE portfolio_id = ?", (portfolio_id,))
+        _execute(conn, "DELETE FROM portfolios WHERE id = ?", (portfolio_id,))
         conn.commit()
         return {"data": {"message": "Portfolio deleted", "portfolio_id": portfolio_id}}
     finally:

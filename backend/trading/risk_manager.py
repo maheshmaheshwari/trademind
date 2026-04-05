@@ -11,26 +11,25 @@ TradeMind AI — Risk Manager
 """
 from datetime import datetime
 from typing import Dict, Tuple
-from database.db import get_connection
+from database.db import get_connection, _execute
+
+
+def _col_names(conn, table: str):
+    cur = _execute(conn, f"SELECT * FROM {table} LIMIT 0")
+    return [d[0] for d in cur.description]
 
 
 def get_risk_settings(user_id: int) -> Dict:
     """Get risk settings for a user. Creates defaults if not exist."""
     conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM risk_settings WHERE user_id = ?", (user_id,)
-    ).fetchone()
-    
+    row = _execute(conn, "SELECT * FROM risk_settings WHERE user_id = ?", (user_id,)).fetchone()
+
     if not row:
-        conn.execute(
-            "INSERT INTO risk_settings (user_id) VALUES (?)", (user_id,)
-        )
+        _execute(conn, "INSERT INTO risk_settings (user_id) VALUES (?)", (user_id,))
         conn.commit()
-        row = conn.execute(
-            "SELECT * FROM risk_settings WHERE user_id = ?", (user_id,)
-        ).fetchone()
-    
-    cols = [d[0] for d in conn.execute("SELECT * FROM risk_settings LIMIT 0").description]
+        row = _execute(conn, "SELECT * FROM risk_settings WHERE user_id = ?", (user_id,)).fetchone()
+
+    cols = _col_names(conn, "risk_settings")
     conn.close()
     return dict(zip(cols, row))
 
@@ -40,10 +39,11 @@ def update_risk_settings(user_id: int, settings: Dict) -> Dict:
     conn = get_connection()
     allowed = ["max_daily_loss", "max_daily_trades", "max_position_pct",
                "auto_stop_loss", "auto_target"]
-    
+
     for key, value in settings.items():
         if key in allowed:
-            conn.execute(
+            _execute(
+                conn,
                 f"UPDATE risk_settings SET {key} = ? WHERE user_id = ?",
                 (value, user_id)
             )
@@ -61,20 +61,20 @@ def check_order(
 ) -> Tuple[bool, str, list]:
     """
     Run all 6 risk checks. Returns (approved, reason, checks).
-    
+
     Each check is: {"name": str, "passed": bool, "detail": str}
     """
     conn = get_connection()
     checks = []
-    
+
     # Get user + settings
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    user_cols = [d[0] for d in conn.execute("SELECT * FROM users LIMIT 0").description]
+    user = _execute(conn, "SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user_cols = _col_names(conn, "users")
     user_dict = dict(zip(user_cols, user))
-    
+
     settings = get_risk_settings(user_id)
     today = datetime.now().strftime("%Y-%m-%d")
-    
+
     # 1. Balance check
     available = user_dict["virtual_balance"]
     has_balance = investment_amount <= available
@@ -83,10 +83,10 @@ def check_order(
         "passed": has_balance,
         "detail": f"₹{available:,.2f} available, ₹{investment_amount:,.2f} needed"
     })
-    
+
     # 2. Daily loss limit
-    daily_loss = conn.execute("""
-        SELECT COALESCE(SUM(pnl), 0) FROM orders 
+    daily_loss = _execute(conn, """
+        SELECT COALESCE(SUM(pnl), 0) FROM orders
         WHERE user_id = ? AND DATE(created_at) = ? AND pnl < 0
     """, (user_id, today)).fetchone()[0]
     loss_ok = abs(daily_loss) < settings["max_daily_loss"]
@@ -95,10 +95,10 @@ def check_order(
         "passed": loss_ok,
         "detail": f"Today's loss: ₹{abs(daily_loss):,.2f} / ₹{settings['max_daily_loss']:,.2f} max"
     })
-    
+
     # 3. Daily trade count
-    trade_count = conn.execute("""
-        SELECT COUNT(*) FROM orders 
+    trade_count = _execute(conn, """
+        SELECT COUNT(*) FROM orders
         WHERE user_id = ? AND DATE(created_at) = ? AND order_purpose = 'ENTRY'
     """, (user_id, today)).fetchone()[0]
     trades_ok = trade_count < settings["max_daily_trades"]
@@ -107,7 +107,7 @@ def check_order(
         "passed": trades_ok,
         "detail": f"{trade_count} / {settings['max_daily_trades']} trades today"
     })
-    
+
     # 4. Position concentration
     total_capital = user_dict["virtual_balance"] + user_dict["virtual_invested"]
     position_pct = (investment_amount / total_capital * 100) if total_capital > 0 else 100
@@ -117,7 +117,7 @@ def check_order(
         "passed": conc_ok,
         "detail": f"{position_pct:.1f}% of capital / {settings['max_position_pct']}% max"
     })
-    
+
     # 5. Volume safety
     if max_safe_qty and max_safe_qty > 0:
         vol_ok = quantity <= max_safe_qty
@@ -132,7 +132,7 @@ def check_order(
             "passed": True,
             "detail": "No volume data — skipped"
         })
-    
+
     # 6. Market hours (IST: 9:15 - 15:30)
     # For paper trading, we allow anytime but flag it
     now = datetime.now()
@@ -144,12 +144,12 @@ def check_order(
         "passed": True,  # Always pass for paper trading
         "detail": "Market OPEN" if market_open else "Market CLOSED (paper trade OK)"
     })
-    
+
     conn.close()
-    
+
     # Overall result
     all_passed = all(c["passed"] for c in checks)
     failed = [c for c in checks if not c["passed"]]
     reason = failed[0]["detail"] if failed else "All checks passed"
-    
+
     return all_passed, reason, checks

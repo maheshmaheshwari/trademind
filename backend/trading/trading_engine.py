@@ -11,7 +11,7 @@ import json
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from database.db import get_connection
+from database.db import get_connection, _execute
 
 
 def _now():
@@ -20,6 +20,24 @@ def _now():
 
 def _today():
     return datetime.now().strftime("%Y-%m-%d")
+
+
+def _fetchone(conn, sql: str, params: tuple = ()) -> Optional[tuple]:
+    """Execute a query and return one row."""
+    cur = _execute(conn, sql, params)
+    return cur.fetchone()
+
+
+def _fetchall(conn, sql: str, params: tuple = ()) -> List[tuple]:
+    """Execute a query and return all rows."""
+    cur = _execute(conn, sql, params)
+    return cur.fetchall()
+
+
+def _col_names(conn, table: str) -> List[str]:
+    """Return column names for a table."""
+    cur = _execute(conn, f"SELECT * FROM {table} LIMIT 0")
+    return [d[0] for d in cur.description]
 
 
 # ==========================================
@@ -35,20 +53,19 @@ def create_user(username: str, password_hash: str, display_name: str = None, ema
     """Create a virtual trading account with ₹10,00,000 starting balance."""
     conn = get_connection()
     try:
-        conn.execute(
+        _execute(
+            conn,
             "INSERT INTO users (username, email, password_hash, display_name) VALUES (?, ?, ?, ?)",
             (username, email, password_hash, display_name or username)
         )
         conn.commit()
-        user = conn.execute(
-            "SELECT * FROM users WHERE username = ?", (username,)
-        ).fetchone()
-        cols = [d[0] for d in conn.execute("SELECT * FROM users LIMIT 0").description]
+        user = _fetchone(conn, "SELECT * FROM users WHERE username = ?", (username,))
+        cols = _col_names(conn, "users")
         conn.close()
         return dict(zip(cols, user))
     except Exception as e:
         conn.close()
-        if "UNIQUE" in str(e):
+        if "UNIQUE" in str(e) or "unique" in str(e):
             raise ValueError(f"Username '{username}' already exists")
         raise
 
@@ -56,11 +73,11 @@ def create_user(username: str, password_hash: str, display_name: str = None, ema
 def get_user(user_id: int) -> Optional[Dict]:
     """Get user account details."""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
     if not row:
         conn.close()
         return None
-    cols = [d[0] for d in conn.execute("SELECT * FROM users LIMIT 0").description]
+    cols = _col_names(conn, "users")
     conn.close()
     return dict(zip(cols, row))
 
@@ -68,11 +85,11 @@ def get_user(user_id: int) -> Optional[Dict]:
 def get_user_by_username(username: str) -> Optional[Dict]:
     """Get user by username."""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    row = _fetchone(conn, "SELECT * FROM users WHERE username = ?", (username,))
     if not row:
         conn.close()
         return None
-    cols = [d[0] for d in conn.execute("SELECT * FROM users LIMIT 0").description]
+    cols = _col_names(conn, "users")
     conn.close()
     return dict(zip(cols, row))
 
@@ -166,53 +183,54 @@ def execute_signal(
 ) -> Dict:
     """
     Execute an AI trade signal as a bracket order.
-    
+
     Creates 3 orders:
       1. BUY (ENTRY) — executed immediately (paper) or via Angel One (live)
       2. STOP_LOSS — pending, triggers if price drops to SL
       3. TARGET — pending, triggers if price reaches target
-    
+
     mode: "PAPER" (virtual balance) or "LIVE" (real Angel One orders + GTT)
     """
     conn = get_connection()
-    
+
     # Get user
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
     if not user:
         conn.close()
         raise ValueError("User not found")
-    
-    user_cols = [d[0] for d in conn.execute("SELECT * FROM users LIMIT 0").description]
+
+    user_cols = _col_names(conn, "users")
     user_dict = dict(zip(user_cols, user))
-    
+
     # Check balance
     available = user_dict["virtual_balance"]
     if investment_amount > available:
         conn.close()
         raise ValueError(f"Insufficient balance: ₹{available:.2f} available, ₹{investment_amount:.2f} requested")
-    
+
     # Check if already have a position in this stock
-    existing = conn.execute(
+    existing = _fetchone(
+        conn,
         "SELECT * FROM positions WHERE user_id = ? AND symbol = ?",
         (user_id, symbol)
-    ).fetchone()
+    )
     if existing:
         conn.close()
         raise ValueError(f"Already have an open position in {symbol}. Square off first.")
-    
+
     # Calculate quantity
     quantity = int(investment_amount / buy_price)
     if quantity < 1:
         conn.close()
         raise ValueError(f"Investment amount ₹{investment_amount:.2f} too small for {symbol} at ₹{buy_price:.2f}")
-    
+
     actual_investment = round(quantity * buy_price, 2)
     bracket_id = f"BRK_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     now = _now()
-    
+
     # Estimate fees (approx 0.05% brokerage + taxes)
     fees = round(actual_investment * 0.0005, 2)
-    
+
     # ---- LIVE MODE: Place real BUY order on Angel One ----
     angel_order_id = None
     if mode == "LIVE":
@@ -220,9 +238,9 @@ def execute_signal(
         if not angel_order_id:
             conn.close()
             raise ValueError(f"Failed to place BUY order on Angel One for {symbol}")
-    
+
     # 1. BUY order — immediately executed
-    conn.execute("""
+    _execute(conn, """
         INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
             quantity, price, status, mode, signal, confidence, horizon, fill_price, fees,
             order_id, created_at, updated_at)
@@ -230,27 +248,27 @@ def execute_signal(
     """, (user_id, bracket_id, symbol, name, quantity, buy_price,
           mode, signal, confidence, horizon, buy_price, fees,
           angel_order_id, now, now))
-    
+
     # ---- GTT or PAPER pending orders ----
     sl_gtt_id = None
     target_gtt_id = None
-    
+
     if mode == "LIVE":
         # Place GTT orders on Angel One
         from trading.gtt_manager import place_bracket_gtts
         gtt_result = place_bracket_gtts(symbol, quantity, stop_loss, target_price)
         sl_gtt_id = gtt_result.get("sl_rule_id")
         target_gtt_id = gtt_result.get("target_rule_id")
-        
+
         if not gtt_result["success"]:
             # GTT failed — rollback: we still keep the BUY but warn
             import logging
             logging.getLogger(__name__).error(
                 f"GTT placement failed for {symbol}. BUY executed but SL/Target NOT placed!"
             )
-    
+
     # 2. STOP_LOSS order — pending
-    conn.execute("""
+    _execute(conn, """
         INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
             quantity, price, trigger_price, status, mode, signal, confidence, horizon,
             gtt_rule_id, gtt_status, created_at, updated_at)
@@ -260,9 +278,9 @@ def execute_signal(
           str(sl_gtt_id) if sl_gtt_id else None,
           'PENDING' if sl_gtt_id else None,
           now, now))
-    
+
     # 3. TARGET order — pending
-    conn.execute("""
+    _execute(conn, """
         INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
             quantity, price, trigger_price, status, mode, signal, confidence, horizon,
             gtt_rule_id, gtt_status, created_at, updated_at)
@@ -272,47 +290,45 @@ def execute_signal(
           str(target_gtt_id) if target_gtt_id else None,
           'PENDING' if target_gtt_id else None,
           now, now))
-    
+
     # Create position
-    conn.execute("""
+    _execute(conn, """
         INSERT INTO positions (user_id, symbol, name, quantity, avg_buy_price, current_price,
             target_price, stop_loss, unrealized_pnl, unrealized_pnl_pct, invested_amount,
             current_value, mode, bracket_id, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
     """, (user_id, symbol, name, quantity, buy_price, buy_price,
           target_price, stop_loss, actual_investment, actual_investment, mode, bracket_id, now))
-    
+
     # Deduct from virtual balance
-    conn.execute("""
-        UPDATE users SET 
+    _execute(conn, """
+        UPDATE users SET
             virtual_balance = virtual_balance - ?,
             virtual_invested = virtual_invested + ?
         WHERE id = ?
     """, (actual_investment + fees, actual_investment, user_id))
-    
+
     # Increment consumed_volume on the trade signal (platform-wide volume tracking)
-    conn.execute("""
+    _execute(conn, """
         UPDATE trade_signals SET consumed_volume = COALESCE(consumed_volume, 0) + ?
         WHERE symbol = ? AND generated_date = (
             SELECT MAX(generated_date) FROM trade_signals WHERE symbol = ?
         )
     """, (quantity, symbol, symbol))
-    
+
     conn.commit()
-    
+
     # Fetch all orders for this bracket
-    orders = conn.execute(
-        "SELECT * FROM orders WHERE bracket_id = ? ORDER BY id", (bracket_id,)
-    ).fetchall()
-    order_cols = [d[0] for d in conn.execute("SELECT * FROM orders LIMIT 0").description]
+    orders = _fetchall(conn, "SELECT * FROM orders WHERE bracket_id = ? ORDER BY id", (bracket_id,))
+    order_cols = _col_names(conn, "orders")
     orders_list = [dict(zip(order_cols, o)) for o in orders]
-    
+
     # Get updated user
-    updated_user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    updated_user = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
     updated_user_dict = dict(zip(user_cols, updated_user))
-    
+
     conn.close()
-    
+
     return {
         "bracket_id": bracket_id,
         "mode": mode,
@@ -346,11 +362,12 @@ def execute_signal(
 def get_positions(user_id: int) -> List[Dict]:
     """Get all open positions for a user with current P&L."""
     conn = get_connection()
-    rows = conn.execute(
+    rows = _fetchall(
+        conn,
         "SELECT * FROM positions WHERE user_id = ? ORDER BY updated_at DESC",
         (user_id,)
-    ).fetchall()
-    cols = [d[0] for d in conn.execute("SELECT * FROM positions LIMIT 0").description]
+    )
+    cols = _col_names(conn, "positions")
     conn.close()
     return [dict(zip(cols, r)) for r in rows]
 
@@ -358,11 +375,12 @@ def get_positions(user_id: int) -> List[Dict]:
 def get_orders(user_id: int, limit: int = 50) -> List[Dict]:
     """Get order history for a user."""
     conn = get_connection()
-    rows = conn.execute(
+    rows = _fetchall(
+        conn,
         "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
         (user_id, limit)
-    ).fetchall()
-    cols = [d[0] for d in conn.execute("SELECT * FROM orders LIMIT 0").description]
+    )
+    cols = _col_names(conn, "orders")
     conn.close()
     return [dict(zip(cols, r)) for r in rows]
 
@@ -373,23 +391,24 @@ def square_off(user_id: int, symbol: str, sell_price: float = None) -> Dict:
     Cancels pending SL/Target orders, books P&L.
     """
     conn = get_connection()
-    
+
     # Get position
-    pos = conn.execute(
+    pos = _fetchone(
+        conn,
         "SELECT * FROM positions WHERE user_id = ? AND symbol = ?",
         (user_id, symbol)
-    ).fetchone()
+    )
     if not pos:
         conn.close()
         raise ValueError(f"No open position in {symbol}")
-    
-    pos_cols = [d[0] for d in conn.execute("SELECT * FROM positions LIMIT 0").description]
+
+    pos_cols = _col_names(conn, "positions")
     pos_dict = dict(zip(pos_cols, pos))
-    
+
     # Use current_price if sell_price not provided
     if not sell_price:
         sell_price = pos_dict["current_price"] or pos_dict["avg_buy_price"]
-    
+
     qty = pos_dict["quantity"]
     buy_price = pos_dict["avg_buy_price"]
     invested = pos_dict["invested_amount"]
@@ -397,44 +416,44 @@ def square_off(user_id: int, symbol: str, sell_price: float = None) -> Dict:
     pnl = round(sell_value - invested, 2)
     fees = round(sell_value * 0.0005, 2)
     net_pnl = round(pnl - fees, 2)
-    
+
     now = _now()
     bracket_id = pos_dict.get("bracket_id")
     position_mode = pos_dict.get("mode", "PAPER")
-    
+
     # Create SELL order
-    conn.execute("""
+    _execute(conn, """
         INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
             quantity, price, status, mode, fill_price, fees, pnl, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'SELL', 'SQUARE_OFF', ?, ?, 'EXECUTED', ?, ?, ?, ?, ?, ?)
     """, (user_id, bracket_id, symbol, pos_dict.get("name"), qty, sell_price,
           position_mode, sell_price, fees, net_pnl, now, now))
-    
+
     # Cancel pending SL and TARGET orders for this bracket
     if bracket_id:
         # If LIVE mode, cancel GTT rules on Angel One first
         if position_mode == "LIVE":
-            pending_gtts = conn.execute("""
+            pending_gtts = _fetchall(conn, """
                 SELECT gtt_rule_id FROM orders
                 WHERE bracket_id = ? AND status = 'PENDING' AND gtt_rule_id IS NOT NULL
-            """, (bracket_id,)).fetchall()
-            
+            """, (bracket_id,))
+
             from trading.gtt_manager import cancel_gtt
             for row in pending_gtts:
                 if row[0]:
                     cancel_gtt(int(row[0]))
-        
-        conn.execute("""
+
+        _execute(conn, """
             UPDATE orders SET status = 'CANCELLED', gtt_status = CASE
                 WHEN gtt_rule_id IS NOT NULL THEN 'CANCELLED' ELSE gtt_status END,
                 updated_at = ?
             WHERE bracket_id = ? AND status = 'PENDING'
         """, (now, bracket_id))
-    
+
     # Update user balance
     is_win = 1 if net_pnl > 0 else 0
-    conn.execute("""
-        UPDATE users SET 
+    _execute(conn, """
+        UPDATE users SET
             virtual_balance = virtual_balance + ?,
             virtual_invested = virtual_invested - ?,
             total_pnl = total_pnl + ?,
@@ -442,21 +461,18 @@ def square_off(user_id: int, symbol: str, sell_price: float = None) -> Dict:
             loss_count = loss_count + ?
         WHERE id = ?
     """, (sell_value - fees, invested, net_pnl, is_win, 1 - is_win, user_id))
-    
+
     # Delete position
-    conn.execute(
-        "DELETE FROM positions WHERE user_id = ? AND symbol = ?",
-        (user_id, symbol)
-    )
-    
+    _execute(conn, "DELETE FROM positions WHERE user_id = ? AND symbol = ?", (user_id, symbol))
+
     conn.commit()
-    
+
     # Get updated user
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    user_cols = [d[0] for d in conn.execute("SELECT * FROM users LIMIT 0").description]
+    user = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
+    user_cols = _col_names(conn, "users")
     user_dict = dict(zip(user_cols, user))
     conn.close()
-    
+
     return {
         "symbol": symbol,
         "quantity": qty,
@@ -488,7 +504,7 @@ def square_off_all(user_id: int) -> Dict:
             results.append(r)
         except Exception as e:
             results.append({"symbol": pos["symbol"], "error": str(e)})
-    
+
     user = get_user(user_id)
     return {
         "positions_closed": len(results),
@@ -505,15 +521,15 @@ def get_portfolio_summary(user_id: int) -> Dict:
     user = get_user(user_id)
     if not user:
         raise ValueError("User not found")
-    
+
     positions = get_positions(user_id)
     total_unrealized = sum(p.get("unrealized_pnl", 0) or 0 for p in positions)
-    
+
     wins = user["win_count"]
     losses = user["loss_count"]
     total_trades = wins + losses
     win_rate = round(wins / total_trades * 100, 1) if total_trades > 0 else 0
-    
+
     return {
         "user": {
             "id": user["id"],

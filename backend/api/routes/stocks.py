@@ -11,7 +11,7 @@ import os
 from fastapi import APIRouter, Query
 from typing import Optional
 
-from database.db import get_connection
+from database.db import get_connection, _execute
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -49,7 +49,7 @@ async def get_all_stocks(
     conn = get_connection()
     try:
         # Get latest price for each stock
-        rows = conn.execute("""
+        rows = _execute(conn, """
             SELECT p.symbol, p.open, p.high, p.low, p.close, p.volume, p.date
             FROM prices p
             INNER JOIN (
@@ -62,7 +62,7 @@ async def get_all_stocks(
         """).fetchall()
 
         # Get previous day prices for change calculation
-        prev_rows = conn.execute("""
+        prev_rows = _execute(conn, """
             SELECT p.symbol, p.close
             FROM prices p
             INNER JOIN (

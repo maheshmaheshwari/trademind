@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, TrendingUp, TrendingDown, Brain, Shield, Loader2, CheckCircle, AlertTriangle, Zap, Activity, Target, BarChart3, Clock, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries, AreaSeries } from 'lightweight-charts';
 import { useAuth } from '../AuthContext';
-import { getStockWatchlist, getLatestSignals, getStockPrices, getStockIndicators, getOrders, executeSignal } from '../api';
+import { getStockWatchlist, getSignalForStock, getStockPrices, getStockIndicators, getOrders, executeSignal } from '../api';
 
 interface PriceData { date: string; open: number; high: number; low: number; close: number; volume: number; }
 
@@ -38,7 +38,7 @@ export default function TradeExecutionPage() {
             try {
                 const [w, s, p, ind, orders] = await Promise.all([
                     getStockWatchlist(symbol).catch(() => null),
-                    getLatestSignals().catch(() => ({ data: { trades: [] } })),
+                    getSignalForStock(symbol).catch(() => ({ signal: null })),
                     getStockPrices(symbol, 365).catch(() => ({ data: [] })),
                     getStockIndicators(symbol).catch(() => null),
                     user ? getOrders(user.id).catch(() => ({ orders: [] })) : Promise.resolve({ orders: [] }),
@@ -46,9 +46,8 @@ export default function TradeExecutionPage() {
                 setStockData(w);
                 setPrices(p?.data || []);
                 setIndicators(ind);
-                const trades = s?.data?.trades || [];
-                const match = trades.find((t: any) => t.symbol === symbol || t.symbol?.replace('.NS', '') === displaySymbol);
-                setSignalData(match || null);
+                const match = s?.signal || null;
+                setSignalData(match);
                 // Auto-fill price fields from signal or stock data
                 const curPrice = w?.latest_price?.close || match?.price?.current || match?.trade?.buy_price || 0;
                 if (match?.trade) {
@@ -292,7 +291,11 @@ export default function TradeExecutionPage() {
                                 <div className="mt-3 flex items-center gap-4 text-xs text-slate-500">
                                     <span>Model: {signalData.model.name}</span>
                                     <span>Horizon: {signalData.model.horizon}</span>
-                                    {indicators?.date && <span>Updated: {indicators.date}</span>}
+                                    {indicators?.date && (
+                                        <span className={indicators.stale ? 'text-amber-500' : ''}>
+                                            Indicators: {indicators.date}{indicators.stale ? ` (${indicators.days_old}d old)` : ''}
+                                        </span>
+                                    )}
                                 </div>
                             )}
                         </div>

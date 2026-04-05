@@ -359,19 +359,19 @@ async def api_update_risk_settings(user_id: int, req: RiskSettingsRequest):
 @router.get("/pnl/today/{user_id}")
 async def api_today_pnl(user_id: int):
     """Get today's realized P&L."""
-    from database.db import get_connection
+    from database.db import get_connection, _execute
     from datetime import datetime
-    
+
     conn = get_connection()
     today = datetime.now().strftime("%Y-%m-%d")
-    
-    row = conn.execute("""
-        SELECT 
+
+    row = _execute(conn, """
+        SELECT
             COALESCE(SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END), 0) as profit,
             COALESCE(SUM(CASE WHEN pnl < 0 THEN pnl ELSE 0 END), 0) as loss,
             COALESCE(SUM(pnl), 0) as net,
             COUNT(CASE WHEN pnl IS NOT NULL THEN 1 END) as trades
-        FROM orders 
+        FROM orders
         WHERE user_id = ? AND DATE(created_at) = ? AND order_purpose = 'SQUARE_OFF'
     """, (user_id, today)).fetchone()
     

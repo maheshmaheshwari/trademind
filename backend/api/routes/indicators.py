@@ -5,6 +5,7 @@ GET /api/indicators/{symbol}
 """
 
 import logging
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 
@@ -38,9 +39,23 @@ async def get_indicators(symbol: str):
                 detail=f"No indicators found for {symbol}. Run: python main.py collect",
             )
 
+        # Check staleness
+        data_date = data.get("date")
+        days_old = None
+        is_stale = False
+        if data_date:
+            try:
+                dt = data_date if isinstance(data_date, datetime) else datetime.strptime(str(data_date), "%Y-%m-%d")
+                days_old = (datetime.now() - dt).days
+                is_stale = days_old > 5
+            except Exception:
+                pass
+
         return {
             "symbol": symbol,
             "date": data.get("date"),
+            "stale": is_stale,
+            "days_old": days_old,
             "indicators": {
                 "rsi_14": data.get("rsi_14"),
                 "macd": data.get("macd"),

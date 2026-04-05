@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logger = logging.getLogger(__name__)
 
-from database.db import get_connection, init_database, insert_prices, get_all_symbols
+from database.db import get_connection, init_database, insert_prices_batch, get_all_symbols, _execute
 
 init_database()
 
@@ -29,7 +29,7 @@ today = datetime.now().strftime('%Y-%m-%d')
 print(f"📅 Today: {today}")
 
 # Get latest date for each symbol
-rows = conn.execute(
+rows = _execute(conn,
     "SELECT symbol, MAX(date) as latest_date FROM prices WHERE interval = '1d' GROUP BY symbol"
 ).fetchall()
 symbol_dates = {r[0]: r[1] for r in rows}
@@ -39,8 +39,9 @@ conn.close()
 needs_update = []
 for sym in all_symbols:
     last = symbol_dates.get(sym, '2020-01-01')
-    if last < today:
-        needs_update.append((sym, last))
+    last_str = str(last)[:10] if last else '2020-01-01'
+    if last_str < today:
+        needs_update.append((sym, last_str))
 
 print(f"📈 Stocks needing update: {len(needs_update)} / {len(all_symbols)}")
 if needs_update:
@@ -88,23 +89,49 @@ for i in range(0, len(needs_update), BATCH_SIZE):
                 if len(batch_symbols) == 1:
                     df = data
                 else:
-                    df = data[sym] if sym in data.columns.get_level_values(0) else pd.DataFrame()
+                    # yfinance 1.x: MultiIndex columns (field, symbol)
+                    try:
+                        if hasattr(data.columns, 'get_level_values'):
+                            lvl0 = data.columns.get_level_values(0).unique()
+                            lvl1 = data.columns.get_level_values(1).unique() if data.columns.nlevels > 1 else []
+                            if sym in lvl1:
+                                df = data.xs(sym, axis=1, level=1)
+                            elif sym in lvl0:
+                                df = data[sym]
+                            else:
+                                df = pd.DataFrame()
+                        else:
+                            df = data[sym] if sym in data.columns else pd.DataFrame()
+                    except Exception:
+                        df = pd.DataFrame()
                 
                 if df.empty or df.dropna(how='all').empty:
                     failed.append(sym)
                     continue
                 
+                # Flatten MultiIndex columns (yfinance 1.x batch downloads)
+                if hasattr(df.columns, 'get_level_values') and len(df.columns.names) > 1:
+                    df.columns = df.columns.get_level_values(0)
+
+                if 'Close' not in df.columns:
+                    failed.append(sym)
+                    continue
                 df = df.dropna(subset=['Close'])
-                
+
                 prices = []
                 for idx, row in df.iterrows():
-                    date_str = idx.strftime('%Y-%m-%d') if hasattr(idx, 'strftime') else str(idx)[:10]
-                    
+                    # Handle timezone-aware timestamps from yfinance 1.x
+                    if hasattr(idx, 'strftime'):
+                        date_str = idx.strftime('%Y-%m-%d')
+                    else:
+                        date_str = str(idx)[:10]
+
                     # Skip if we already have this date
                     last_date = symbol_dates.get(sym, '2020-01-01')
+                    last_date = str(last_date)[:10] if last_date else '2020-01-01'
                     if date_str <= last_date:
                         continue
-                    
+
                     prices.append({
                         'symbol': sym,
                         'date': date_str,
@@ -117,7 +144,12 @@ for i in range(0, len(needs_update), BATCH_SIZE):
                     })
                 
                 if prices:
-                    insert_prices(prices)
+                    rows_to_insert = [
+                        (p['symbol'], 'NSE', p['date'], '00:00:00',
+                         p['open'], p['high'], p['low'], p['close'], p['volume'], p['interval'])
+                        for p in prices
+                    ]
+                    insert_prices_batch(rows_to_insert)
                     total_inserted += len(prices)
                     success += 1
                 else:
@@ -144,14 +176,14 @@ if failed:
 
 # Verify final state
 conn = get_connection()
-final = conn.execute(
+final = _execute(conn,
     "SELECT MAX(date) as latest, COUNT(DISTINCT symbol) as symbols FROM prices WHERE interval = '1d'"
 ).fetchone()
 print(f"\n📊 Final state: {final[1]} symbols, latest date: {final[0]}")
 
-rows3 = conn.execute(
-    """SELECT MAX(date) as latest_date, COUNT(*) as num 
-     FROM (SELECT symbol, MAX(date) as date FROM prices WHERE interval = '1d' GROUP BY symbol) 
+rows3 = _execute(conn,
+    """SELECT MAX(date) as latest_date, COUNT(*) as num
+     FROM (SELECT symbol, MAX(date) as date FROM prices WHERE interval = '1d' GROUP BY symbol)
      GROUP BY date ORDER BY latest_date DESC LIMIT 5"""
 ).fetchall()
 print("   Date distribution:")

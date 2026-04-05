@@ -29,6 +29,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -40,6 +41,7 @@ from database.db import (
     init_database,
     insert_ai_signal,
     insert_indicators,
+    _execute,
 )
 import joblib
 import os
@@ -69,22 +71,27 @@ def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str
             df_feat = df.copy()
             
             # Fetch rolling sentiment from DB (since it's not in standard indicators)
-            conn = get_connection(sync_on_connect=False)
-            news_query = """
-            SELECT date(published_at) as date, sentiment, confidence
-            FROM news_sentiment
-            WHERE symbol = ? OR symbol IS NULL
-            ORDER BY published_at DESC LIMIT 10
-            """
-            news_df = pd.read_sql_query(news_query, conn, params=(symbol,))
-            conn.close()
-            
             sentiment_rolling_3d = 0.0
-            if not news_df.empty:
-                sentiment_map = {'positive': 1, 'negative': -1, 'neutral': 0}
-                news_df['sentiment_score'] = news_df['sentiment'].map(sentiment_map).fillna(0) * pd.to_numeric(news_df['confidence'], errors='coerce').fillna(0)
-                # Just take a crude average of recent news for the live inference point
-                sentiment_rolling_3d = float(news_df['sentiment_score'].mean())
+            try:
+                conn = get_connection()
+                cur = _execute(conn, """
+                    SELECT sentiment, confidence
+                    FROM news_sentiment
+                    WHERE symbol = ? OR symbol IS NULL
+                    ORDER BY published_at DESC LIMIT 10
+                """, (symbol,))
+                news_rows = cur.fetchall()
+                conn.close()
+                if news_rows:
+                    sentiment_map = {'positive': 1, 'negative': -1, 'neutral': 0}
+                    scores = []
+                    for row in news_rows:
+                        sent = row[0] or 'neutral'
+                        conf = float(row[1] or 0)
+                        scores.append(sentiment_map.get(sent, 0) * conf)
+                    sentiment_rolling_3d = float(sum(scores) / len(scores)) if scores else 0.0
+            except Exception:
+                pass
                 
             # Compute advanced technicals for the latest subset
             # Distance from MA
@@ -304,22 +311,16 @@ def process_all_stocks() -> Dict:
         for s in summary['top_buys'][:5]:
             print(f"  {s['symbol']}: {s['signal']} ({s['strength']}%)")
     """
-    import database.db as db_module
-    
-    # Force disable Turso sync for this heavy batch process to prevent WAL locks
-    original_use_turso = db_module.USE_TURSO
-    db_module.USE_TURSO = False
-    
     try:
         init_database()
-        
+
         # Get all symbols that have price data
-        conn = get_connection(sync_on_connect=False)
+        conn = get_connection()
         try:
-            rows = conn.execute(
+            cur = _execute(conn,
                 "SELECT DISTINCT symbol FROM prices WHERE interval = '1d' ORDER BY symbol"
-            ).fetchall()
-            symbols = [row[0] for row in rows]
+            )
+            symbols = [row[0] for row in cur.fetchall()]
         finally:
             conn.close()
 
@@ -334,7 +335,7 @@ def process_all_stocks() -> Dict:
         print(f"\n🔬 Processing indicators for {len(symbols)} stocks...\n")
 
         for symbol in tqdm(symbols, desc="Analyzing", unit="stock"):
-            result = process_stock(symbol, conn=conn)
+            result = process_stock(symbol)
             if result:
                 processed += 1
                 all_signals.append(result)
@@ -374,16 +375,9 @@ def process_all_stocks() -> Dict:
             "top_sells": sell_signals[:10],
             "all_signals": all_signals,
         }
-    finally:
-        # Restore original Turso setting
-        db_module.USE_TURSO = original_use_turso
-        
-        # Sync once at the very end if Turso was originally enabled
-        if original_use_turso:
-            print("\n☁️ Syncing all batch results to Turso cloud...")
-            conn = get_connection(sync_on_connect=True)
-            conn.close()
-            print("✅ Sync complete!")
+    except Exception as e:
+        logger.error(f"process_all_stocks failed: {e}")
+        raise
 
 
 def _safe_float(value) -> Optional[float]:

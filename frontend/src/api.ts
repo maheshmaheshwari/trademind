@@ -113,6 +113,12 @@ export async function getLatestSignals(params?: TableParams) {
   return res.json();
 }
 
+export async function getSignalForStock(symbol: string) {
+  const res = await fetch(`${API_BASE}/api/signals/stock/${symbol}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to load signal');
+  return res.json();
+}
+
 export async function getActionableSignals() {
   const res = await fetch(`${API_BASE}/api/signals/actionable`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to load signals');

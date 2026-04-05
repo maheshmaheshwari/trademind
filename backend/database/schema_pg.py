@@ -161,6 +161,8 @@ CREATE TABLE IF NOT EXISTS orders (
     fill_price    DOUBLE PRECISION,
     fees          DOUBLE PRECISION DEFAULT 0,
     pnl           DOUBLE PRECISION,
+    gtt_rule_id   TEXT,
+    gtt_status    TEXT,
     created_at    TIMESTAMPTZ DEFAULT NOW(),
     updated_at    TIMESTAMPTZ DEFAULT NOW()
 );

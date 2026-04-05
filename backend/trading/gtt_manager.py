@@ -255,13 +255,13 @@ def sync_gtt_statuses() -> List[Dict]:
 
     Returns list of triggered GTT rules that were synced.
     """
-    from database.db import get_connection
+    from database.db import get_connection, _execute
     from trading.trading_engine import square_off
 
     conn = get_connection()
 
     # Find all orders with pending GTT rules
-    pending_gtts = conn.execute("""
+    pending_gtts = _execute(conn, """
         SELECT o.id, o.user_id, o.symbol, o.order_purpose, o.gtt_rule_id,
                o.quantity, o.price, o.bracket_id
         FROM orders o
@@ -312,7 +312,7 @@ def sync_gtt_statuses() -> List[Dict]:
                 from datetime import datetime
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                conn.execute("""
+                _execute(conn, """
                     UPDATE orders SET gtt_status = 'TRIGGERED', status = 'EXECUTED',
                         fill_price = price, updated_at = ?
                     WHERE id = ?
@@ -320,14 +320,14 @@ def sync_gtt_statuses() -> List[Dict]:
 
                 # Cancel the other leg (if SL triggered, cancel Target and vice versa)
                 other_purpose = "TARGET" if gtt["order_purpose"] == "STOP_LOSS" else "STOP_LOSS"
-                other_order = conn.execute("""
+                other_order = _execute(conn, """
                     SELECT id, gtt_rule_id FROM orders
                     WHERE bracket_id = ? AND order_purpose = ? AND status = 'PENDING'
                 """, (gtt["bracket_id"], other_purpose)).fetchone()
 
                 if other_order and other_order[1]:
                     cancel_gtt(int(other_order[1]))
-                    conn.execute("""
+                    _execute(conn, """
                         UPDATE orders SET gtt_status = 'CANCELLED', status = 'CANCELLED',
                             updated_at = ?
                         WHERE id = ?
@@ -345,7 +345,7 @@ def sync_gtt_statuses() -> List[Dict]:
                     logger.error(f"Error squaring off after GTT trigger: {e}")
 
             elif rule_status == "CANCELLED":
-                conn.execute("""
+                _execute(conn, """
                     UPDATE orders SET gtt_status = 'CANCELLED', updated_at = ?
                     WHERE id = ?
                 """, (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), gtt["id"]))

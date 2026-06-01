@@ -9,11 +9,10 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
-from database.db import get_trade_signals_formatted, get_connection, _execute, USE_PG
+from database.db import get_trade_signals_formatted, get_connection, _execute
 
 router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])
 
-DB_PATH = "nifty500.db"
 TOKENS_PATH = "data/angel_tokens.json"
 
 
@@ -239,14 +238,11 @@ async def create_portfolio(body: PortfolioCreate):
     # Save to DB
     conn = get_connection()
     try:
-        insert_sql = "INSERT INTO portfolios (name, investment_amount, time_horizon, risk_profile) VALUES (?, ?, ?, ?)"
-        params = (body.name, body.investment_amount, body.time_horizon, body.risk_profile)
-        if USE_PG:
-            cur = _execute(conn, insert_sql + " RETURNING id", params)
-            portfolio_id = cur.fetchone()[0]
-        else:
-            cur = _execute(conn, insert_sql, params)
-            portfolio_id = cur.lastrowid
+        cur = _execute(conn,
+            "INSERT INTO portfolios (name, investment_amount, time_horizon, risk_profile) VALUES (?, ?, ?, ?) RETURNING id",
+            (body.name, body.investment_amount, body.time_horizon, body.risk_profile),
+        )
+        portfolio_id = cur.fetchone()[0]
         conn.commit()
 
         # Save sector allocations
@@ -362,7 +358,7 @@ async def update_sectors(portfolio_id: int, body: SectorUpdate):
                 (sector_data["allocation_pct"], portfolio_id, sector_data["sector"])
             )
 
-        _execute(conn, "UPDATE portfolios SET updated_at = NOW() WHERE id = ?", (portfolio_id,)) if USE_PG else _execute(conn, "UPDATE portfolios SET updated_at = datetime('now') WHERE id = ?", (portfolio_id,))
+        _execute(conn, "UPDATE portfolios SET updated_at = NOW() WHERE id = ?", (portfolio_id,))
         conn.commit()
         
         return {"data": {"message": "Sectors updated", "portfolio_id": portfolio_id}}
@@ -413,7 +409,7 @@ async def rebalance_portfolio(portfolio_id: int):
                  pick["stop_loss"], pick["allocated_amount"], pick["quantity"])
             )
 
-        _execute(conn, "UPDATE portfolios SET updated_at = NOW() WHERE id = ?", (portfolio_id,)) if USE_PG else _execute(conn, "UPDATE portfolios SET updated_at = datetime('now') WHERE id = ?", (portfolio_id,))
+        _execute(conn, "UPDATE portfolios SET updated_at = NOW() WHERE id = ?", (portfolio_id,))
         conn.commit()
         
         return {"data": {

@@ -40,7 +40,7 @@ _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from database.db import insert_news, get_local_connection, init_database
+from database.db import insert_news, get_connection, init_database, _execute
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -176,10 +176,8 @@ def fetch_gdelt_month(
 def _get_symbols_with_news() -> Set[str]:
     """Return the set of symbols that already have at least one news row."""
     try:
-        conn = get_local_connection()
-        cur = conn.execute(
-            "SELECT DISTINCT symbol FROM news_sentiment WHERE symbol IS NOT NULL"
-        )
+        conn = get_connection()
+        cur = _execute(conn, "SELECT DISTINCT symbol FROM news_sentiment WHERE symbol IS NOT NULL")
         symbols = {row[0] for row in cur.fetchall()}
         conn.close()
         return symbols
@@ -322,9 +320,9 @@ def score_pending_news(batch_limit: int = 500) -> int:
         )
         return 0
 
-    conn = get_local_connection()
+    conn = get_connection()
     try:
-        rows = conn.execute(
+        rows = _execute(conn,
             "SELECT id, headline FROM news_sentiment WHERE sentiment IS NULL LIMIT ?",
             (batch_limit,),
         ).fetchall()
@@ -344,7 +342,7 @@ def score_pending_news(batch_limit: int = 500) -> int:
     for row_id, headline in rows:
         try:
             sentiment, confidence = analyze_sentiment(headline)
-            conn.execute(
+            _execute(conn,
                 "UPDATE news_sentiment SET sentiment=?, confidence=? WHERE id=?",
                 (sentiment, float(confidence), row_id),
             )

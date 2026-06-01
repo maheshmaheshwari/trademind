@@ -24,9 +24,15 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier,
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 from sklearn.model_selection import TimeSeriesSplit
 
-from database.db import get_connection, USE_PG
+try:
+    from catboost import CatBoostClassifier
+    _CATBOOST_AVAILABLE = True
+except ImportError:
+    _CATBOOST_AVAILABLE = False
 
-_PH = "%s" if USE_PG else "?"   # SQL placeholder for the active backend
+from database.db import get_connection
+
+_PH = "%s"
 
 
 # ---------------------------------------------------------------------------
@@ -44,16 +50,13 @@ HORIZONS = {
 
 
 def _query_to_df(conn, sql: str, params: tuple = ()) -> pd.DataFrame:
-    """Execute a query and return a DataFrame — works for both sqlite3 and psycopg2."""
-    if USE_PG:
-        cur = conn.cursor()
-        cur.execute(sql, params)
-        cols = [d[0] for d in cur.description]
-        rows = cur.fetchall()
-        cur.close()
-        return pd.DataFrame(rows, columns=cols)
-    else:
-        return pd.read_sql_query(sql, conn, params=params)
+    """Execute a query and return a DataFrame."""
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    cols = [d[0] for d in cur.description]
+    rows = cur.fetchall()
+    cur.close()
+    return pd.DataFrame(rows, columns=cols)
 
 
 def load_data_for_symbol(symbol: str) -> pd.DataFrame:
@@ -255,6 +258,48 @@ def engineer_features_and_target(df: pd.DataFrame, forward_days: int = 20,
     df['sent_extreme_pos'] = (df['sent_max_pos'] > 0.8).astype(int)
     df['sent_extreme_neg'] = (df['sent_max_neg'] < -0.8).astype(int)
 
+    # ── NEW: Williams %R (14-period) — momentum oscillator ───────────────────
+    roll_high_14 = df['high'].rolling(14, min_periods=5).max()
+    roll_low_14  = df['low'].rolling(14, min_periods=5).min()
+    hl_range = roll_high_14 - roll_low_14
+    df['williams_r'] = np.where(
+        hl_range > 0,
+        -100 * (roll_high_14 - df['close']) / hl_range,
+        -50.0
+    )
+    df['williams_r_oversold']   = (df['williams_r'] < -80).astype(int)
+    df['williams_r_overbought'] = (df['williams_r'] > -20).astype(int)
+
+    # ── NEW: Money Flow Index (14-period) — volume-weighted RSI ──────────────
+    typical_price = (df['high'] + df['low'] + df['close']) / 3
+    raw_mf = typical_price * df['volume']
+    tp_prev = typical_price.shift(1)
+    pos_mf = raw_mf.where(typical_price > tp_prev, 0.0)
+    neg_mf = raw_mf.where(typical_price < tp_prev, 0.0)
+    pos_mf_14 = pos_mf.rolling(14, min_periods=5).sum()
+    neg_mf_14 = neg_mf.rolling(14, min_periods=5).sum()
+    df['mfi'] = np.where(
+        neg_mf_14 > 0,
+        100 - 100 / (1 + pos_mf_14 / neg_mf_14),
+        100.0
+    )
+    df['mfi_oversold']   = (df['mfi'] < 20).astype(int)
+    df['mfi_overbought'] = (df['mfi'] > 80).astype(int)
+
+    # ── NEW: Market regime features (trending vs choppy) ─────────────────────
+    df['is_trending']     = (df['adx_14'].fillna(0) > 20).astype(int)
+    df['trend_strength']  = (df['adx_14'].fillna(20) / 50).clip(0, 1)
+    df['trending_bull']   = ((df['adx_14'].fillna(0) > 20) & (df['close'] > df['sma_50'].fillna(df['close']))).astype(int)
+    df['trending_bear']   = ((df['adx_14'].fillna(0) > 20) & (df['close'] < df['sma_50'].fillna(df['close']))).astype(int)
+
+    # ── NEW: Typical price vs SMA (daily VWAP-like ratio) ────────────────────
+    df['typical_price'] = (df['high'] + df['low'] + df['close']) / 3
+    df['typical_vs_sma20'] = np.where(
+        df['sma_20'].fillna(0) > 0,
+        df['typical_price'] / df['sma_20'] - 1,
+        0.0
+    )
+
     # ── Target: raw forward return ────────────────────────────────────────────
     df['future_close']      = df['close'].shift(-forward_days)
     df['future_return_pct'] = ((df['future_close'] - df['close']) / df['close']) * 100
@@ -275,6 +320,8 @@ def engineer_features_and_target(df: pd.DataFrame, forward_days: int = 20,
         # Raw sentiment (keep engineered versions)
         'sent_stock', 'news_count_stock', 'news_pos', 'news_neg',
         'sent_max_pos', 'sent_max_neg', 'mkt_sentiment', 'mkt_news_count',
+        # Raw prices from new features (keep derived ratios only)
+        'typical_price',
     ]
     features = df.drop(columns=[c for c in drop_cols if c in df.columns])
     return features, df['target']
@@ -310,12 +357,12 @@ def _best_threshold(proba: np.ndarray, yte: pd.Series):
 def _build_models(pos_weight: float) -> dict:
     """Return a fresh dict of models, parameterised for the current class balance."""
     pw = max(1.0, pos_weight)
-    return {
+    models = {
         "XGBoost": xgb.XGBClassifier(
             n_estimators=500, learning_rate=0.02, max_depth=5,
             min_child_weight=5, subsample=0.8, colsample_bytree=0.7,
             gamma=0.1, reg_alpha=0.5, reg_lambda=2.0,
-            scale_pos_weight=pw,                        # ← NEW: class imbalance
+            scale_pos_weight=pw,
             random_state=42, eval_metric='logloss', early_stopping_rounds=50),
         "XGB_HiReg": xgb.XGBClassifier(
             n_estimators=800, learning_rate=0.01, max_depth=3,
@@ -323,7 +370,7 @@ def _build_models(pos_weight: float) -> dict:
             gamma=0.3, reg_alpha=2.0, reg_lambda=5.0,
             scale_pos_weight=pw,
             random_state=42, eval_metric='logloss', early_stopping_rounds=80),
-        "LightGBM": lgb.LGBMClassifier(                 # ← NEW model
+        "LightGBM": lgb.LGBMClassifier(
             n_estimators=500, learning_rate=0.02, max_depth=5,
             num_leaves=31, min_child_samples=20,
             subsample=0.8, colsample_bytree=0.7,
@@ -345,6 +392,15 @@ def _build_models(pos_weight: float) -> dict:
             n_estimators=300, learning_rate=0.03, max_depth=3,
             min_samples_leaf=20, subsample=0.8, random_state=42),
     }
+    if _CATBOOST_AVAILABLE:
+        models["CatBoost"] = CatBoostClassifier(
+            iterations=500, learning_rate=0.02, depth=6,
+            l2_leaf_reg=3, random_seed=42, verbose=0,
+            auto_class_weights='Balanced',
+            eval_metric='Logloss',
+            allow_writing_files=False,
+        )
+    return models
 
 
 def train_and_evaluate(symbol: str):
@@ -384,6 +440,36 @@ def train_and_evaluate(symbol: str):
         pos = (ytr == 1).sum()
         pos_weight = neg / max(pos, 1)
 
+        # ── 3-fold walk-forward CV on training set for robust model selection ─
+        # CV precision is averaged across folds and blended with holdout precision
+        # to prevent selection bias toward the specific holdout 6-month window.
+        _cv_prec: dict = {}
+        if len(Xtr) >= 200:
+            tscv = TimeSeriesSplit(n_splits=3)
+            _fold_precs: dict = {k: [] for k in _build_models(pos_weight).keys()}
+            for tr_idx, va_idx in tscv.split(Xtr):
+                Xcv_tr, ycv_tr = Xtr.iloc[tr_idx], ytr.iloc[tr_idx]
+                Xcv_va, ycv_va = Xtr.iloc[va_idx], ytr.iloc[va_idx]
+                if len(Xcv_va) < 5:
+                    continue
+                _cv_neg = (ycv_tr == 0).sum()
+                _cv_pos = (ycv_tr == 1).sum()
+                _cv_pw  = _cv_neg / max(_cv_pos, 1)
+                for mn, m in _build_models(_cv_pw).items():
+                    try:
+                        if "XG" in mn:
+                            m.fit(Xcv_tr, ycv_tr, eval_set=[(Xcv_va, ycv_va)], verbose=False)
+                        else:
+                            m.fit(Xcv_tr, ycv_tr)
+                        _p_va = m.predict_proba(Xcv_va)[:, 1]
+                        _thr  = _best_threshold(_p_va, ycv_va)
+                        _yp   = (_p_va >= _thr).astype(int)
+                        _fold_precs[mn].append(precision_score(ycv_va, _yp, zero_division=0))
+                    except Exception:
+                        pass
+            for mn, precs in _fold_precs.items():
+                _cv_prec[mn] = float(np.mean(precs)) if precs else 0.0
+
         models = _build_models(pos_weight)
 
         horizon_probas = {}  # for ensemble
@@ -405,9 +491,14 @@ def train_and_evaluate(symbol: str):
                 r = recall_score(yte, yp, zero_division=0)
                 f = f1_score(yte, yp, zero_division=0)
 
+                # Blend holdout precision with CV precision for selection score
+                cv_p = _cv_prec.get(mname, p)
+                blended_prec = 0.6 * p + 0.4 * cv_p
+
                 key = f"{label}|{mname}"
                 all_results[key] = {
                     'model': model, 'model_name': mname,
+                    'blended_prec': blended_prec,
                     'horizon': label, 'fwd': fwd, 'tgt_pct': tgt_pct,
                     'acc': a, 'prec': p, 'rec': r, 'f1': f,
                     'thr': best_thr, 'features': list(Xtr.columns),
@@ -445,11 +536,17 @@ def train_and_evaluate(symbol: str):
                 f = f1_score(yte, yp_ens, zero_division=0)
 
                 key_ens = f"{label}|Ensemble"
+                # Ensemble blended precision = weighted avg of member blended precisions
+                ens_blended = float(np.mean([
+                    all_results.get(f"{label}|{mn}", {}).get('blended_prec', p)
+                    for mn in names
+                ]))
                 all_results[key_ens] = {
                     'model': None,  # ensemble — no single model object
                     'model_name': 'Ensemble',
                     'horizon': label, 'fwd': fwd, 'tgt_pct': tgt_pct,
                     'acc': a, 'prec': p, 'rec': r, 'f1': f,
+                    'blended_prec': ens_blended,
                     'thr': best_thr_ens,
                     'features': list(Xtr.columns),
                     'report': classification_report(yte, yp_ens, zero_division=0),
@@ -470,9 +567,12 @@ def train_and_evaluate(symbol: str):
         return
 
     # ── Cross-horizon summary ─────────────────────────────────────────────────
-    best_key = max(all_results, key=lambda k:
-        min(all_results[k]['acc'], all_results[k]['prec']) * 0.7 +
-        max(all_results[k]['acc'], all_results[k]['prec']) * 0.3)
+    # Use blended precision (60% holdout + 40% CV) to select best model.
+    # Fall back to holdout-only precision if blended_prec wasn't computed.
+    best_key = max(all_results, key=lambda k: (
+        min(all_results[k]['acc'], all_results[k].get('blended_prec', all_results[k]['prec'])) * 0.7 +
+        max(all_results[k]['acc'], all_results[k].get('blended_prec', all_results[k]['prec'])) * 0.3
+    ))
     best = all_results[best_key]
 
     print(f"\n{'='*70}")

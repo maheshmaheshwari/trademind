@@ -359,15 +359,9 @@ def main():
     parser.add_argument("--workers", type=int, default=4, help="Parallel worker threads (default: 4)")
     args = parser.parse_args()
     
-    import libsql_experimental as libsql
-    from database.models import ALL_TABLES, CREATE_INDEXES
-    
-    conn = libsql.connect("nifty500.db")
-    for sql in ALL_TABLES:
-        conn.execute(sql)
-    for sql in CREATE_INDEXES:
-        conn.execute(sql)
-    conn.commit()
+    from database.db import init_database, get_connection, _execute
+    init_database()
+    conn = get_connection()
     
     print(f"🗓️  Backfilling {args.days} days ({args.days // 365} years) of news sentiment")
     print(f"   Workers: {args.workers}\n")
@@ -381,9 +375,9 @@ def main():
         total += backfill_stock_sentiment(conn, days=args.days, workers=args.workers)
     
     # Summary
-    mkt = conn.execute("SELECT COUNT(*) FROM news_daily_sentiment WHERE symbol IS NULL").fetchone()[0]
-    stk = conn.execute("SELECT COUNT(*) FROM news_daily_sentiment WHERE symbol IS NOT NULL").fetchone()[0]
-    unique_syms = conn.execute("SELECT COUNT(DISTINCT symbol) FROM news_daily_sentiment WHERE symbol IS NOT NULL").fetchone()[0]
+    mkt = _execute(conn, "SELECT COUNT(*) FROM news_daily_sentiment WHERE symbol IS NULL").fetchone()[0]
+    stk = _execute(conn, "SELECT COUNT(*) FROM news_daily_sentiment WHERE symbol IS NOT NULL").fetchone()[0]
+    unique_syms = _execute(conn, "SELECT COUNT(DISTINCT symbol) FROM news_daily_sentiment WHERE symbol IS NOT NULL").fetchone()[0]
     
     print(f"\n{'='*55}")
     print(f"📊 BACKFILL COMPLETE")

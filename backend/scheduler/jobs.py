@@ -29,6 +29,7 @@ Usage:
 
 import logging
 from datetime import datetime
+from typing import Optional
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -113,13 +114,11 @@ def cleanup_old_data_job():
     """Weekly job: remove intraday data older than 30 days."""
     logger.info("⏰ Running data cleanup...")
     try:
-        from database.db import get_connection
+        from database.db import get_connection, _execute
         conn = get_connection()
         try:
-            cursor = conn.execute(
-                """DELETE FROM prices
-                WHERE interval != '1d'
-                AND date < date('now', '-30 days')"""
+            cursor = _execute(conn,
+                "DELETE FROM prices WHERE interval != '1d' AND date < NOW() - INTERVAL '30 days'"
             )
             deleted = cursor.rowcount
             conn.commit()
@@ -158,15 +157,6 @@ def generate_trade_signals_job():
         logger.error(f"Trade signal generation failed: {e}")
 
 
-def sync_to_turso_job():
-    """Daily EOD job: sync local trade_signals to Turso cloud."""
-    logger.info("⏰ Running EOD Turso sync...")
-    try:
-        from database.db import sync_trade_signals_to_turso
-        count = sync_trade_signals_to_turso()
-        logger.info(f"EOD sync done: {count} trade signals pushed to Turso")
-    except Exception as e:
-        logger.error(f"EOD Turso sync failed: {e}")
 
 
 def intraday_price_fetch_job():
@@ -362,7 +352,7 @@ def start_scheduler() -> None:
 # ==========================================
 # Global reference for background scheduler
 # ==========================================
-_bg_scheduler: BackgroundScheduler | None = None
+_bg_scheduler: Optional[BackgroundScheduler] = None
 
 
 def _add_all_jobs(scheduler):
@@ -384,9 +374,6 @@ def _add_all_jobs(scheduler):
     scheduler.add_job(collect_fii_data_job, CronTrigger(hour=17, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="fii_dii", name="FII/DII Data", misfire_grace_time=3600, replace_existing=True)
     # 17:15 — Trade signal generation
     scheduler.add_job(generate_trade_signals_job, CronTrigger(hour=17, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="trade_signals", name="Generate Trade Signals", misfire_grace_time=3600, replace_existing=True)
-    # 20:00 — Turso cloud sync
-    scheduler.add_job(sync_to_turso_job, CronTrigger(hour=20, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="eod_turso_sync", name="EOD Turso Cloud Sync", misfire_grace_time=3600, replace_existing=True)
-
     # HOURLY JOBS — 9 AM–4 PM IST weekdays
     # Every hour: RSS news refresh
     scheduler.add_job(collect_news_job, CronTrigger(hour="9-16", minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="hourly_news", name="Hourly News Refresh", misfire_grace_time=1800, replace_existing=True)
@@ -408,7 +395,7 @@ def _add_all_jobs(scheduler):
     scheduler.add_job(verify_data_integrity_job, CronTrigger(day_of_week="sun", hour=20, minute=30, timezone="Asia/Kolkata"), id="integrity", name="Weekly Data Integrity Check", misfire_grace_time=7200, replace_existing=True)
 
 
-def start_background_scheduler() -> BackgroundScheduler | None:
+def start_background_scheduler() -> Optional[BackgroundScheduler]:
     """
     Start a non-blocking BackgroundScheduler inside the API server process.
 

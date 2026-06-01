@@ -30,6 +30,7 @@ from database.db import (
     get_latest_date,
     init_database,
     insert_prices_batch,
+    _execute,
 )
 
 load_dotenv()
@@ -56,17 +57,17 @@ def angel_login() -> SmartConnect:
     """Login to Angel One SmartAPI and return the SmartConnect client."""
     api_key = os.getenv("ANGEL_API_KEY", "")
     client_id = os.getenv("ANGEL_CLIENT_ID", "")
-    password = os.getenv("ANGEL_PASSWORD", "")
+    mpin = os.getenv("ANGEL_MPIN", "") or os.getenv("ANGEL_PASSWORD", "")
     totp_secret = os.getenv("ANGEL_TOTP_SECRET", "")
 
-    if not all([api_key, client_id, password, totp_secret]):
+    if not all([api_key, client_id, mpin, totp_secret]):
         print("❌ Angel One credentials missing in .env")
         sys.exit(1)
 
     smart_api = SmartConnect(api_key=api_key)
     totp = pyotp.TOTP(totp_secret).now()
 
-    data = smart_api.generateSession(client_id, password, totp)
+    data = smart_api.generateSession(client_id, mpin, totp)
     if not data.get("status"):
         print(f"❌ Angel One login failed: {data.get('message')}")
         sys.exit(1)
@@ -224,9 +225,8 @@ def main():
 
     # Verify final state
     conn = get_connection()
-    final = conn.execute(
-        "SELECT MAX(date) as latest, COUNT(DISTINCT symbol) as symbols FROM prices WHERE interval = '1d'"
-    ).fetchone()
+    cur = _execute(conn, "SELECT MAX(date) as latest, COUNT(DISTINCT symbol) as symbols FROM prices WHERE interval = '1d'")
+    final = cur.fetchone()
     print(f"\n📊 DB state: {final[1]} symbols, latest date: {final[0]}")
     conn.close()
 

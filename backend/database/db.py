@@ -1,8 +1,7 @@
 """
 TradeMind AI — Database Connection & Helper Functions
 
-Uses TimescaleDB (PostgreSQL via psycopg2).
-Falls back to local SQLite if PGHOST is not configured.
+Uses TimescaleDB (PostgreSQL via psycopg2) exclusively.
 
 Usage:
     from database.db import init_database, get_connection, get_prices
@@ -12,7 +11,6 @@ Usage:
 import json
 import logging
 import os
-import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,61 +25,27 @@ logger = logging.getLogger(__name__)
 # Config
 # ---------------------------------------------------------------------------
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nifty500.db")
-
 PGHOST     = os.getenv("PGHOST", "localhost")
 PGPORT     = int(os.getenv("PGPORT", "5433"))
 PGDATABASE = os.getenv("PGDATABASE", "trademind")
 PGUSER     = os.getenv("PGUSER", "trademind")
 PGPASSWORD = os.getenv("PGPASSWORD", "trademind")
 
-# Use PostgreSQL when PGHOST is explicitly set, else fall back to SQLite
-USE_PG = bool(os.getenv("PGHOST"))
-
 
 # ---------------------------------------------------------------------------
 # Connection helpers
 # ---------------------------------------------------------------------------
 
-def get_connection(sync_on_connect: bool = True):
-    """
-    Return a database connection.
-    - PostgreSQL (psycopg2) when PGHOST is set in .env
-    - SQLite fallback when PGHOST is not set
-    """
-    if USE_PG:
-        import psycopg2
-        import psycopg2.extras
-        conn = psycopg2.connect(
-            host=PGHOST, port=PGPORT, dbname=PGDATABASE,
-            user=PGUSER, password=PGPASSWORD,
-        )
-        conn.autocommit = False
-        return conn
-    else:
-        conn = sqlite3.connect(DB_PATH, timeout=15.0)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-
-def get_local_connection():
-    """Alias — always returns the active connection (PG or SQLite)."""
-    return get_connection()
-
-
-def get_turso_connection(sync_on_connect: bool = True):
-    """Kept for backward compatibility."""
-    return get_connection()
-
-
-def get_remote_turso_connection():
-    """Kept for backward compatibility."""
-    return get_connection()
-
-
-def _placeholder() -> str:
-    """Return the correct SQL placeholder for the active backend."""
-    return "%s" if USE_PG else "?"
+def get_connection():
+    """Return a psycopg2 connection to TimescaleDB."""
+    import psycopg2
+    conn = psycopg2.connect(
+        host=PGHOST, port=PGPORT, dbname=PGDATABASE,
+        user=PGUSER, password=PGPASSWORD,
+        sslmode="require",
+    )
+    conn.autocommit = False
+    return conn
 
 
 def _rows_to_dicts(cursor) -> List[Dict]:
@@ -106,56 +70,39 @@ def _row_to_dict(cursor) -> Optional[Dict]:
 
 def _execute(conn, sql: str, params: tuple = ()):
     """
-    Execute a SQL statement with correct placeholder syntax.
-    Translates ? → %s automatically when USE_PG is True.
+    Execute a SQL statement via psycopg2 cursor.
+    Translates ? → %s for convenience so callers can use either style.
     Returns the cursor.
     """
-    if USE_PG:
-        sql = sql.replace("?", "%s")
-        # Translate SQLite-specific syntax to PostgreSQL
-        sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
-        sql = sql.replace("INSERT OR REPLACE INTO", "INSERT INTO")
-        cur = conn.cursor()
-        cur.execute(sql, params)
-        return cur
-    else:
-        return conn.execute(sql, params)
+    sql = sql.replace("?", "%s")
+    sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+    sql = sql.replace("INSERT OR REPLACE INTO", "INSERT INTO")
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    return cur
 
 
 def _executemany(conn, sql: str, params_list):
-    """Execute a statement for multiple parameter sets."""
-    if USE_PG:
-        import psycopg2.extras
-        sql = sql.replace("?", "%s")
-        sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
-        sql = sql.replace("INSERT OR REPLACE INTO", "INSERT INTO")
-        cur = conn.cursor()
-        psycopg2.extras.execute_batch(cur, sql, params_list, page_size=2000)
-        return cur
-    else:
-        return conn.executemany(sql, params_list)
+    """Execute a statement for multiple parameter sets via psycopg2."""
+    import psycopg2.extras
+    sql = sql.replace("?", "%s")
+    sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+    sql = sql.replace("INSERT OR REPLACE INTO", "INSERT INTO")
+    cur = conn.cursor()
+    psycopg2.extras.execute_batch(cur, sql, params_list, page_size=2000)
+    return cur
 
 
 def _on_conflict_ignore(sql: str, unique_cols: List[str]) -> str:
-    """
-    Append ON CONFLICT DO NOTHING for PostgreSQL.
-    For SQLite the INSERT OR IGNORE is already in the sql string.
-    """
-    if USE_PG:
-        return sql + " ON CONFLICT DO NOTHING"
-    return sql
+    """Append ON CONFLICT DO NOTHING for upsert-ignore semantics."""
+    return sql + " ON CONFLICT DO NOTHING"
 
 
 def _on_conflict_replace(sql: str, unique_cols: List[str], update_cols: List[str]) -> str:
-    """
-    Append ON CONFLICT (...) DO UPDATE for PostgreSQL.
-    For SQLite the INSERT OR REPLACE is already in the sql string.
-    """
-    if USE_PG:
-        conflict = ", ".join(unique_cols)
-        updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
-        return sql + f" ON CONFLICT ({conflict}) DO UPDATE SET {updates}"
-    return sql
+    """Append ON CONFLICT (...) DO UPDATE SET ... for upsert-replace semantics."""
+    conflict = ", ".join(unique_cols)
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+    return sql + f" ON CONFLICT ({conflict}) DO UPDATE SET {updates}"
 
 
 # ---------------------------------------------------------------------------
@@ -163,30 +110,13 @@ def _on_conflict_replace(sql: str, unique_cols: List[str], update_cols: List[str
 # ---------------------------------------------------------------------------
 
 def init_database() -> None:
-    """
-    Create all tables, hypertables, indexes (idempotent).
-    PostgreSQL: uses schema_pg.py
-    SQLite: uses models.py
-    """
-    if USE_PG:
-        from database.schema_pg import init_timescale
-        conn = get_connection()
-        try:
-            init_timescale(conn)
-        finally:
-            conn.close()
-    else:
-        from database.models import ALL_TABLES, CREATE_INDEXES
-        conn = get_connection()
-        try:
-            for sql in ALL_TABLES:
-                conn.execute(sql)
-            for sql in CREATE_INDEXES:
-                conn.execute(sql)
-            conn.commit()
-            print(f"✅ Database initialized at {DB_PATH} (SQLite)")
-        finally:
-            conn.close()
+    """Create all tables, hypertables, indexes (idempotent)."""
+    from database.schema_pg import init_timescale
+    conn = get_connection()
+    try:
+        init_timescale(conn)
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +147,7 @@ def insert_price(
         conn.commit()
         return True
     except Exception as e:
-        conn.rollback() if USE_PG else None
+        conn.rollback()
         logger.error(f"insert_price {symbol} {date}: {e}")
         return False
     finally:
@@ -240,7 +170,7 @@ def insert_prices_batch(rows: List[Tuple], sync: bool = True) -> int:
         logger.info(f"Batch inserted {len(rows)} price rows")
         return len(rows)
     except Exception as e:
-        conn.rollback() if USE_PG else None
+        conn.rollback()
         logger.error(f"insert_prices_batch: {e}")
         return 0
     finally:
@@ -293,7 +223,7 @@ def insert_indicators(
         return True
     except Exception as e:
         if not conn:
-            db_conn.rollback() if USE_PG else None
+            db_conn.rollback()
         logger.error(f"insert_indicators {symbol} {date}: {e}")
         return False
     finally:
@@ -321,7 +251,7 @@ def insert_news(
         conn.commit()
         return True
     except Exception as e:
-        conn.rollback() if USE_PG else None
+        conn.rollback()
         logger.error(f"insert_news: {e}")
         return False
     finally:
@@ -355,7 +285,7 @@ def insert_market_overview(data: Dict[str, Any]) -> bool:
         conn.commit()
         return True
     except Exception as e:
-        conn.rollback() if USE_PG else None
+        conn.rollback()
         logger.error(f"insert_market_overview: {e}")
         return False
     finally:
@@ -389,7 +319,7 @@ def insert_ai_signal(
         return True
     except Exception as e:
         if not conn:
-            db_conn.rollback() if USE_PG else None
+            db_conn.rollback()
         logger.error(f"insert_ai_signal {symbol}: {e}")
         return False
     finally:
@@ -453,16 +383,11 @@ def insert_trade_signals_batch(
         logger.info(f"Stored {count} trade signals for {generated_date}")
         return count
     except Exception as e:
-        conn.rollback() if USE_PG else None
+        conn.rollback()
         logger.error(f"insert_trade_signals_batch: {e}")
         return 0
     finally:
         conn.close()
-
-
-def sync_trade_signals_to_turso() -> int:
-    """No-op — kept for scheduler compatibility."""
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -632,7 +557,6 @@ def get_latest_date(symbol: str) -> Optional[str]:
         )
         row = cur.fetchone()
         val = row[0] if row and row[0] else None
-        # psycopg2 returns date objects; convert to string
         return str(val) if val else None
     finally:
         conn.close()

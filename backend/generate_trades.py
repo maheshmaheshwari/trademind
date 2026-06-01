@@ -20,7 +20,6 @@ import json
 import joblib
 import numpy as np
 import pandas as pd
-import libsql_experimental as libsql
 from datetime import datetime
 from analysis.model_training import load_data_for_symbol, engineer_features_and_target
 
@@ -341,19 +340,7 @@ def generate_signals():
     # Store trade signals in database
     # ==========================================
     try:
-        from database.db import insert_trade_signals_batch, get_local_connection
-        from database.models import CREATE_TRADE_SIGNALS_TABLE, CREATE_INDEXES
-
-        # Ensure trade_signals table exists
-        conn = get_local_connection()
-        conn.execute(CREATE_TRADE_SIGNALS_TABLE)
-        for idx_sql in CREATE_INDEXES:
-            try:
-                conn.execute(idx_sql)
-            except Exception:
-                pass  # Index may reference tables not yet created
-        conn.commit()
-        conn.close()
+        from database.db import insert_trade_signals_batch
 
         # Store all trades (deduplicates on symbol + date)
         all_trades = trades  # trades list has all 493 signals

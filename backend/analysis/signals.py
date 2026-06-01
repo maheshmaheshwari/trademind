@@ -49,144 +49,126 @@ import os
 logger = logging.getLogger(__name__)
 
 
+def _rules_signal(df: pd.DataFrame) -> Tuple[str, float, List[str]]:
+    """Simple rules-based fallback using RSI, MACD, BB, ADX."""
+    latest = df.iloc[-1]
+    reasons = ["Using rules-based fallback (no final model found)."]
+    bull, bear = 0, 0
+
+    rsi = latest.get("rsi_14")
+    if rsi is not None and not pd.isna(rsi):
+        if rsi < 30:   bull += 2; reasons.append(f"RSI oversold ({rsi:.1f})")
+        elif rsi > 70: bear += 2; reasons.append(f"RSI overbought ({rsi:.1f})")
+
+    macd_v = latest.get("macd")
+    macd_s = latest.get("macd_signal")
+    if macd_v is not None and macd_s is not None and not pd.isna(macd_v):
+        if macd_v > macd_s: bull += 1; reasons.append("MACD bullish crossover")
+        else:               bear += 1; reasons.append("MACD bearish crossover")
+
+    bb_pos = None
+    bb_u, bb_l = latest.get("bb_upper"), latest.get("bb_lower")
+    cl = latest.get("close")
+    if bb_u and bb_l and cl and (bb_u - bb_l) > 0:
+        bb_pos = (cl - bb_l) / (bb_u - bb_l)
+        if bb_pos < 0.2:  bull += 1; reasons.append(f"Price near BB lower ({bb_pos:.2f})")
+        elif bb_pos > 0.8: bear += 1; reasons.append(f"Price near BB upper ({bb_pos:.2f})")
+
+    adx = latest.get("adx_14")
+    trend_confirmed = adx is not None and not pd.isna(adx) and adx > 20
+
+    net = bull - bear
+    strength = min(100.0, abs(net) / max(bull + bear, 1) * 100)
+    if net >= 2:   signal = "STRONG BUY" if (net >= 3 and trend_confirmed) else "BUY"
+    elif net <= -2: signal = "STRONG SELL" if (net <= -3 and trend_confirmed) else "SELL"
+    else:           signal = "HOLD"
+    return signal, round(strength, 1), reasons
+
+
 def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str]]:
     """
-    Analyze a DataFrame of OHLCV + indicators and generate a trading signal.
-    Uses the trained XGBoost model if available, otherwise falls back to rules.
+    Generate a trading signal for `symbol`.
+
+    Preferred path: load the final production artifact from final_models/,
+    run the full v4 feature pipeline, and predict. Falls back to a
+    rules-based system when no trained model is available.
     """
     if df.empty or len(df) < 14:
         return "HOLD", 0.0, ["Insufficient data for analysis"]
 
-    # 1. Attempt to load the trained model for the specific symbol
-    model_path = f"models/best_{symbol}_v2.pkl"
-    if not os.path.exists(model_path):
-        model_path = f"models/xgb_{symbol}_v2.pkl" # fallback to older filename
+    # ── 1. Try final production model (final_models/{symbol}_final.pkl) ────────
+    final_path = os.path.join("final_models", f"{symbol}_final.pkl")
+    if not os.path.exists(final_path):
+        # Also try without the .NS suffix stored in the filename
+        bare = symbol.replace(".NS", "")
+        final_path = os.path.join("final_models", f"{bare}_final.pkl")
 
-    if os.path.exists(model_path):
+    if os.path.exists(final_path):
         try:
-            model = joblib.load(model_path)
-            
-            # 2. Engineer the exact features the model expects for the LATEST row
-            # Note: We must replicate the feature engineering from model_training.py exactly
-            df_feat = df.copy()
-            
-            # Fetch rolling sentiment from DB (since it's not in standard indicators)
-            sentiment_rolling_3d = 0.0
-            try:
-                conn = get_connection()
-                cur = _execute(conn, """
-                    SELECT sentiment, confidence
-                    FROM news_sentiment
-                    WHERE symbol = ? OR symbol IS NULL
-                    ORDER BY published_at DESC LIMIT 10
-                """, (symbol,))
-                news_rows = cur.fetchall()
-                conn.close()
-                if news_rows:
-                    sentiment_map = {'positive': 1, 'negative': -1, 'neutral': 0}
-                    scores = []
-                    for row in news_rows:
-                        sent = row[0] or 'neutral'
-                        conf = float(row[1] or 0)
-                        scores.append(sentiment_map.get(sent, 0) * conf)
-                    sentiment_rolling_3d = float(sum(scores) / len(scores)) if scores else 0.0
-            except Exception:
-                pass
-                
-            # Compute advanced technicals for the latest subset
-            # Distance from MA
-            df_feat['dist_sma_20'] = (df_feat['close'] / df_feat['sma_20'] - 1).fillna(0)
-            df_feat['dist_sma_50'] = (df_feat['close'] / df_feat['sma_50'] - 1).fillna(0)
-            df_feat['dist_sma_200'] = (df_feat['close'] / df_feat['sma_200'] - 1).fillna(0)
-            
-            # BB Position
-            bb_range = df_feat['bb_upper'] - df_feat['bb_lower']
-            df_feat['bb_position'] = np.where(bb_range > 0, (df_feat['close'] - df_feat['bb_lower']) / bb_range, 0.5)
-            
-            # Slopes
-            df_feat['rsi_slope'] = df_feat['rsi_14'].diff(3).fillna(0)
-            df_feat['macd_hist_slope'] = df_feat['macd_hist'].diff(2).fillna(0)
-            
-            # Returns
-            df_feat['return_3d'] = df_feat['close'].pct_change(3).fillna(0)
-            df_feat['return_5d'] = df_feat['close'].pct_change(5).fillna(0)
-            
-            # Add Sentiment
-            df_feat['sentiment_rolling_3d'] = sentiment_rolling_3d
-            
-            # Extract the features expected by the model in the correct order
-            # The model was trained on these columns:
-            expected_features = [
-                'volume', 'rsi_14', 'macd', 'macd_signal', 'macd_hist', 'atr_14', 'adx_14', 
-                'stoch_k', 'stoch_d', 'india_vix', 'fii_net', 'dii_net', 
-                'sentiment_rolling_3d', 'dist_sma_20', 'dist_sma_50', 'dist_sma_200', 
-                'bb_position', 'rsi_slope', 'macd_hist_slope', 'return_3d', 'return_5d'
-            ]
-            
-            # Get the very last row for prediction
-            latest_feat = df_feat.iloc[-1:].copy()
-            
-            # Fill missing market context if not fetched directly in this simple pass
-            for col in ['india_vix', 'fii_net', 'dii_net']:
-                if col not in latest_feat.columns:
-                    latest_feat[col] = 0.0 # Will be populated natively in a full pipeline
-                    
-            X_live = latest_feat[expected_features]
-            
-            # 3. Model Inference
-            prob_buy = float(model.predict_proba(X_live)[0][1])
-            
-            high_precision_threshold = 0.60
-            
-            reasons = [
-                f"XGBoost ML Model Prediction Probability: {prob_buy*100:.1f}%",
-                f"Current RSI: {float(latest_feat['rsi_14'].iloc[-1]):.1f}",
-                f"MACD Histogram: {float(latest_feat['macd_hist'].iloc[-1]):.2f}",
-                f"3-Day Rolling Sentiment: {sentiment_rolling_3d:.2f}"
-            ]
-            
-            if prob_buy >= high_precision_threshold:
-                return "STRONG BUY", prob_buy * 100.0, reasons
-            elif prob_buy >= 0.50:
-                return "BUY", prob_buy * 100.0, reasons
-            elif prob_buy <= 0.30:
-                return "STRONG SELL", (1 - prob_buy) * 100.0, reasons
-            elif prob_buy <= 0.45:
-                return "SELL", (1 - prob_buy) * 100.0, reasons
+            from analysis.model_training import load_data_for_symbol, engineer_features_and_target
+            artifact = joblib.load(final_path)
+            features  = artifact["features"]
+            threshold = artifact.get("threshold", 0.5)
+            horizon   = artifact.get("horizon", "Unknown")
+            fwd       = artifact.get("forward_days", 20)
+            tgt_pct   = artifact.get("target_pct", 3.5)
+            model_name = artifact.get("model_name", "Ensemble")
+            metrics   = artifact.get("metrics", {})
+
+            # Rebuild the full feature matrix from DB (market data + sentiment included)
+            raw_df = load_data_for_symbol(symbol)
+            if raw_df.empty or len(raw_df) < 60:
+                raise ValueError("Insufficient data for full pipeline")
+
+            X, _ = engineer_features_and_target(raw_df, forward_days=fwd, target_pct=tgt_pct)
+            if X.empty:
+                raise ValueError("Feature matrix empty after engineering")
+
+            latest = X.iloc[-1:].copy()
+            for f in features:
+                if f not in latest.columns:
+                    latest[f] = 0.0
+            latest = latest[features].replace([np.inf, -np.inf], 0).fillna(0)
+
+            # Ensemble or single model
+            sub_models  = artifact.get("sub_models")
+            sub_weights = artifact.get("sub_weights")
+            if sub_models and sub_weights:
+                total_w = sum(sub_weights.values())
+                buy_prob = sum(
+                    sub_models[mn].predict_proba(latest)[0][1] * (sub_weights[mn] / total_w)
+                    for mn in sub_models
+                    if hasattr(sub_models[mn], "predict_proba")
+                )
             else:
-                return "HOLD", prob_buy * 100.0, reasons
-                
+                model = artifact["model"]
+                buy_prob = float(model.predict_proba(latest)[0][1])
+
+            acc  = metrics.get("accuracy", 0)
+            prec = metrics.get("precision", 0)
+            reasons = [
+                f"{model_name} model | horizon: {horizon} | buy_prob: {buy_prob*100:.1f}%",
+                f"Model accuracy: {acc*100:.1f}%  precision: {prec*100:.1f}%",
+                f"RSI-14: {float(df['rsi_14'].iloc[-1]):.1f}",
+                f"MACD hist: {float(df['macd_hist'].iloc[-1]):.3f}",
+            ]
+
+            if buy_prob >= 0.75 and acc >= 0.80:
+                return "STRONG BUY", round(buy_prob * 100, 1), reasons
+            elif buy_prob >= threshold:
+                return "BUY", round(buy_prob * 100, 1), reasons
+            elif buy_prob <= 0.25:
+                return "STRONG SELL", round((1 - buy_prob) * 100, 1), reasons
+            elif buy_prob <= (1 - threshold):
+                return "SELL", round((1 - buy_prob) * 100, 1), reasons
+            else:
+                return "HOLD", round(buy_prob * 100, 1), reasons
+
         except Exception as e:
-            logger.error(f"Failed to run ML model for {symbol}: {e}")
-            # Fall back to rules below if it fails
+            logger.error(f"Final model inference failed for {symbol}: {e}")
 
-    # ==========================================
-    # FALLBACK RULES-BASED SYSTEM (Legacy)
-    # ==========================================
-    latest = df.iloc[-1]
-    bullish_points = 0
-    bearish_points = 0
-    reasons = ["⚠️ ML Model not found; using legacy rules-based fallback."]
-
-    rsi = latest.get("rsi_14")
-    if rsi is not None and not pd.isna(rsi):
-        if rsi < 30: bullish_points += 2
-        elif rsi > 70: bearish_points += 2
-
-    macd_val = latest.get("macd")
-    macd_signal = latest.get("macd_signal")
-    if macd_val is not None and macd_signal is not None and not pd.isna(macd_val):
-        if macd_val > macd_signal: bullish_points += 1
-        else: bearish_points += 1
-
-    net_score = bullish_points - bearish_points
-    strength = min(100.0, abs(net_score) / max((bullish_points + bearish_points), 1) * 100)
-
-    if net_score >= 2: signal = "BUY"
-    elif net_score <= -2: signal = "SELL"
-    else: signal = "HOLD"
-
-    return signal, round(strength, 1), reasons
+    # ── 2. Rules-based fallback ────────────────────────────────────────────────
+    return _rules_signal(df)
 
 
 def process_stock(symbol: str, days: int = 365, conn: Optional[Any] = None) -> Optional[Dict]:

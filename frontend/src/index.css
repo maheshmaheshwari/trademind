@@ -2,349 +2,327 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ==========================================
-   THEME TOKENS (CSS Custom Properties)
-   Dark defaults, overridden in .light
-   ========================================== */
+/* =========================================================
+   CSS VARIABLES — design token system (dark + light)
+   ========================================================= */
+
 :root {
-  /* Auth page tokens */
-  --auth-bg: linear-gradient(135deg, #0c1825 0%, #101922 50%, #0a1628 100%);
-  --auth-card: rgba(15, 23, 42, 0.7);
-  --auth-card-sub: rgba(30, 41, 59, 0.3);
-  --auth-input: rgba(2, 6, 23, 0.5);
-  --auth-heading: #ffffff;
-  --auth-label: #cbd5e1;
-  --auth-muted: #94a3b8;
-  --auth-border: rgba(51, 65, 85, 0.6);
+  /* Layout dimensions */
+  --sidebar-w:           240px;
+  --sidebar-w-collapsed: 72px;
+  --navbar-h:            60px;
+  --radius:              14px;
+  --radius-sm:           9px;
+  --radius-lg:           18px;
 
-  /* Chart tokens */
-  --chart-bg: #0f172a;
-  --chart-text: #94a3b8;
-  --chart-grid: #1e293b;
-  --chart-border: #334155;
+  /* Density multiplier */
+  --u: 1;
+
+  /* Easing */
+  --ease: cubic-bezier(.4,0,.2,1);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.18);
+  --shadow-md: 0 6px 24px rgba(0,0,0,.28);
+  --shadow-lg: 0 18px 50px rgba(0,0,0,.40);
 }
 
-.light {
-  /* Auth page tokens */
-  --auth-bg: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 50%, #f8fafc 100%);
-  --auth-card: rgba(255, 255, 255, 0.85);
-  --auth-card-sub: rgba(241, 245, 249, 0.8);
-  --auth-input: #f8fafc;
-  --auth-heading: #0f172a;
-  --auth-label: #475569;
-  --auth-muted: #64748b;
-  --auth-border: rgba(203, 213, 225, 0.8);
+/* ── DARK theme ─────────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg:            #0A0E1A;
+  --bg-grad:       radial-gradient(1200px 700px at 78% -8%, rgba(59,130,246,.10), transparent 60%);
+  --surface:       #111827;
+  --surface-2:     #161F33;
+  --surface-3:     #1C2740;
+  --surface-hover: #1A2438;
+  --border:        rgba(255,255,255,.07);
+  --border-strong: rgba(255,255,255,.13);
+  --text:          #EEF2F9;
+  --text-2:        #AEB9CE;
+  --text-3:        #6B7890;
+  --accent:        #3B82F6;
+  --accent-soft:   rgba(59,130,246,.14);
+  --accent-2:      #60A5FA;
+  --green:         #10B981;
+  --green-soft:    rgba(16,185,129,.14);
+  --red:           #EF4444;
+  --red-soft:      rgba(239,68,68,.14);
+  --gold:          #F59E0B;
+  --gold-soft:     rgba(245,158,11,.16);
 
-  /* Chart tokens */
-  --chart-bg: #ffffff;
-  --chart-text: #64748b;
-  --chart-grid: #f1f5f9;
-  --chart-border: #e2e8f0;
+  /* Chart */
+  --chart-gain:    #10B981;
+  --chart-loss:    #EF4444;
+  --chart-accent:  #3B82F6;
+  --chart-gold:    #F59E0B;
+  --chart-grid:    rgba(255,255,255,.05);
+  --chart-surface: #111827;
+  --chart-ink3:    #6B7890;
 }
 
-/* ==========================================
-   BASE STYLES
-   ========================================== */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* ── LIGHT theme ────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg:            #EEF1F8;
+  --bg-grad:       radial-gradient(1200px 700px at 78% -8%, rgba(59,130,246,.10), transparent 60%);
+  --surface:       #FFFFFF;
+  --surface-2:     #F4F6FB;
+  --surface-3:     #E9EEF7;
+  --surface-hover: #F0F3FA;
+  --border:        rgba(15,23,42,.09);
+  --border-strong: rgba(15,23,42,.15);
+  --text:          #0E1726;
+  --text-2:        #4A5670;
+  --text-3:        #8A95AD;
+  --accent:        #2563EB;
+  --accent-soft:   rgba(37,99,235,.10);
+  --accent-2:      #3B82F6;
+  --green:         #059669;
+  --green-soft:    rgba(5,150,105,.12);
+  --red:           #DC2626;
+  --red-soft:      rgba(220,38,38,.10);
+  --gold:          #D97706;
+  --gold-soft:     rgba(217,119,6,.14);
+
+  /* Chart */
+  --chart-gain:    #059669;
+  --chart-loss:    #DC2626;
+  --chart-accent:  #2563EB;
+  --chart-gold:    #D97706;
+  --chart-grid:    rgba(15,23,42,.06);
+  --chart-surface: #FFFFFF;
+  --chart-ink3:    #8A95AD;
 }
+
+/* Density scale */
+[data-density="compact"] { --u: .82; --radius: 11px; --radius-sm: 7px; }
+[data-density="balanced"] { --u: 1; }
+[data-density="comfy"]   { --u: 1.2; --radius: 16px; }
+
+/* =========================================================
+   GLOBAL BASE
+   ========================================================= */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
 
 body {
-  font-family: "Space Grotesk", sans-serif;
+  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: #101922;
-  color: #e2e8f0;
+  text-rendering: optimizeLegibility;
+  font-variant-numeric: tabular-nums;
+  background-color: var(--bg);
+  color: var(--text);
   min-height: 100vh;
-  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-.light body,
-body:has(.light) {
-  background-color: #f8fafc;
-  color: #1e293b;
+#root { height: 100%; }
+
+::selection { background: rgba(59,130,246,0.18); }
+
+/* =========================================================
+   SCROLLBARS
+   ========================================================= */
+
+*::-webkit-scrollbar       { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.13);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #6B7890;
+  background-clip: content-box;
 }
 
-#root {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+[data-theme="light"] *::-webkit-scrollbar-thumb {
+  background: rgba(15,23,42,.15);
+  background-clip: content-box;
 }
 
-/* ==========================================
-   LIGHT MODE — BACKGROUND OVERRIDES
-   ========================================== */
+/* =========================================================
+   DENSITY-SCALED UTILITIES  (calc with --u)
+   Used where Tailwind fixed spacing won't scale with density
+   ========================================================= */
 
-/* Main surface backgrounds */
-.light .bg-background-dark {
-  background-color: #f8fafc !important;
+.dp  { padding: calc(18px * var(--u)); }
+.dpx { padding-left: calc(18px * var(--u)); padding-right: calc(18px * var(--u)); }
+.dpy { padding-top: calc(18px * var(--u)); padding-bottom: calc(18px * var(--u)); }
+.dp-head {
+  padding: calc(15px * var(--u)) calc(18px * var(--u));
+}
+.dgap { gap: calc(16px * var(--u)); }
+.dgap-sm { gap: calc(13px * var(--u)); }
+.dmb  { margin-bottom: calc(16px * var(--u)); }
+
+/* =========================================================
+   SKELETON SHIMMER  (gradient can't be expressed in Tailwind)
+   ========================================================= */
+
+.skel {
+  background: #1C2740;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255,255,255,.04) 25%,
+    rgba(255,255,255,.09) 37%,
+    rgba(255,255,255,.04) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
 }
 
-.light .bg-background-dark\/80 {
-  background-color: rgba(248, 250, 252, 0.8) !important;
+[data-theme="light"] .skel {
+  background: #E9EEF7;
+  background-image: linear-gradient(
+    90deg,
+    rgba(15,23,42,.04) 25%,
+    rgba(15,23,42,.08) 37%,
+    rgba(15,23,42,.04) 63%
+  );
+  background-size: 400% 100%;
 }
 
-.light .bg-surface-dark {
-  background-color: #ffffff !important;
+@keyframes shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
-.light .bg-surface-dark\/50 {
-  background-color: rgba(255, 255, 255, 0.9) !important;
+/* =========================================================
+   SIDEBAR ACTIVE ITEM — left accent bar (pseudo-element)
+   ========================================================= */
+
+.sb-item-active::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: #3B82F6;
 }
 
-/* Slate backgrounds (cards, panels, sections) */
-.light .bg-slate-700 {
-  background-color: #e2e8f0 !important;
+/* =========================================================
+   TAB ACTIVE UNDERLINE — pseudo-element
+   ========================================================= */
+
+.tab-active::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2.5px;
+  border-radius: 3px 3px 0 0;
+  background: #3B82F6;
 }
 
-.light .bg-slate-800,
-.light .bg-slate-900,
-.light .bg-slate-950 {
-  background-color: #f1f5f9 !important;
+/* =========================================================
+   CONFIDENCE BAR FILL — gradient by value (passed inline)
+   ========================================================= */
+
+.conf-track {
+  flex: 1;
+  min-width: 46px;
+  height: 6px;
+  border-radius: 999px;
+  background: #1C2740;
+  overflow: hidden;
 }
 
-/* Slate backgrounds with opacity */
-.light .bg-slate-800\/50,
-.light .bg-slate-800\/40,
-.light .bg-slate-800\/30,
-.light .bg-slate-950\/50 {
-  background-color: rgba(241, 245, 249, 0.8) !important;
+[data-theme="light"] .conf-track { background: #E9EEF7; }
+
+/* =========================================================
+   RANGE INPUT — custom thumb
+   ========================================================= */
+
+input[type="range"].rng {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  border-radius: 999px;
+  background: #1C2740;
+  outline: none;
+}
+[data-theme="light"] input[type="range"].rng { background: #E9EEF7; }
+input[type="range"].rng::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #3B82F6;
+  border: 2px solid #111827;
+  box-shadow: 0 1px 2px rgba(0,0,0,.18);
+  cursor: pointer;
+}
+[data-theme="light"] input[type="range"].rng::-webkit-slider-thumb {
+  border-color: #FFFFFF;
 }
 
-.light .bg-slate-900\/50,
-.light .bg-slate-900\/60,
-.light .bg-slate-900\/30 {
-  background-color: rgba(241, 245, 249, 0.7) !important;
-}
+/* =========================================================
+   LIGHT THEME — Surface & text color overrides
+   (Tailwind dark: only works one-way; light: plugin handles these)
+   ========================================================= */
 
-/* Gradient backgrounds — make them light */
-.light .bg-gradient-to-br.from-primary\/5,
-.light [class*="from-primary/5"],
-.light [class*="bg-gradient-to-br"] {
-  --tw-gradient-from: rgba(13, 127, 242, 0.03) !important;
-}
+[data-theme="light"] { color-scheme: light; }
+[data-theme="dark"]  { color-scheme: dark; }
 
-.light [class*="to-purple-500/5"] {
-  --tw-gradient-to: rgba(168, 85, 247, 0.03) !important;
-}
+/* =========================================================
+   TAILWIND → CSS-VAR BRIDGE
+   Maps Tailwind semantic color classes to design tokens so
+   every component responds to [data-theme] without changes.
+   Unlayered CSS beats @layer utilities — no !important needed.
+   ========================================================= */
 
-/* ==========================================
-   LIGHT MODE — TEXT OVERRIDES
-   ========================================== */
+/* Backgrounds */
+.bg-bg             { background-color: var(--bg); }
+.bg-surface        { background-color: var(--surface); }
+.bg-surface-2      { background-color: var(--surface-2); }
+.bg-surface-3      { background-color: var(--surface-3); }
+.bg-surface-hover  { background-color: var(--surface-hover); }
+.bg-accent         { background-color: var(--accent); }
+.bg-accent-soft    { background-color: var(--accent-soft); }
+.bg-gain-soft      { background-color: var(--green-soft); }
+.bg-loss-soft      { background-color: var(--red-soft); }
+.bg-gold-soft      { background-color: var(--gold-soft); }
 
-.light .text-white {
-  color: #0f172a !important;
-}
+/* Hover state backgrounds */
+.hover\:bg-surface-hover:hover { background-color: var(--surface-hover); }
+.hover\:bg-accent-soft:hover   { background-color: var(--accent-soft); }
+.hover\:bg-gain-soft:hover     { background-color: var(--green-soft); }
+.hover\:bg-loss-soft:hover     { background-color: var(--red-soft); }
+.hover\:bg-accent-2:hover      { background-color: var(--accent-2); }
 
-.light .text-slate-100 {
-  color: #1e293b !important;
-}
+/* Text */
+.text-ink          { color: var(--text); }
+.text-ink-2        { color: var(--text-2); }
+.text-ink-3        { color: var(--text-3); }
+.text-accent       { color: var(--accent); }
+.text-accent-2     { color: var(--accent-2); }
+.text-gain         { color: var(--green); }
+.text-loss         { color: var(--red); }
+.text-gold         { color: var(--gold); }
 
-.light .text-slate-200 {
-  color: #334155 !important;
-}
+/* Hover text */
+.hover\:text-ink:hover     { color: var(--text); }
+.hover\:text-ink-2:hover   { color: var(--text-2); }
+.hover\:text-accent-2:hover { color: var(--accent-2); }
+.hover\:text-loss:hover     { color: var(--red); }
 
-.light .text-slate-300 {
-  color: #475569 !important;
-}
+/* Borders */
+.border-line       { border-color: var(--border); }
+.border-line-strong { border-color: var(--border-strong); }
+.border-accent     { border-color: var(--accent); }
+.border-gain       { border-color: var(--green); }
+.border-loss       { border-color: var(--red); }
+.border-gold       { border-color: var(--gold); }
 
-.light .text-slate-400 {
-  color: #64748b !important;
-}
+/* Focus border */
+.focus\:border-accent:focus { border-color: var(--accent); }
 
-.light .text-slate-500 {
-  color: #64748b !important;
-}
-
-.light .text-slate-600 {
-  color: #475569 !important;
-}
-
-/* ==========================================
-   LIGHT MODE — BORDER OVERRIDES
-   ========================================== */
-
-.light .border-slate-700,
-.light .border-slate-800 {
-  border-color: #e2e8f0 !important;
-}
-
-.light .border-slate-600 {
-  border-color: #cbd5e1 !important;
-}
-
-.light .border-slate-700\/50 {
-  border-color: rgba(226, 232, 240, 0.5) !important;
-}
-
-/* Dividers */
-.light .divide-slate-700 > * + *,
-.light .divide-slate-800 > * + * {
-  border-color: #e2e8f0 !important;
-}
-
-/* ==========================================
-   LIGHT MODE — RING OVERRIDES
-   ========================================== */
-
-.light .ring-slate-700 {
-  --tw-ring-color: #e2e8f0 !important;
-}
-
-/* ==========================================
-   LIGHT MODE — INPUT / FORM OVERRIDES
-   ========================================== */
-
-.light input,
-.light select,
-.light textarea {
-  color: #1e293b;
-  background-color: #f8fafc;
-  border-color: #e2e8f0;
-}
-
-.light input::placeholder,
-.light textarea::placeholder {
-  color: #94a3b8;
-}
-
-.light input:focus,
-.light select:focus,
-.light textarea:focus {
-  border-color: #0d7ff2;
-}
-
-/* ==========================================
-   LIGHT MODE — HOVER OVERRIDES
-   ========================================== */
-
-.light .hover\:bg-slate-800:hover {
-  background-color: #f1f5f9 !important;
-}
-
-.light .hover\:bg-slate-700:hover {
-  background-color: #e2e8f0 !important;
-}
-
-.light .hover\:text-white:hover {
-  color: #0f172a !important;
-}
-
-/* ==========================================
-   LIGHT MODE — BADGE / TAG COLORS
-   Keep the same tinted backgrounds in light mode
-   ========================================== */
-
-.light .bg-green-500\/5 {
-  background-color: rgba(16, 185, 129, 0.05) !important;
-}
-
-.light .bg-green-500\/10,
-.light .bg-green-900\/30,
-.light .bg-green-500\/20 {
-  background-color: rgba(16, 185, 129, 0.1) !important;
-}
-
-.light .bg-red-500\/5 {
-  background-color: rgba(239, 68, 68, 0.05) !important;
-}
-
-.light .bg-red-500\/10,
-.light .bg-red-900\/30,
-.light .bg-red-500\/20 {
-  background-color: rgba(239, 68, 68, 0.1) !important;
-}
-
-.light .bg-blue-500\/10,
-.light .bg-blue-900\/30 {
-  background-color: rgba(59, 130, 246, 0.1) !important;
-}
-
-.light .bg-amber-500\/10,
-.light .bg-amber-500\/20 {
-  background-color: rgba(245, 158, 11, 0.1) !important;
-}
-
-.light .bg-primary\/10,
-.light .bg-primary\/20 {
-  background-color: rgba(13, 127, 242, 0.1) !important;
-}
-
-/* ==========================================
-   LIGHT MODE — CARD SHADOWS
-   ========================================== */
-
-.light .bg-surface-dark,
-.light [class*="bg-surface-dark"] {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.light .shadow-2xl {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08) !important;
-}
-
-.light .shadow-lg {
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06) !important;
-}
-
-/* ==========================================
-   LIGHT MODE — NAVBAR & LAYOUT
-   ========================================== */
-
-.light .backdrop-blur-md {
-  backdrop-filter: blur(12px) saturate(180%) !important;
-}
-
-/* Bottom mobile nav */
-.light .bg-background-dark\/95 {
-  background-color: rgba(255, 255, 255, 0.95) !important;
-}
-
-/* ==========================================
-   LIGHT MODE — TABLE & DATA
-   ========================================== */
-
-.light .even\:bg-slate-800\/30:nth-child(even) {
-  background-color: rgba(241, 245, 249, 0.5) !important;
-}
-
-.light tr:hover {
-  background-color: rgba(241, 245, 249, 0.8) !important;
-}
-
-/* ==========================================
-   CUSTOM SCROLLBAR
-   ========================================== */
-
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: #101922;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #223649;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #0d7ff2;
-}
-
-/* Light mode scrollbar */
-.light ::-webkit-scrollbar-track {
-  background: #f8fafc;
-}
-
-.light ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-}
-
-.light ::-webkit-scrollbar-thumb:hover {
-  background: #0d7ff2;
-}
+/* Sidebar active item accent bar — uses CSS var now */
+.sb-item-active::before { background: var(--accent); }
+.tab-active::after      { background: var(--accent); }
+.conf-track             { background: var(--surface-3); }
+input[type="range"].rng { background: var(--surface-3); }
+input[type="range"].rng::-webkit-slider-thumb { background: var(--accent); border-color: var(--surface); }

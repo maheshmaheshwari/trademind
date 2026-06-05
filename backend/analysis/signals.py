@@ -97,11 +97,12 @@ def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str
         return "HOLD", 0.0, ["Insufficient data for analysis"]
 
     # ── 1. Try final production model (final_models/{symbol}_final.pkl) ────────
-    final_path = os.path.join("final_models", f"{symbol}_final.pkl")
+    _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    final_path = os.path.join(_backend_dir, "final_models", f"{symbol}_final.pkl")
     if not os.path.exists(final_path):
         # Also try without the .NS suffix stored in the filename
         bare = symbol.replace(".NS", "")
-        final_path = os.path.join("final_models", f"{bare}_final.pkl")
+        final_path = os.path.join(_backend_dir, "final_models", f"{bare}_final.pkl")
 
     if os.path.exists(final_path):
         try:
@@ -157,7 +158,7 @@ def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str
                 return "STRONG BUY", round(buy_prob * 100, 1), reasons
             elif buy_prob >= threshold:
                 return "BUY", round(buy_prob * 100, 1), reasons
-            elif buy_prob <= 0.25:
+            elif buy_prob <= 0.25 and acc >= 0.80:
                 return "STRONG SELL", round((1 - buy_prob) * 100, 1), reasons
             elif buy_prob <= (1 - threshold):
                 return "SELL", round((1 - buy_prob) * 100, 1), reasons
@@ -171,7 +172,7 @@ def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str
     return _rules_signal(df)
 
 
-def process_stock(symbol: str, days: int = 365, conn: Optional[Any] = None) -> Optional[Dict]:
+def process_stock(symbol: str, days: int = 400, conn: Optional[Any] = None) -> Optional[Dict]:
     """
     Process a single stock: calculate indicators and generate signal.
 
@@ -252,7 +253,7 @@ def process_stock(symbol: str, days: int = 365, conn: Optional[Any] = None) -> O
                 stop_loss = round(close_price + (1.5 * atr), 2)
 
         # Store AI signal
-        model_ver = f"v2.0.0-ml" if "ML Model Prediction" in " ".join(reasons) else "v1.0.0-rules-fallback"
+        model_ver = "v2.0.0-ml" if any("model" in r.lower() and "horizon" in r.lower() for r in reasons) else "v1.0.0-rules-fallback"
         insert_ai_signal(
             symbol=symbol,
             signal=signal,

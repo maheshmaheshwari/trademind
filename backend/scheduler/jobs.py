@@ -39,16 +39,72 @@ logger = logging.getLogger(__name__)
 
 
 def collect_eod_data_job():
-    """Daily job: collect end-of-day prices for all stocks via Angel One (smart date detection)."""
-    logger.info("⏰ Running EOD data collection (Angel One)...")
+    """
+    Daily job: EOD prices → indicators → trade signals (chained in order).
+    Guarantees each step only starts after the previous one completes,
+    regardless of how long each step takes.
+    """
+    # ── Step 1: EOD prices ───────────────────────────────────────────────────
+    logger.info("⏰ [1/3] EOD price collection starting...")
     try:
         from update_stocks_angel import main as run_eod
-        import sys
-        sys.argv = ["update_stocks_angel.py", "--days", "2"]
-        run_eod()
-        logger.info("EOD collection done")
+        run_eod(days=2)
+        logger.info("✅ [1/3] EOD prices done")
     except Exception as e:
-        logger.error(f"EOD collection failed: {e}")
+        logger.error(f"❌ [1/3] EOD collection failed: {e} — aborting chain")
+        return
+
+    # ── Step 2: Technical indicators ─────────────────────────────────────────
+    logger.info("⏰ [2/3] Technical indicators starting...")
+    try:
+        from analysis.signals import process_all_stocks
+        result = process_all_stocks()
+        logger.info(f"✅ [2/3] Indicators done ({result['processed']} stocks)")
+    except Exception as e:
+        logger.error(f"❌ [2/3] Indicators failed: {e} — aborting chain")
+        return
+
+    # ── Step 3: Trade signal generation ──────────────────────────────────────
+    logger.info("⏰ [3/3] Trade signal generation starting...")
+    try:
+        from generate_trades import generate_signals
+        generate_signals()
+        logger.info("✅ [3/3] Trade signals done — EOD pipeline complete")
+    except Exception as e:
+        logger.error(f"❌ [3/3] Trade signal generation failed: {e}")
+
+
+def collect_yfinance_news_job():
+    """Daily job: fetch ~10 recent articles per stock from yfinance."""
+    logger.info("⏰ Running yfinance news collection...")
+    try:
+        from collectors.yfinance_news_collector import collect_all
+        result = collect_all()
+        logger.info(f"yfinance news done: {result['total']} new articles")
+    except Exception as e:
+        logger.error(f"yfinance news collection failed: {e}")
+
+
+def collect_delivery_job():
+    """Daily job: fetch NSE delivery % bhavcopy after market close."""
+    logger.info("⏰ Running NSE delivery % collection...")
+    try:
+        from collectors.delivery_collector import collect_today
+        n = collect_today()
+        logger.info(f"Delivery % done: {n} records stored")
+    except Exception as e:
+        logger.error(f"Delivery collection failed: {e}")
+
+
+def collect_rss_news_job():
+    """Daily job: scrape market-wide news from ET, Moneycontrol, Business Standard RSS."""
+    logger.info("⏰ Running RSS news collection...")
+    try:
+        from collectors.rss_collector import collect_all_rss
+        result = collect_all_rss()
+        logger.info(f"RSS news done: {result['total']} new articles")
+    except Exception as e:
+        logger.error(f"RSS news collection failed: {e}")
 
 
 def calculate_indicators_job():
@@ -226,6 +282,108 @@ def score_pending_news_job():
         logger.error(f"News scoring failed: {e}")
 
 
+def notify_signal_changes_job():
+    """Post-EOD: create notifications for watchlist stocks whose signal changed today."""
+    logger.info("⏰ Checking for signal changes on watchlisted stocks...")
+    try:
+        from database.db import get_connection, _rows_to_dicts, _execute, insert_notification, release_connection
+        conn = get_connection()
+        try:
+            cur = _execute(conn, """
+                SELECT DISTINCT ON (w.user_id, s.symbol)
+                    w.user_id,
+                    s.symbol,
+                    s.signal      AS new_signal,
+                    s.confidence,
+                    LAG(s.signal) OVER (PARTITION BY s.symbol ORDER BY s.generated_at) AS prev_signal
+                FROM watchlist w
+                JOIN trade_signals s ON s.symbol = w.symbol
+                WHERE s.generated_at >= NOW() - INTERVAL '2 days'
+                ORDER BY w.user_id, s.symbol, s.generated_at DESC
+            """)
+            rows = _rows_to_dicts(cur)
+        finally:
+            release_connection(conn)
+        fired = 0
+        for row in rows:
+            if row.get("prev_signal") and row["new_signal"] != row["prev_signal"]:
+                conf = row.get("confidence") or 0
+                insert_notification(
+                    user_id=row["user_id"],
+                    type="signal",
+                    title=f"{row['symbol']} signal changed",
+                    message=f"{row['prev_signal']} → {row['new_signal']} ({conf:.0%} confidence)",
+                    icon="TrendingUp",
+                    color="#3B82F6",
+                )
+                fired += 1
+        logger.info(f"Signal change notifications fired: {fired}")
+    except Exception as e:
+        logger.error(f"Signal change notifier failed: {e}")
+
+
+def price_alert_job():
+    """Hourly: check watchlist price alerts and fire notifications when thresholds are crossed."""
+    logger.info("⏰ Checking price alerts...")
+    try:
+        from database.db import get_connection, _rows_to_dicts, _execute, get_latest_indicators, insert_notification, release_connection
+        conn = get_connection()
+        try:
+            cur = _execute(conn,
+                "SELECT user_id, symbol, alert_above, alert_below FROM watchlist "
+                "WHERE alert_above IS NOT NULL OR alert_below IS NOT NULL"
+            )
+            alerts = _rows_to_dicts(cur)
+        finally:
+            release_connection(conn)
+
+        fired = 0
+        for alert in alerts:
+            ind = get_latest_indicators(alert["symbol"])
+            if not ind:
+                continue
+            price = ind.get("close") or ind.get("ltp")
+            if not price:
+                continue
+
+            # Cooldown: skip if a price notification for this user+symbol was sent in the last 24h
+            conn2 = get_connection()
+            try:
+                recent = _execute(conn2,
+                    """SELECT 1 FROM notifications
+                       WHERE user_id = ? AND type = 'price'
+                         AND title LIKE ?
+                         AND created_at >= NOW() - INTERVAL '24 hours'
+                       LIMIT 1""",
+                    (alert["user_id"], f"{alert['symbol']}%"),
+                ).fetchone()
+            finally:
+                release_connection(conn2)
+
+            if recent:
+                continue
+
+            if alert["alert_above"] and price >= alert["alert_above"]:
+                insert_notification(
+                    user_id=alert["user_id"], type="price",
+                    title=f"{alert['symbol']} above ₹{alert['alert_above']:,.2f}",
+                    message=f"Current price ₹{price:,.2f}",
+                    icon="ArrowUp", color="#10B981",
+                )
+                fired += 1
+            elif alert["alert_below"] and price <= alert["alert_below"]:
+                insert_notification(
+                    user_id=alert["user_id"], type="price",
+                    title=f"{alert['symbol']} below ₹{alert['alert_below']:,.2f}",
+                    message=f"Current price ₹{price:,.2f}",
+                    icon="ArrowDown", color="#EF4444",
+                )
+                fired += 1
+        logger.info(f"Price alert notifications fired: {fired}")
+    except Exception as e:
+        logger.error(f"Price alert job failed: {e}")
+
+
 def sync_gtt_status_job():
     """Every 5 min: sync GTT rule statuses from Angel One to local DB."""
     logger.info("⏰ Syncing GTT statuses from Angel One...")
@@ -364,21 +522,29 @@ def _add_all_jobs(scheduler):
     scheduler.add_job(collect_index_data_eod_job, CronTrigger(hour=16, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="index_data_eod", name="Index & Market Overview", misfire_grace_time=3600, replace_existing=True)
     # 16:05 — Legacy index collector (price_collector.py fallback)
     scheduler.add_job(collect_index_data_job, CronTrigger(hour=16, minute=5, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="index_data", name="Index Data Collection (legacy)", misfire_grace_time=3600, replace_existing=True)
-    # 16:15 — Technical indicators
-    scheduler.add_job(calculate_indicators_job, CronTrigger(hour=16, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="indicators", name="Calculate Indicators", misfire_grace_time=3600, replace_existing=True)
-    # 16:30 — RSS + NewsAPI live news
+    # NOTE: indicators + trade signals are now chained inside collect_eod_data_job (step 2 & 3)
+    # 18:00 — NSE delivery % (NSE uploads bhavcopy ~5:30 PM IST)
+    scheduler.add_job(collect_delivery_job, CronTrigger(hour=18, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="delivery_data", name="NSE Delivery % Collection", misfire_grace_time=3600, replace_existing=True)
+    # 16:30 — RSS market-wide news (ET, Moneycontrol, Business Standard)
+    scheduler.add_job(collect_rss_news_job, CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="rss_news", name="RSS Market News", misfire_grace_time=3600, replace_existing=True)
+    # 16:45 — yfinance per-stock news (~10 articles × 499 stocks)
+    scheduler.add_job(collect_yfinance_news_job, CronTrigger(hour=16, minute=45, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="yfinance_news", name="yfinance Per-Stock News", misfire_grace_time=3600, replace_existing=True)
+    # Legacy news collector (fallback)
     scheduler.add_job(collect_news_job, CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="daily_news", name="Daily News Collection", misfire_grace_time=3600, replace_existing=True)
     # 16:45 — Alpha Vantage news (25 stocks/day free tier)
     scheduler.add_job(collect_av_news_job, CronTrigger(hour=16, minute=45, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="av_news", name="Alpha Vantage News", misfire_grace_time=3600, replace_existing=True)
     # 17:00 — FII/DII data
     scheduler.add_job(collect_fii_data_job, CronTrigger(hour=17, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="fii_dii", name="FII/DII Data", misfire_grace_time=3600, replace_existing=True)
-    # 17:15 — Trade signal generation
-    scheduler.add_job(generate_trade_signals_job, CronTrigger(hour=17, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="trade_signals", name="Generate Trade Signals", misfire_grace_time=3600, replace_existing=True)
+    # NOTE: trade signal generation is now chained inside collect_eod_data_job (step 3)
+    # 17:30 — Notify users of signal changes on watchlisted stocks
+    scheduler.add_job(notify_signal_changes_job, CronTrigger(hour=17, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="signal_notifications", name="Signal Change Notifications", misfire_grace_time=3600, replace_existing=True)
     # HOURLY JOBS — 9 AM–4 PM IST weekdays
     # Every hour: RSS news refresh
     scheduler.add_job(collect_news_job, CronTrigger(hour="9-16", minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="hourly_news", name="Hourly News Refresh", misfire_grace_time=1800, replace_existing=True)
     # Every hour: score unscored news with FinBERT
     scheduler.add_job(score_pending_news_job, CronTrigger(hour="9-20", minute=5, timezone="Asia/Kolkata"), id="score_news", name="FinBERT News Scoring", misfire_grace_time=1800, replace_existing=True)
+    # Every hour (market hours): check watchlist price alerts
+    scheduler.add_job(price_alert_job, CronTrigger(hour="9-15", minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="price_alerts", name="Price Alert Checker", misfire_grace_time=1800, replace_existing=True)
 
     # INTRADAY JOBS — market hours (9:15–15:30 IST)
     # Every 30 min: 30m candles for open positions (new dedicated collector)

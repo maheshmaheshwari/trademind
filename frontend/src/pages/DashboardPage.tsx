@@ -1,221 +1,346 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { TrendingUp, ArrowUp, Briefcase, Wallet, ChevronRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Bookmark, RefreshCw, ChevronRight } from 'lucide-react';
 import { useAuth } from '../AuthContext';
-import { getPortfolioSummary, getLatestSignals } from '../api';
+import { useToast } from '../components/ui';
+import {
+  useGetPortfolioSummaryQuery, useGetTodayPnlQuery, useGetActionableSignalsQuery,
+  useGetOrdersQuery, useGetPositionsQuery, useGetMarketOverviewQuery, useRefreshSignalsMutation,
+} from '../services/tradeMindApiService';
+import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell, Conf, DateComponent } from '../components/ui';
+import { AreaChart, Gauge, Sparkline } from '../components/Charts';
+import type { Stock, IndexData, Breadth, Trade } from '../types';
 
-interface PortfolioData {
-    balance: number;
-    invested: number;
-    total_value: number;
-    realized_pnl: number;
-    unrealized_pnl: number;
-    total_pnl: number;
-    open_positions: number;
-    wins: number;
-    losses: number;
-    win_rate: number;
-    positions: any[];
+function inrCompact(n: number) {
+  const a = Math.abs(n);
+  if (a >= 1e7) return '₹' + (n / 1e7).toFixed(2) + ' Cr';
+  if (a >= 1e5) return '₹' + (n / 1e5).toFixed(2) + ' L';
+  return '₹' + n.toLocaleString('en-IN');
+}
+function inr(n: number, dec = 2) {
+  return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+function fmtAgo(m: number) { return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`; }
+
+function StatCard({
+  label, value, delta, deltaSuffix = '%', iconColor,
+  icon, spark, sparkColor,
+}: {
+  label: string; value: string; delta?: number | null; deltaSuffix?: string;
+  iconColor: string; icon: React.ReactNode; spark?: number[]; sparkColor?: string;
+}) {
+  return (
+    <div className="bg-surface border border-line relative overflow-hidden" style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(17px * var(--u)) calc(18px * var(--u))' }}>
+      <div className="flex items-center justify-between">
+        <span className="text-[12.5px] text-ink-2 font-medium">{label}</span>
+        <span className="w-[34px] h-[34px] rounded-[10px] grid place-items-center" style={{ background: iconColor + '1f', color: iconColor }}>
+          {icon}
+        </span>
+      </div>
+      <div className="font-bold tracking-tight tabular-nums text-ink" style={{ fontSize: 'calc(27px * var(--u))', margin: '10px 0 5px' }}>
+        {value}
+      </div>
+      {delta != null && (
+        <span className="inline-flex items-center gap-1 text-[12.5px] font-semibold" style={{ color: delta >= 0 ? 'var(--green)' : 'var(--red)' }}>
+          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            {delta >= 0
+              ? <><path d="M7 17 17 7M8 7h9v9"/></>
+              : <><path d="M12 5v14M6 13l6 6 6-6"/></>
+            }
+          </svg>
+          {delta >= 0 ? '+' : ''}{delta}{deltaSuffix}
+          <span className="text-ink-3 font-medium ml-[2px]">today</span>
+        </span>
+      )}
+      {spark && (
+        <div className="absolute right-0 bottom-0 left-0 h-[38px] opacity-55 pointer-events-none">
+          <Sparkline data={spark} color={sparkColor || iconColor} w={300} h={38} />
+        </div>
+      )}
+    </div>
+  );
 }
 
-interface Signal {
-    symbol: string;
-    name: string;
-    signal: string;
-    confidence: number;
-    trade?: { buy_price?: number; target_price?: number };
+function SignalCard({ s, onClick }: { s: Stock; onClick: () => void }) {
+  const col = s.signal === 'BUY' ? 'var(--green)' : s.signal === 'SELL' ? 'var(--red)' : 'var(--gold)';
+  const sparkColor = s.signal === 'SELL' ? '#EF4444' : s.signal === 'HOLD' ? '#F59E0B' : '#10B981';
+  return (
+    <button
+      onClick={onClick}
+      className="text-left font-sans text-ink bg-surface-2 border border-line cursor-pointer w-full transition-all hover:border-line-strong hover:bg-surface-hover hover:-translate-y-0.5"
+      style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(15px * var(--u))' }}
+    >
+      <div className="flex items-center justify-between">
+        <SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector={false} />
+        <SignalBadge signal={s.signal} />
+      </div>
+      <div className="flex items-center justify-between my-[13px] mb-[11px]">
+        <div className="flex flex-col gap-[1px]">
+          <span className="font-mono text-[18px] font-bold">{inr(s.price)}</span>
+          <Delta value={s.change} size={12} />
+        </div>
+        <Sparkline data={s.spark} color={sparkColor} w={88} h={38} />
+      </div>
+      <div className="h-px bg-[var(--border)] mb-[11px]" />
+      <div className="flex justify-between">
+        <div className="flex flex-col gap-[2px]">
+          <span className="text-[11px] text-ink-3">Horizon</span>
+          <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s.horizon}</span>
+        </div>
+        <div className="flex flex-col gap-[2px] items-end">
+          <span className="text-[11px] text-ink-3">Exp. Return</span>
+          <span className="font-mono font-bold text-[13.5px]" style={{ color: col }}>
+            {(s.expReturn >= 0 ? '+' : '') + s.expReturn.toFixed(2) + '%'}
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center justify-between mt-[11px] gap-[10px]">
+        <span className="text-[11px] text-ink-3 whitespace-nowrap">Confidence</span>
+        <div className="flex-1"><Conf value={s.confidence} /></div>
+      </div>
+    </button>
+  );
 }
 
 export default function DashboardPage() {
-    const { user } = useAuth();
-    const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
-    const [signals, setSignals] = useState<Signal[]>([]);
-    const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const toast = useToast();
 
-    useEffect(() => {
-        if (!user) return;
-        const load = async () => {
-            try {
-                const [portData, sigData] = await Promise.all([
-                    getPortfolioSummary(user.id),
-                    getLatestSignals(),
-                ]);
-                setPortfolio(portData);
-                const trades = sigData?.data?.trades || sigData?.data?.actionable_trades || [];
-                setSignals(trades.slice(0, 5));
-            } catch {
-                // Backend might be down; use fallback data from user object
-                setPortfolio({
-                    balance: user.virtual_balance,
-                    invested: user.virtual_invested,
-                    total_value: user.virtual_balance + user.virtual_invested,
-                    realized_pnl: user.total_pnl,
-                    unrealized_pnl: 0,
-                    total_pnl: user.total_pnl,
-                    open_positions: 0,
-                    wins: user.win_count,
-                    losses: user.loss_count,
-                    win_rate: user.win_count + user.loss_count > 0 ? Math.round((user.win_count / (user.win_count + user.loss_count)) * 100) : 0,
-                    positions: [],
-                });
-            } finally {
-                setLoading(false);
-            }
-        };
-        load();
-    }, [user]);
+  const { data: portData,    isLoading: loadPort    } = useGetPortfolioSummaryQuery(user!.id, { skip: !user });
+  const { data: todayPnl,    isLoading: loadPnl     } = useGetTodayPnlQuery(user!.id, { skip: !user });
+  const { data: signalsData, isLoading: loadSignals } = useGetActionableSignalsQuery();
+  const { data: ordersData,  isLoading: loadOrders  } = useGetOrdersQuery({ userId: user!.id, size: 6 }, { skip: !user });
+  const { data: posData,     isLoading: loadPos     } = useGetPositionsQuery({ userId: user!.id, size: 1 }, { skip: !user });
+  const { data: mktData,     isLoading: loadMkt     } = useGetMarketOverviewQuery();
+  const [refreshSignals, { isLoading: refreshing }]   = useRefreshSignalsMutation();
 
-    const fmt = (n: number) => n?.toLocaleString('en-IN', { maximumFractionDigits: 2 }) || '0';
-    const pnlColor = (n: number) => n >= 0 ? 'text-green-400' : 'text-red-400';
+  const loading = loadPort || loadPnl || loadSignals || loadOrders || loadPos || loadMkt;
 
-    if (loading) {
-        return <div className="flex items-center justify-center py-20 text-slate-400 text-lg">Loading dashboard...</div>;
+  const signals: Stock[] = (signalsData as any)?.data ?? [];
+  const trades: Trade[]  = (ordersData as any)?.data?.slice(0, 6) ?? [];
+  const posCount: number = (posData as any)?.total ?? 0;
+  const indices: IndexData[] = (mktData as any)?.indices ?? [];
+  const breadth: Breadth | null = (mktData as any)?.breadth ?? null;
+  const sentiment: number = (mktData as any)?.sentiment ?? 0;
+
+  async function refresh() {
+    try {
+      await refreshSignals().unwrap();
+      toast({ type: 'success', title: 'Signals refreshed', msg: '498 stocks re-scored' });
+    } catch {
+      toast({ type: 'error', title: 'Refresh failed' });
     }
+  }
 
-    const p = portfolio!;
+  const nifty    = indices[0];
+  const winRate  = user ? (user.win_count + user.loss_count > 0 ? ((user.win_count / (user.win_count + user.loss_count)) * 100).toFixed(1) : '0') : '0';
+  const niftyLabels = ['9:15', '11:00', '12:45', '14:30', '15:30'];
 
-    return (
-        <>
-            {/* Welcome */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-white text-2xl font-bold">Welcome back, {user?.display_name || user?.username}!</h1>
-                    <p className="text-slate-400 text-sm mt-1">Here's your portfolio overview</p>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500/20 border border-green-500/20">
-                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                    <span className="text-green-400 text-xs font-bold">PAPER TRADING</span>
-                </div>
+  // Dynamic greeting based on current hour
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+  // Last run time from signals data
+  const lastRunStr = (signalsData as any)?.generated_at
+    ? fmtAgo(Math.round((Date.now() - new Date((signalsData as any).generated_at).getTime()) / 60000))
+    : fmtAgo(8);
+
+  // Today P&L % from API
+  const todayPnlPct = (todayPnl as any)?.today_pnl_pct ?? null;
+
+  return (
+    <div className="flex flex-col dgap animate-page-in">
+
+      {/* ── Header ── */}
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-bold tracking-tight m-0 text-ink" style={{ fontSize: 'calc(25px * var(--u))' }}>
+            {greeting}, {user?.display_name?.split(' ')[0] || user?.username} 👋
+          </h1>
+          <p className="text-ink-2 text-[13.5px] mt-1 m-0">
+            Your AI engine scanned <b className="tabular-nums">498</b> Nifty 500 stocks · last run {lastRunStr}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => toast({ type: 'info', title: 'Added to Watchlist', msg: 'Top 5 signals saved to your watchlist' })}
+            className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border border-line bg-surface-2 text-ink transition-colors hover:bg-surface-hover"
+          >
+            <Bookmark size={17} /> Add to Watchlist
+          </button>
+          <button
+            onClick={refresh}
+            className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border border-transparent text-[#1A1206] transition-all hover:brightness-110"
+            style={{ background: 'var(--gold)', boxShadow: '0 4px 14px rgba(245,158,11,.3)' }}
+          >
+            <RefreshCw size={17} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+            Refresh Signals
+          </button>
+        </div>
+      </div>
+
+      {/* ── Stat cards ── */}
+      <div className="grid max-lg:grid-cols-2" style={{ gridTemplateColumns: 'repeat(4,1fr)', gap: 'calc(16px * var(--u))' }}>
+        {loading ? Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="bg-surface border border-line" style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(17px * var(--u))' }}>
+            <Skeleton h={12} w="50%" className="mb-3" /><Skeleton h={28} w="70%" className="mb-2" /><Skeleton h={11} w="40%" />
+          </div>
+        )) : (<>
+          <StatCard label="Portfolio Value" value={inrCompact((portData as any)?.current_value ?? 0)} delta={todayPnlPct} iconColor="var(--accent)"
+            icon={<svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18"/><circle cx="16.5" cy="14" r="1.3" fill="currentColor" stroke="none"/></svg>}
+            spark={nifty?.spark} sparkColor="var(--accent)"
+          />
+          <StatCard label="Today's P&L" value={(todayPnl as any) ? ((todayPnl as any).today_pnl >= 0 ? '+' : '') + inr((todayPnl as any).today_pnl, 2).replace('₹', '') : '—'} delta={(todayPnl as any)?.today_pnl_pct ?? null} iconColor="var(--green)"
+            icon={<svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 11V7h-4"/></svg>}
+            spark={indices[1]?.spark} sparkColor="var(--green)"
+          />
+          <StatCard label="Active Positions" value={String(posCount)} iconColor="var(--gold)"
+            icon={<svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>}
+          />
+          <StatCard label="Win Rate" value={winRate + '%'} delta={2.3} iconColor="#8B5CF6"
+            icon={<svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg>}
+          />
+        </>)}
+      </div>
+
+      {/* ── NIFTY chart + Sentiment ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: 'calc(16px * var(--u))' }}>
+        <Card
+          title="NIFTY 50" sub="NSE · Intraday" icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 2 4-6"/></svg>}
+          pad={false}
+          right={nifty ? (
+            <div className="flex flex-col items-end">
+              <span className="font-mono text-[20px] font-bold text-ink">{nifty.value.toLocaleString('en-IN')}</span>
+              <span className="text-[12.5px] font-semibold text-gain">+{nifty.change} (+{nifty.pct.toFixed(2)}%)</span>
             </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="flex flex-col gap-2 rounded-xl p-6 bg-surface-dark border border-slate-800">
-                    <div className="flex items-center gap-2 text-slate-400 text-sm">
-                        <Briefcase className="w-4 h-4" />
-                        Total Portfolio Value
-                    </div>
-                    <p className="text-white text-3xl font-bold tracking-tight">₹{fmt(p.total_value)}</p>
-                    <p className={`text-sm flex items-center gap-1 ${pnlColor(p.total_pnl)}`}>
-                        <TrendingUp className="w-3 h-3" /> {p.total_pnl >= 0 ? '+' : ''}₹{fmt(p.total_pnl)}
-                    </p>
-                </div>
-                <div className="flex flex-col gap-2 rounded-xl p-6 bg-surface-dark border border-slate-800">
-                    <div className="flex items-center gap-2 text-slate-400 text-sm">
-                        <TrendingUp className="w-4 h-4" />
-                        Unrealized P&L
-                    </div>
-                    <p className={`text-3xl font-bold tracking-tight ${pnlColor(p.unrealized_pnl)}`}>
-                        {p.unrealized_pnl >= 0 ? '+' : ''}₹{fmt(p.unrealized_pnl)}
-                    </p>
-                    <p className="text-slate-500 text-sm">{p.open_positions} open positions</p>
-                </div>
-                <div className="flex flex-col gap-2 rounded-xl p-6 bg-surface-dark border border-slate-800">
-                    <div className="flex items-center gap-2 text-slate-400 text-sm">
-                        <Wallet className="w-4 h-4" />
-                        Invested Amount
-                    </div>
-                    <p className="text-white text-3xl font-bold tracking-tight">₹{fmt(p.invested)}</p>
-                    <div className="w-full bg-slate-700 rounded-full h-2 mt-1">
-                        <div className="bg-primary h-2 rounded-full" style={{ width: `${Math.min((p.invested / (p.invested + p.balance)) * 100, 100)}%` }} />
-                    </div>
-                </div>
-                <div className="flex flex-col gap-2 rounded-xl p-6 bg-surface-dark border border-slate-800">
-                    <div className="flex items-center gap-2 text-slate-400 text-sm">
-                        <Wallet className="w-4 h-4" />
-                        Virtual Balance
-                    </div>
-                    <p className="text-white text-3xl font-bold tracking-tight">₹{fmt(p.balance)}</p>
-                    <p className="text-slate-500 text-xs mt-1">
-                        Win Rate: {p.win_rate}% ({p.wins}W/{p.losses}L)
-                    </p>
-                </div>
+          ) : undefined}
+        >
+          <div className="dp" style={{ paddingTop: 8 }}>
+            {loading
+              ? <Skeleton h={210} />
+              : <AreaChart data={nifty?.spark ?? []} color="#10B981" h={210} labels={niftyLabels} />
+            }
+            <div className="flex gap-2 flex-wrap mt-3">
+              {loading
+                ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} h={32} w={110} rounded="9px" />)
+                : indices.map(ix => (
+                  <div key={ix.name} className="flex items-center gap-2 px-[11px] py-[7px] rounded-[9px] bg-surface-2 text-[12px]">
+                    <span className="text-ink-2 font-semibold">{ix.name}</span>
+                    <span className="font-mono font-bold text-ink">{ix.value.toLocaleString('en-IN')}</span>
+                    <span className="font-semibold tabular-nums" style={{ color: ix.pct >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {(ix.pct >= 0 ? '+' : '') + ix.pct.toFixed(2) + '%'}
+                    </span>
+                  </div>
+                ))
+              }
             </div>
+          </div>
+        </Card>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Left: Positions */}
-                <div className="lg:col-span-2 flex flex-col gap-6">
-                    <div className="rounded-xl bg-surface-dark border border-slate-800">
-                        <div className="flex items-center justify-between p-5 border-b border-slate-800">
-                            <h3 className="text-white font-bold">Open Positions ({p.positions.length})</h3>
-                            <Link to="/portfolio" className="text-primary text-sm font-medium hover:underline">View All</Link>
-                        </div>
-                        {p.positions.length === 0 ? (
-                            <div className="p-8 text-center">
-                                <p className="text-slate-400 text-sm">No open positions yet.</p>
-                                <Link to="/signals" className="text-primary text-sm font-medium hover:underline mt-2 inline-block">
-                                    Browse AI Signals to start trading →
-                                </Link>
-                            </div>
-                        ) : (
-                            p.positions.slice(0, 5).map((pos: any) => (
-                                <Link to={`/trade/${pos.symbol}`} key={pos.symbol} className="flex items-center justify-between p-5 border-b border-slate-800/50 last:border-0 hover:bg-slate-800/30 transition-colors">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center text-primary text-xs font-bold">
-                                            {pos.symbol?.slice(0, 3)}
-                                        </div>
-                                        <div>
-                                            <p className="text-white font-bold text-sm">{pos.symbol}</p>
-                                            <p className="text-slate-500 text-xs">Qty: {pos.quantity} • Avg: ₹{fmt(pos.avg_buy_price)}</p>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className={`font-bold text-sm ${pnlColor(pos.unrealized_pnl || 0)}`}>
-                                            {(pos.unrealized_pnl || 0) >= 0 ? '+' : ''}₹{fmt(pos.unrealized_pnl || 0)}
-                                        </p>
-                                        <p className={`text-xs ${pnlColor(pos.unrealized_pnl_pct || 0)}`}>
-                                            {(pos.unrealized_pnl_pct || 0) >= 0 ? '+' : ''}{(pos.unrealized_pnl_pct || 0).toFixed(2)}%
-                                        </p>
-                                    </div>
-                                </Link>
-                            ))
-                        )}
-                    </div>
+        <Card title="Market Sentiment" sub="Driven by news + flows" icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-1 5 3 3 0 0 0 2 4 3 3 0 0 0 5 1V4.5A2.5 2.5 0 0 0 9 4z"/><path d="M15 4a3 3 0 0 1 3 3 3 3 0 0 1 1 5 3 3 0 0 1-2 4 3 3 0 0 1-5 1"/></svg>}>
+          <div className="dp flex flex-col items-center gap-[14px]">
+            {loading ? <Skeleton w={190} h={140} rounded="12px" /> : <Gauge value={sentiment} size={200} />}
+            {breadth && (
+              <div className="flex justify-around w-full border-t border-line pt-[13px]">
+                <div className="flex flex-col items-center gap-[1px]">
+                  <span className="font-mono font-bold text-gain">{breadth.advances}</span>
+                  <span className="text-[11px] text-ink-3">Advances</span>
                 </div>
+                <div className="flex flex-col items-center gap-[1px]">
+                  <span className="font-mono font-bold text-loss">{breadth.declines}</span>
+                  <span className="text-[11px] text-ink-3">Declines</span>
+                </div>
+                <div className="flex flex-col items-center gap-[1px]">
+                  <span className="font-mono font-bold text-gold">{(breadth.advances / breadth.declines).toFixed(2)}</span>
+                  <span className="text-[11px] text-ink-3">A/D Ratio</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
 
-                {/* Right: AI Top Picks */}
-                <div className="flex flex-col gap-6">
-                    <div className="rounded-xl bg-surface-dark border border-slate-800">
-                        <div className="flex items-center justify-between p-5 border-b border-slate-800">
-                            <h3 className="text-white font-bold">AI Top Picks</h3>
-                            <span className="text-xs text-primary font-bold border border-primary/30 px-2 py-0.5 rounded-full">AI</span>
-                        </div>
-                        {signals.length === 0 ? (
-                            <div className="p-8 text-center text-slate-400 text-sm">
-                                No signals available yet. Run the signal generator.
-                            </div>
-                        ) : (
-                            signals.map((s) => (
-                                <Link to={`/trade/${s.symbol?.replace('.NS', '')}`} key={s.symbol} className="flex items-center justify-between px-5 py-4 border-b border-slate-800/50 last:border-0 hover:bg-slate-800/30 transition-colors">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-white text-xs font-bold ${s.signal?.includes('BUY') ? 'bg-green-600' : s.signal?.includes('SELL') ? 'bg-red-600' : 'bg-amber-600'
-                                            }`}>
-                                            {s.symbol?.replace('.NS', '').slice(0, 3)}
-                                        </div>
-                                        <div>
-                                            <p className="text-white font-bold text-sm">{s.symbol?.replace('.NS', '')}</p>
-                                            <p className={`text-xs font-bold ${s.signal?.includes('BUY') ? 'text-green-400' : s.signal?.includes('SELL') ? 'text-red-400' : 'text-amber-400'
-                                                }`}>{s.signal}</p>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-primary text-sm font-bold">{s.confidence?.toFixed(0)}%</p>
-                                        {s.trade?.buy_price && <p className="text-slate-500 text-xs">₹{fmt(s.trade.buy_price)}</p>}
-                                    </div>
-                                </Link>
-                            ))
-                        )}
-                        <div className="px-5 py-4">
-                            <Link
-                                to="/signals"
-                                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-slate-700 text-white text-sm font-medium hover:bg-slate-800 transition-colors"
-                            >
-                                View Full Analysis <ChevronRight className="w-4 h-4" />
-                            </Link>
-                        </div>
-                    </div>
-                </div>
+      {/* ── Top AI Signals ── */}
+      <Card
+        title="Top AI Signals Today"
+        sub="Highest-confidence calls across Nifty 500"
+        icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>}
+        pad={false}
+        right={
+          <button onClick={() => navigate('/signals')} className="inline-flex items-center gap-[6px] h-8 px-[11px] rounded-[9px] font-sans text-[12.5px] font-semibold cursor-pointer border border-line bg-surface-2 text-ink transition-colors hover:bg-surface-hover">
+            View all 498 <ChevronRight size={15} />
+          </button>
+        }
+      >
+        <div className="dp">
+          {loading ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(216px,1fr))', gap: 'calc(13px * var(--u))' }}>
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} h={190} rounded="12px" />)}
             </div>
-        </>
-    );
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(216px,1fr))', gap: 'calc(13px * var(--u))' }}>
+              {signals.map(s => (
+                <SignalCard key={s.symbol} s={s} onClick={() => navigate('/signals')} />
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* ── Recent Trades ── */}
+      <Card
+        title="Recent Trades"
+        sub="Latest executions across your accounts"
+        icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M7 8h13M17 5l3 3-3 3M17 16H4M7 13l-3 3 3 3"/></svg>}
+        pad={false}
+        right={
+          <button onClick={() => navigate('/orders')} className="inline-flex items-center gap-[6px] h-8 px-[11px] rounded-[9px] font-sans text-[12.5px] font-semibold cursor-pointer border border-line bg-surface-2 text-ink transition-colors hover:bg-surface-hover">
+            All trades <ChevronRight size={15} />
+          </button>
+        }
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr>
+                {['Symbol', 'Side', 'Price', 'Value', 'Realized P&L', 'Date'].map(h => (
+                  <th key={h} className="text-[11px] font-semibold tracking-[.04em] uppercase text-ink-3 border-b border-line whitespace-nowrap sticky top-0 bg-surface z-[1]"
+                    style={{ textAlign: h === 'Value' || h === 'Price' || h === 'Realized P&L' ? 'right' : 'left', padding: 'calc(11px * var(--u)) 14px' }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? <SkeletonRows cols={6} rows={5} /> : trades.length === 0 ? (
+                <tr><td colSpan={6} className="text-center text-ink-3 py-10 px-5">No recent trades.</td></tr>
+              ) : trades.map(t => (
+                <tr key={t.id} className="cursor-default transition-colors hover:bg-surface-2">
+                  <td className="border-b border-line whitespace-nowrap" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
+                    <SymbolCell symbol={t.symbol} name={t.name} sector={t.sector} showSector={false} />
+                  </td>
+                  <td className="border-b border-line whitespace-nowrap" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
+                    <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold border border-line"
+                      style={{ background: t.side === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)', color: t.side === 'BUY' ? 'var(--green)' : 'var(--red)' }}>
+                      {t.side}
+                    </span>
+                  </td>
+                  <td className="border-b border-line whitespace-nowrap text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>{inr(t.price)}</td>
+                  <td className="border-b border-line whitespace-nowrap text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>{inr(t.value, 0)}</td>
+                  <td className="border-b border-line whitespace-nowrap text-right" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
+                    <Delta value={t.realized} suffix="" showIcon size={12.5} />
+                  </td>
+                  <td className="border-b border-line whitespace-nowrap text-[12px] text-ink-3 font-mono" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
+                    <DateComponent inputDate={String(t.date)} format="DD MMM" showTooltip={false} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
 }

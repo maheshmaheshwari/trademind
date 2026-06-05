@@ -11,12 +11,26 @@ Or via CLI:
     python main.py server
 """
 
+import asyncio
+import calendar
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from functools import lru_cache
+from functools import partial
 from typing import Any, Dict
+from zoneinfo import ZoneInfo
+
+# B4: Thread pool for offloading synchronous psycopg2 calls from the async event loop.
+# All blocking DB calls inside async handlers should use:
+#   await run_in_thread(some_sync_db_function, arg1, arg2)
+_DB_THREAD_POOL = ThreadPoolExecutor(max_workers=10, thread_name_prefix="db-worker")
+
+async def run_in_thread(func, *args, **kwargs):
+    """Run a blocking function in the DB thread pool without blocking the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_DB_THREAD_POOL, partial(func, *args, **kwargs))
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -74,9 +88,18 @@ app.include_router(stocks_routes.router, prefix="/api", tags=["Stocks"])
 from api.routes import portfolio as portfolio_routes
 from api.routes import trades as trades_routes
 from api.routes.trading import router as trading_router
+from api.routes.watchlist import router as watchlist_router
+from api.routes.notifications import router as notifications_router
+from api.routes.orders import router as orders_router
+from api.routes.news import router as news_router, signals_router as user_signals_router
 app.include_router(portfolio_routes.router)
 app.include_router(trades_routes.router)
 app.include_router(trading_router)
+app.include_router(watchlist_router)
+app.include_router(notifications_router)
+app.include_router(orders_router)
+app.include_router(news_router)
+app.include_router(user_signals_router)
 
 
 # ==========================================
@@ -152,7 +175,7 @@ async def health_check():
 
     Returns server status, whether market is open, and timestamp.
     """
-    now = datetime.now()
+    now = datetime.now(tz=ZoneInfo("Asia/Kolkata"))
 
     # IST market hours: 9:15 AM to 3:30 PM, Monday-Friday
     ist_hour = now.hour
@@ -179,24 +202,169 @@ async def health_check():
 @app.get("/api/market/overview", tags=["Market"])
 async def market_overview():
     """
-    Get today's market overview.
-
-    Returns Nifty 50/500, Sensex, VIX, advances/declines, FII/DII flows.
+    Returns structured market overview: indices, breadth, FII/DII history,
+    VIX, top gainers, top losers, and sector heatmap.
     """
-    from database.db import get_market_overview
-
-    # Check cache first
-    cached = get_cached("market_overview", "overview")
+    cached = get_cached("market_overview_v2", "overview")
     if cached:
         return cached
 
-    overview_list = get_market_overview(days=1)
-    if overview_list:
-        data = overview_list[0]
-        set_cached("market_overview", data, "overview")
-        return data
-    else:
-        return {"message": "No market overview data available. Run collector first."}
+    from database.db import get_market_overview, get_top_signals, _execute, _rows_to_dicts, get_connection
+
+    rows = get_market_overview(days=7)
+    today = rows[0] if rows else {}
+
+    # ── Indices ──────────────────────────────────────────────────────────────
+    def _idx(name, val, prev_val):
+        if val is None:
+            return None
+        change = round(val - (prev_val or val), 2)
+        pct    = round(change / (prev_val or val) * 100, 2) if prev_val else 0.0
+        return {"name": name, "value": round(val, 2), "change": change, "pct": pct, "spark": []}
+
+    prev = rows[1] if len(rows) > 1 else {}
+    indices = [x for x in [
+        _idx("NIFTY 50",   today.get("nifty50_close"),   prev.get("nifty50_close")),
+        _idx("NIFTY 500",  today.get("nifty500_close"),  prev.get("nifty500_close")),
+        _idx("SENSEX",     today.get("sensex_close"),     prev.get("sensex_close")),
+        _idx("INDIA VIX",  today.get("india_vix"),        prev.get("india_vix")),
+    ] if x is not None]
+
+    # ── Breadth ───────────────────────────────────────────────────────────────
+    breadth = {
+        "advances":  today.get("advances") or 0,
+        "declines":  today.get("declines") or 0,
+        "unchanged": today.get("unchanged") or 0,
+    }
+
+    # ── FII/DII — last 5 trading days ─────────────────────────────────────────
+    fii_dii = []
+    for r in reversed(rows[:5]):
+        d = r.get("date")
+        day_label = calendar.day_abbr[d.weekday()] if hasattr(d, "weekday") else str(d)
+        fii_dii.append({
+            "day": day_label,
+            "fii": round(r.get("fii_net") or 0, 2),
+            "dii": round(r.get("dii_net") or 0, 2),
+        })
+
+    # ── Gainers / Losers from latest trade signals ────────────────────────────
+    def _sig_to_stock(s):
+        return {
+            "symbol":    s.get("symbol", ""),
+            "name":      s.get("name", ""),
+            "sector":    "",
+            "price":     s.get("current_price") or s.get("buy_price") or 0,
+            "change":    round(s.get("expected_return_pct") or 0, 2),
+            "signal":    s.get("signal", ""),
+            "confidence": round(s.get("confidence") or 0, 4),
+        }
+
+    gainers = [_sig_to_stock(s) for s in get_top_signals("BUY",  limit=5)]
+    losers  = [_sig_to_stock(s) for s in get_top_signals("SELL", limit=5)]
+
+    # ── Sector heatmap (reuse cached result from /api/market/sectors) ─────────
+    heatmap = get_cached("market_sectors", "overview") or []
+
+    result = {
+        "indices":  indices,
+        "breadth":  breadth,
+        "fii_dii":  fii_dii,
+        "vix":      today.get("india_vix") or 0,
+        "gainers":  gainers,
+        "losers":   losers,
+        "heatmap":  heatmap,
+        "sentiment_score": today.get("overall_sentiment_score"),
+        "fear_greed":      today.get("fear_greed_label"),
+    }
+
+    set_cached("market_overview_v2", result, "overview")
+    return result
+
+
+# ==========================================
+# Sector Performance Endpoint
+# ==========================================
+@app.get("/api/market/sectors", tags=["Market"])
+async def market_sectors():
+    """
+    Returns today's sector performance aggregated from latest trade signals.
+    Uses Nifty 500 sector mapping — covers all 500 stocks.
+    Response shape per sector: { sector, change, signal_dist, stock_count, stocks }
+    """
+    cached = get_cached("market_sectors", "overview")
+    if cached:
+        return cached
+
+    from database.db import get_trade_signals_formatted
+    from data.nifty500_full import NIFTY_500_STOCKS
+
+    # Build symbol → sector lookup
+    sym_to_sector = {s["symbol"]: s["sector"] for s in NIFTY_500_STOCKS}
+
+    raw = get_trade_signals_formatted()
+    all_signals = raw.get("actionable_trades", []) + raw.get("hold_list", []) + raw.get("avoid_list", [])
+
+    sectors: dict = {}
+    for sig in all_signals:
+        symbol  = sig.get("symbol", "")
+        sector  = sym_to_sector.get(symbol, "Other")
+        signal  = sig.get("signal", "HOLD")
+        conf    = sig.get("confidence") or 0
+        exp_ret = (sig.get("trade") or {}).get("expected_return_pct") or 0
+        price   = (sig.get("price") or {}).get("current") or 0
+
+        if sector not in sectors:
+            sectors[sector] = {
+                "sector": sector,
+                "total_exp_ret": 0.0,
+                "total_conf": 0.0,
+                "count": 0,
+                "buy": 0, "sell": 0, "hold": 0,
+                "stocks": [],
+            }
+
+        g = sectors[sector]
+        g["total_exp_ret"] += exp_ret
+        g["total_conf"]    += conf
+        g["count"]         += 1
+        if "BUY"  in signal: g["buy"]  += 1
+        elif "SELL" in signal: g["sell"] += 1
+        else: g["hold"] += 1
+
+        g["stocks"].append({
+            "symbol":     symbol,
+            "name":       sig.get("name", ""),
+            "price":      round(price, 2),
+            "change":     round(exp_ret, 2),
+            "signal":     signal,
+            "confidence": round(conf, 4),
+        })
+
+    result = []
+    for g in sectors.values():
+        n = g["count"] or 1
+        result.append({
+            "sector":      g["sector"],
+            "change":      round(g["total_exp_ret"] / n, 2),
+            "avg_conf":    round(g["total_conf"] / n, 4),
+            "stock_count": g["count"],
+            "buy_count":   g["buy"],
+            "sell_count":  g["sell"],
+            "hold_count":  g["hold"],
+            "stocks":      sorted(g["stocks"], key=lambda x: x["change"], reverse=True)[:10],
+        })
+
+    result.sort(key=lambda x: x["change"], reverse=True)
+
+    set_cached("market_sectors", result, "overview")
+    # also warm the overview cache's heatmap slice
+    overview_cached = get_cached("market_overview_v2", "overview")
+    if overview_cached:
+        overview_cached["heatmap"] = result
+        set_cached("market_overview_v2", overview_cached, "overview")
+
+    return result
 
 
 # ==========================================
@@ -305,11 +473,12 @@ async def global_exception_handler(request: Request, exc: Exception):
     Catch all unhandled exceptions and return a clean error response.
     """
     logger.error(f"Unhandled error: {exc}", exc_info=True)
+    detail = str(exc) if os.getenv("DEBUG", "").lower() == "true" else "An internal error occurred"
     return JSONResponse(
         status_code=500,
         content={
             "error": "Internal server error",
-            "detail": str(exc),
+            "detail": detail,
         },
     )
 

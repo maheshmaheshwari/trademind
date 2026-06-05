@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { getMe, clearToken } from './api';
 
 interface User {
@@ -38,12 +38,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     localStorage.setItem('trademind_user', JSON.stringify(u));
                 })
                 .catch(() => {
-                    // Token expired or invalid — try cached user
-                    const stored = localStorage.getItem('trademind_user');
-                    if (stored) {
-                        try { setUser(JSON.parse(stored)); } catch { }
-                    }
+                    // Token expired or invalid — clear both token and cached user
+                    // Do NOT load stale user from localStorage after a failed token validation
+                    localStorage.removeItem('trademind_user');
                     clearToken();
+                    setUser(null);
                 })
                 .finally(() => setIsLoading(false));
         } else {
@@ -51,15 +50,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
-    const login = (u: User) => {
-        setUser(u);
-        localStorage.setItem('trademind_user', JSON.stringify(u));
-    };
-
-    const logout = () => {
+    const logout = useCallback(() => {
         setUser(null);
         localStorage.removeItem('trademind_user');
         clearToken();
+    }, []);
+
+    // Interceptor fires this event on 401 — auto-logout
+    useEffect(() => {
+        window.addEventListener('trademind:unauthorized', logout);
+        return () => window.removeEventListener('trademind:unauthorized', logout);
+    }, [logout]);
+
+    const login = (u: User) => {
+        setUser(u);
+        localStorage.setItem('trademind_user', JSON.stringify(u));
     };
 
     const refreshUser = async () => {

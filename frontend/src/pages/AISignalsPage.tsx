@@ -1,213 +1,200 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { Search, Brain } from 'lucide-react';
-import { getLatestSignals } from '../api';
-import Pagination from '../components/Pagination';
+import { useDeferredValue, useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
+import { useGetStocksQuery } from '../services/tradeMindApiService';
+import {
+  Card, SignalBadge, SkeletonRows,
+  SymbolCell, Conf, Pager, useSort, Th, PlainTh, Td,
+} from '../components/ui';
+import { StockDrawer } from '../components/StockDrawer';
+import type { Stock } from '../types';
 
-interface Signal {
-    symbol: string;
-    name: string;
-    signal: string;
-    confidence: number;
-    trade: {
-        buy_price: number;
-        target_price: number;
-        stop_loss: number;
-        risk_reward: number;
-    };
-    reasons: string[];
-}
-
-const sectorColors: Record<string, string> = {
-    'STRONG BUY': 'bg-green-500/20 text-green-400',
-    BUY: 'bg-green-500/10 text-green-400',
-    HOLD: 'bg-amber-500/10 text-amber-400',
-    SELL: 'bg-red-500/10 text-red-400',
-    'STRONG SELL': 'bg-red-500/20 text-red-400',
+const HORIZONS = ['All', '1W', '2W', '1M', '2M', '3M', '6M'] as const;
+const SIGNALS  = ['All', 'BUY', 'SELL', 'HOLD'] as const;
+const SECTORS  = ['All', 'IT', 'Banking', 'Financials', 'Energy', 'Auto', 'FMCG', 'Pharma', 'Metals', 'Cement', 'Infra', 'Telecom', 'Power'];
+const SECTOR_COLORS: Record<string, string> = {
+  IT: '#3B82F6', Banking: '#8B5CF6', Financials: '#6366F1', Energy: '#F59E0B', Auto: '#EC4899',
+  FMCG: '#10B981', Pharma: '#14B8A6', Metals: '#F97316', Cement: '#A78BFA', Infra: '#0EA5E9',
+  Telecom: '#EF4444', Power: '#EAB308',
 };
+const PER_PAGE = 12;
+
+function fmtAgo(m: number) { return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`; }
 
 export default function AISignalsPage() {
-    const [signals, setSignals] = useState<Signal[]>([]);
-    const [total, setTotal] = useState(0);
-    const [loading, setLoading] = useState(true);
+  const [search,       setSearch]  = useState('');
+  const [sigType,      setSigType] = useState<typeof SIGNALS[number]>('All');
+  const [horizon,      setHorizon] = useState<typeof HORIZONS[number]>('All');
+  const [sector,       setSector]  = useState('All');
+  const [conf,         setConf]    = useState(50);
+  const [page,         setPage]    = useState(1);
+  const [drawerSymbol, setDrawer]  = useState<string | null>(null);
 
-    // Server-side params
-    const [page, setPage] = useState(0);
-    const [pageSize, setPageSize] = useState(25);
-    const [search, setSearch] = useState('');
-    const [activeFilter, setActiveFilter] = useState('All');
-    const [sortKey, setSortKey] = useState('confidence');
-    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const { sort, toggle } = useSort('confidence');
+  const dSearch = useDeferredValue(search);
 
-    // Debounced search
-    const [debouncedSearch, setDebouncedSearch] = useState('');
-    useEffect(() => {
-        const t = setTimeout(() => setDebouncedSearch(search), 400);
-        return () => clearTimeout(t);
-    }, [search]);
+  const { data: res, isLoading: loading } = useGetStocksQuery({ size: 500 });
+  const allStocks: Stock[] = (res as any)?.data ?? [];
 
-    const fetchData = useCallback(async () => {
-        setLoading(true);
-        try {
-            const res = await getLatestSignals({
-                page,
-                size: pageSize,
-                sort: sortKey,
-                order: sortDir,
-                globalFilter: debouncedSearch || (activeFilter !== 'All' ? activeFilter : undefined),
-            });
-            const trades = res?.data || [];
-            setSignals(trades);
-            setTotal(res?.total ?? trades.length);
-        } catch {
-            setSignals([]);
-        } finally {
-            setLoading(false);
-        }
-    }, [page, pageSize, sortKey, sortDir, debouncedSearch, activeFilter]);
+  const filtered = useMemo(() => [...allStocks]
+    .filter(s =>
+      (sigType  === 'All' || s.signal  === sigType)  &&
+      (horizon  === 'All' || s.horizon === horizon)  &&
+      (sector   === 'All' || s.sector  === sector)   &&
+      s.confidence >= conf &&
+      (!dSearch || s.symbol.toLowerCase().includes(dSearch.toLowerCase()) ||
+                   s.name.toLowerCase().includes(dSearch.toLowerCase()))
+    )
+    .sort((a, b) => {
+      const va = a[sort.key as keyof Stock], vb = b[sort.key as keyof Stock];
+      let cmp = 0;
+      if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+      else if (typeof va === 'string' && typeof vb === 'string') cmp = va.localeCompare(vb);
+      return sort.dir === 'asc' ? cmp : -cmp;
+    }), [allStocks, sigType, horizon, sector, conf, dSearch, sort]);
 
-    useEffect(() => { fetchData(); }, [fetchData]);
-    useEffect(() => { setPage(0); }, [debouncedSearch, activeFilter]);
+  const pages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const rows  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-    const fmt = (n: number) => n?.toLocaleString('en-IN', { maximumFractionDigits: 2 }) || '—';
-    const filters = ['All', 'BUY', 'SELL', 'HOLD'];
+  const counts = { BUY: 0, SELL: 0, HOLD: 0 };
+  allStocks.forEach(s => { if (s.signal in counts) counts[s.signal as keyof typeof counts]++; });
 
-    const handleSort = (key: string) => {
-        if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-        else { setSortKey(key); setSortDir('desc'); }
-        setPage(0);
-    };
+  const segBtn = (active: boolean) =>
+    `border-none font-sans text-[12.5px] font-semibold px-3 py-[6px] rounded-[7px] cursor-pointer transition-colors ${
+      active ? 'bg-accent text-white' : 'bg-transparent text-ink-2'
+    }`;
 
-    return (
-        <>
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-white text-3xl md:text-4xl font-black tracking-tight flex items-center gap-3">
-                        <Brain className="w-8 h-8 text-primary" /> AI Trade Signals
-                    </h1>
-                    <p className="text-slate-400 mt-2">ML-generated signals with confidence scores • {total.toLocaleString()} stocks analyzed</p>
-                </div>
+  return (
+    <div className="flex flex-col dgap animate-page-in">
+
+      {/* ── Header ── */}
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-bold tracking-tight m-0 text-ink" style={{ fontSize: 'calc(25px * var(--u))' }}>AI Signals</h1>
+          <p className="text-ink-2 text-[13.5px] mt-1 m-0">
+            Machine-learning signals across all <b className="tabular-nums">498</b> Nifty 500 constituents · refreshed every 15 min
+          </p>
+        </div>
+        {!loading && (
+          <div className="flex items-center gap-2">
+            {(['BUY', 'SELL', 'HOLD'] as const).map(sig => {
+              const col = sig === 'BUY' ? ['var(--green)', 'var(--green-soft)'] : sig === 'SELL' ? ['var(--red)', 'var(--red-soft)'] : ['var(--gold)', 'var(--gold-soft)'];
+              const arrow = sig === 'BUY' ? '↑' : sig === 'SELL' ? '↓' : '●';
+              return (
+                <span key={sig} className="inline-flex items-center gap-[5px] h-[23px] px-[9px] rounded-[7px] text-[11.5px] font-bold"
+                  style={{ color: col[0], background: col[1] }}>
+                  {arrow} {counts[sig]} {sig}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Filter card ── */}
+      <Card pad={false}>
+        <div className="flex flex-col gap-[14px]" style={{ padding: 'calc(15px * var(--u)) calc(18px * var(--u))' }}>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-[1_1_220px] max-w-[280px]">
+              <Search size={17} className="absolute left-[13px] top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" />
+              <input
+                value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+                placeholder="Search symbol or name…"
+                className="w-full h-[38px] pl-10 pr-3 rounded-[10px] border border-line bg-surface-2 text-ink font-sans text-[13px] outline-none box-border focus:border-accent transition-colors"
+              />
             </div>
-
-            {/* Search + Filters */}
-            <div className="flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-2 bg-surface-dark border border-slate-700 rounded-xl px-4 py-3 flex-1 max-w-sm">
-                    <Search className="w-4 h-4 text-slate-400" />
-                    <input
-                        type="text"
-                        placeholder="Search by symbol or name..."
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        className="bg-transparent text-sm text-white placeholder-slate-400 outline-none flex-1"
-                    />
-                </div>
-                <div className="flex gap-2">
-                    {filters.map(f => (
-                        <button
-                            key={f}
-                            onClick={() => setActiveFilter(f)}
-                            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeFilter === f ? 'bg-primary text-white' : 'bg-surface-dark border border-slate-700 text-slate-400 hover:text-white'
-                                }`}
-                        >
-                            {f}
-                        </button>
-                    ))}
-                </div>
+            <div className="flex flex-col gap-[5px]">
+              <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">Sector</span>
+              <select value={sector} onChange={e => { setSector(e.target.value); setPage(1); }}
+                className="h-[38px] px-3 rounded-[10px] border border-line bg-surface-2 text-ink font-sans text-[13px] outline-none min-w-[120px] focus:border-accent transition-colors">
+                {SECTORS.map(s => <option key={s}>{s}</option>)}
+              </select>
             </div>
-
-            {/* Table */}
-            <div className="w-full overflow-hidden rounded-xl border border-slate-800 bg-surface-dark/50 shadow-xl">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="border-b border-slate-700 bg-surface-dark">
-                                {[
-                                    { key: 'symbol', label: 'Symbol' },
-                                    { key: 'signal', label: 'Signal', center: true },
-                                    { key: 'confidence', label: 'Confidence', center: true },
-                                    { key: 'buy_price', label: 'Buy Price', right: true },
-                                    { key: 'target_price', label: 'Target', right: true },
-                                    { key: 'stop_loss', label: 'Stop Loss', right: true },
-                                    { key: 'risk_reward', label: 'R:R', center: true },
-                                    { key: '', label: 'Action', center: true },
-                                ].map(col => (
-                                    <th key={col.label}
-                                        onClick={() => col.key && handleSort(col.key)}
-                                        className={`p-4 text-xs font-bold uppercase tracking-wider text-slate-400 ${col.center ? 'text-center' : col.right ? 'text-right' : ''} ${col.key ? 'cursor-pointer hover:text-white transition-colors' : ''}`}
-                                    >
-                                        <span className="inline-flex items-center gap-1">
-                                            {col.label}
-                                            {sortKey === col.key && <span className="text-primary">{sortDir === 'asc' ? '↑' : '↓'}</span>}
-                                        </span>
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800">
-                            {loading ? (
-                                <tr><td colSpan={8} className="p-16 text-center">
-                                    <div className="flex items-center justify-center gap-3 text-slate-400">
-                                        <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                                        Loading signals...
-                                    </div>
-                                </td></tr>
-                            ) : signals.length === 0 ? (
-                                <tr><td colSpan={8} className="p-10 text-center text-slate-500">No signals found. Try adjusting your search or filters.</td></tr>
-                            ) : (
-                                signals.map((s) => (
-                                    <tr key={s.symbol} className="hover:bg-slate-800/50 transition-colors">
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white text-xs font-bold ${s.signal?.includes('BUY') ? 'bg-green-600' : s.signal?.includes('SELL') ? 'bg-red-600' : 'bg-amber-600'
-                                                    }`}>
-                                                    {s.symbol?.replace('.NS', '').slice(0, 3)}
-                                                </div>
-                                                <div>
-                                                    <p className="text-white font-bold text-sm">{s.symbol?.replace('.NS', '')}</p>
-                                                    <p className="text-slate-500 text-xs truncate max-w-[120px]">{s.name}</p>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-center">
-                                            <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${sectorColors[s.signal] || 'bg-slate-700 text-slate-300'}`}>
-                                                {s.signal}
-                                            </span>
-                                        </td>
-                                        <td className="p-4 text-center">
-                                            <div className="flex flex-col items-center gap-1">
-                                                <span className="text-white font-bold text-sm">{s.confidence?.toFixed(0)}%</span>
-                                                <div className="w-16 h-1.5 bg-slate-700 rounded-full">
-                                                    <div className={`h-1.5 rounded-full ${s.confidence >= 75 ? 'bg-green-400' : s.confidence >= 50 ? 'bg-amber-400' : 'bg-red-400'}`} style={{ width: `${s.confidence}%` }} />
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-right font-mono text-white text-sm">₹{fmt(s.trade?.buy_price || 0)}</td>
-                                        <td className="p-4 text-right font-mono text-green-400 text-sm">₹{fmt(s.trade?.target_price || 0)}</td>
-                                        <td className="p-4 text-right font-mono text-red-400 text-sm">₹{fmt(s.trade?.stop_loss || 0)}</td>
-                                        <td className="p-4 text-center font-mono text-white text-sm">{s.trade?.risk_reward?.toFixed(1) || '—'}</td>
-                                        <td className="p-4 text-center">
-                                            <Link
-                                                to={`/trade/${s.symbol?.replace('.NS', '')}`}
-                                                className="inline-block px-4 py-2 rounded-lg bg-primary/20 text-primary text-xs font-bold hover:bg-primary/30 transition-colors"
-                                            >
-                                                Trade
-                                            </Link>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-                <Pagination
-                    page={page}
-                    pageSize={pageSize}
-                    total={total}
-                    onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
-                    loading={loading}
-                />
+            <div className="flex flex-col gap-[5px]">
+              <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">Signal</span>
+              <div className="inline-flex bg-surface-2 border border-line rounded-[10px] p-[3px] gap-[2px]">
+                {SIGNALS.map(t => (
+                  <button key={t} className={segBtn(sigType === t)} onClick={() => { setSigType(t); setPage(1); }}>{t}</button>
+                ))}
+              </div>
             </div>
-        </>
-    );
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex flex-col gap-[5px]">
+              <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">Horizon</span>
+              <div className="inline-flex bg-surface-2 border border-line rounded-[10px] p-[3px] gap-[2px]">
+                {HORIZONS.map(h => (
+                  <button key={h} className={segBtn(horizon === h)} onClick={() => { setHorizon(h); setPage(1); }}>{h}</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-[5px] flex-[1_1_220px] max-w-[320px]">
+              <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">Min Confidence · {conf}%</span>
+              <div className="flex items-center gap-3">
+                <input type="range" className="rng flex-1" min="50" max="95" value={conf} onChange={e => { setConf(+e.target.value); setPage(1); }} />
+                <span className="font-mono font-bold min-w-[38px]">{conf}%</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-[5px] justify-end">
+              <span className="text-[11px] font-semibold text-transparent tracking-[.03em] uppercase">.</span>
+              <span className="text-[13px] text-ink-2"><b className="tabular-nums">{loading ? '…' : filtered.length}</b> stocks match</span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* ── Table ── */}
+      <Card pad={false}>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr>
+                <Th label="Stock"       sortKey="symbol"     sort={sort} onToggle={toggle} />
+                <Th label="Sector"      sortKey="sector"     sort={sort} onToggle={toggle} />
+                <PlainTh>Signal</PlainTh>
+                <Th label="Confidence"  sortKey="confidence" sort={sort} onToggle={toggle} />
+                <PlainTh>Horizon</PlainTh>
+                <Th label="Exp. Return" sortKey="expReturn"  sort={sort} onToggle={toggle} align="right" />
+                <Th label="Sentiment"   sortKey="sentiment"  sort={sort} onToggle={toggle} align="right" />
+                <Th label="Updated"     sortKey="updatedMin" sort={sort} onToggle={toggle} align="right" />
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? <SkeletonRows cols={8} rows={10} /> : rows.length === 0 ? (
+                <tr><td colSpan={8} className="text-center py-[50px] px-5 text-ink-3">
+                  No signals match your filters. Try lowering the confidence threshold.
+                </td></tr>
+              ) : rows.map(s => (
+                <tr key={s.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => setDrawer(s.symbol)}>
+                  <Td><SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector={false} /></Td>
+                  <Td>
+                    <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 border border-line"
+                      style={{ color: SECTOR_COLORS[s.sector] ?? 'var(--text-2)' }}>{s.sector}</span>
+                  </Td>
+                  <Td><SignalBadge signal={s.signal} /></Td>
+                  <Td><div className="min-w-[130px]"><Conf value={s.confidence} /></div></Td>
+                  <Td>
+                    <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s.horizon}</span>
+                  </Td>
+                  <Td align="right">
+                    <span className="font-mono font-semibold tabular-nums" style={{ color: s.expReturn >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {(s.expReturn >= 0 ? '+' : '') + s.expReturn.toFixed(2) + '%'}
+                    </span>
+                  </Td>
+                  <Td align="right">
+                    <span className="font-mono tabular-nums" style={{ color: s.sentiment >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {(s.sentiment >= 0 ? '+' : '') + s.sentiment.toFixed(2)}
+                    </span>
+                  </Td>
+                  <Td align="right"><span className="text-[12px] text-ink-3 font-mono">{fmtAgo(s.updatedMin)}</span></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <Pager page={page} pages={pages} total={filtered.length} perPage={PER_PAGE} onPage={setPage} label="signals" />
+      </Card>
+
+      <StockDrawer symbol={drawerSymbol} onClose={() => setDrawer(null)} />
+    </div>
+  );
 }

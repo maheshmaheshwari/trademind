@@ -195,6 +195,22 @@ export async function squareOffAll(userId: number) {
 }
 
 // ==========================================
+// GTT Orders
+// ==========================================
+
+export async function getGTTOrders() {
+  const res = await fetch(`${API_BASE}/api/orders/gtt`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to load GTT orders');
+  return res.json();
+}
+
+export async function syncGTTOrders() {
+  const res = await fetch(`${API_BASE}/api/orders/gtt/sync`, { method: 'POST', headers: authHeaders() });
+  if (!res.ok) throw new Error('GTT sync failed');
+  return res.json();
+}
+
+// ==========================================
 // Risk Settings
 // ==========================================
 
@@ -262,4 +278,57 @@ export async function getStockIndicators(symbol: string) {
 
 export function clearToken() {
   localStorage.removeItem('trademind_token');
+}
+
+// ==========================================
+// Watchlist
+// ==========================================
+
+export async function getWatchlist(userId: number) {
+  const res = await fetch(`${API_BASE}/api/watchlist/${userId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to load watchlist');
+  return res.json();
+}
+
+export async function addToWatchlist(userId: number, symbol: string) {
+  const res = await fetch(`${API_BASE}/api/watchlist/${userId}/${encodeURIComponent(symbol)}`, { method: 'POST', headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to add to watchlist');
+  return res.json();
+}
+
+export async function removeFromWatchlist(userId: number, symbol: string) {
+  const res = await fetch(`${API_BASE}/api/watchlist/${userId}/${encodeURIComponent(symbol)}`, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to remove from watchlist');
+  return res.json();
+}
+
+export async function updateWatchlistAlerts(userId: number, symbol: string, alertAbove?: number, alertBelow?: number) {
+  const res = await fetch(`${API_BASE}/api/watchlist/${userId}/${encodeURIComponent(symbol)}/alerts`, {
+    method: 'PUT', headers: authHeaders(),
+    body: JSON.stringify({ alert_above: alertAbove, alert_below: alertBelow }),
+  });
+  if (!res.ok) throw new Error('Failed to update alerts');
+  return res.json();
+}
+
+// ==========================================
+// Notifications
+// ==========================================
+
+export async function getNotifications() {
+  const res = await fetch(`${API_BASE}/api/notifications`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to load notifications');
+  return res.json();
+}
+
+export async function markNotificationsRead() {
+  const res = await fetch(`${API_BASE}/api/notifications/mark-read`, { method: 'POST', headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to mark read');
+  return res.json();
+}
+
+export async function deleteNotification(id: number) {
+  const res = await fetch(`${API_BASE}/api/notifications/${id}`, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to delete notification');
+  return res.json();
 }

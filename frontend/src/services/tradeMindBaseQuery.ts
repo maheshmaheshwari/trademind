@@ -1,46 +1,40 @@
-import type { BaseQueryFn } from "@reduxjs/toolkit/query/react";
-import axios from "axios";
-import type { AxiosRequestConfig, AxiosError } from "axios";
+import type { BaseQueryFn } from '@reduxjs/toolkit/query';
+import axios from 'axios';
+import type { AxiosError, AxiosRequestConfig } from 'axios';
+import tradeMindInterceptor from './tradeMindInterceptor';
 
-const tradeMindBaseQuery =
-  (
-    baseURL: string,
-  ): BaseQueryFn<
-    {
-      url: string;
-      method: AxiosRequestConfig["method"];
-      data?: AxiosRequestConfig["data"];
-      params?: AxiosRequestConfig["params"];
-      headers?: AxiosRequestConfig["headers"];
-      responseType?: AxiosRequestConfig["responseType"];
-    },
-    unknown,
-    unknown
-  > =>
-  async ({ url, method, data, params, headers, responseType }) => {
+// Single shared axios instance with auth interceptor attached
+const axiosInstance = tradeMindInterceptor(axios.create());
+
+const tradeMindBaseQuery = (
+  baseURL: string,
+): BaseQueryFn<
+  {
+    url: string;
+    method?: AxiosRequestConfig['method'];
+    data?: AxiosRequestConfig['data'];
+    params?: AxiosRequestConfig['params'];
+    headers?: AxiosRequestConfig['headers'];
+  },
+  unknown,
+  unknown
+> =>
+  async ({ url, method = 'GET', data, params, headers }) => {
     try {
-      const response = await axios({
+      const response = await axiosInstance({
         url: baseURL + url,
         method,
         data,
         params,
         headers,
-        responseType,
       });
-
-      return {
-        data: {
-          data: response.data,
-          status: response.status,
-          statusText: response.statusText,
-        },
-      };
+      return { data: response.data };
     } catch (axiosError) {
       const err = axiosError as AxiosError;
       return {
         error: {
-          status: err.response?.status,
-          data: err.response?.data || err.message,
+          status: err?.response?.status,
+          data: err?.response?.data || err?.message,
         },
       };
     }

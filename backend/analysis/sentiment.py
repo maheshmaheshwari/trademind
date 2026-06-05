@@ -104,23 +104,28 @@ def score_sentiment(text: str) -> Dict:
             outputs = _model(**inputs)
             probabilities = torch.nn.functional.softmax(outputs.logits, dim=-1)
 
-        # FinBERT labels: positive=0, negative=1, neutral=2
+        # Read label order from model config to avoid hardcoding
         scores = probabilities[0].tolist()
-        labels = ["positive", "negative", "neutral"]
+        id2label = _model.config.id2label
+        labels = [id2label[i].lower() for i in range(len(id2label))]
 
         # Find the highest scoring label
         max_idx = scores.index(max(scores))
         sentiment = labels[max_idx]
         confidence = scores[max_idx]
 
+        score_dict = {labels[i]: round(scores[i], 4) for i in range(len(labels))}
+        # Ensure standard keys exist for downstream consumers
+        result_scores = {
+            "positive": score_dict.get("positive", 0.0),
+            "negative": score_dict.get("negative", 0.0),
+            "neutral":  score_dict.get("neutral", 0.0),
+        }
+
         return {
             "sentiment": sentiment,
             "confidence": round(confidence, 4),
-            "scores": {
-                "positive": round(scores[0], 4),
-                "negative": round(scores[1], 4),
-                "neutral": round(scores[2], 4),
-            },
+            "scores": result_scores,
         }
 
     except Exception as e:
@@ -313,9 +318,10 @@ def score_and_update_news(news_list: List[Dict]) -> List[Dict]:
 
         # Update database if the article has an ID
         if article.get("id"):
+            from database.db import _execute, release_connection
             conn = get_connection()
             try:
-                conn.execute(
+                _execute(conn,
                     """UPDATE news_sentiment
                     SET sentiment = ?, confidence = ?
                     WHERE id = ?""",
@@ -324,8 +330,9 @@ def score_and_update_news(news_list: List[Dict]) -> List[Dict]:
                 conn.commit()
             except Exception as e:
                 logger.error(f"Error updating news sentiment: {e}")
+                conn.rollback()
             finally:
-                conn.close()
+                release_connection(conn)
 
     return scored_news
 

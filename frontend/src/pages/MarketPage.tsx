@@ -1,198 +1,200 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { Search, TrendingUp, TrendingDown, BarChart3, Filter } from 'lucide-react';
-import { getAllStocks } from '../api';
-import Pagination from '../components/Pagination';
+import { useState } from 'react';
+import { useGetMarketOverviewQuery, useGetMarketSectorsQuery } from '../services/tradeMindApiService';
+import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell } from '../components/ui';
+import { FlowBars, Sparkline } from '../components/Charts';
+import { StockDrawer } from '../components/StockDrawer';
+import type { IndexData, FIIDIIBar, HeatmapSector, Breadth, Stock } from '../types';
 
-interface Stock {
-    symbol: string;
-    name: string;
-    sector: string;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume: number;
-    change: number;
-    change_pct: number;
-    prev_close: number;
-    date: string;
+function pct(n: number) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
+function inr(n: number, dec = 2) {
+  return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+function heatColor(c: number) {
+  const a = Math.min(Math.abs(c) / 3.5, 1);
+  return c >= 0 ? `rgba(16,185,129,${(.12 + a * .5).toFixed(2)})` : `rgba(239,68,68,${(.12 + a * .5).toFixed(2)})`;
+}
+
+function IndexCard({ ix }: { ix: IndexData }) {
+  const pos = ix.pct >= 0;
+  return (
+    <div className="bg-surface border border-line relative overflow-hidden" style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(18px * var(--u))' }}>
+      <div className="flex items-center justify-between">
+        <span className="font-bold text-[13.5px] tracking-[.01em] whitespace-nowrap text-ink">{ix.name}</span>
+        <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold"
+          style={{ color: pos ? 'var(--green)' : 'var(--red)', background: pos ? 'var(--green-soft)' : 'var(--red-soft)' }}>
+          {pct(ix.pct)}
+        </span>
+      </div>
+      <div className="font-mono text-[23px] font-bold text-ink" style={{ margin: '9px 0 2px' }}>{ix.value.toLocaleString('en-IN')}</div>
+      <div className="text-[12.5px] font-semibold tabular-nums" style={{ color: pos ? 'var(--green)' : 'var(--red)' }}>
+        {(pos ? '+' : '') + ix.change}
+      </div>
+      <div style={{ marginTop: 10, marginLeft: -2, marginRight: -2 }}>
+        <Sparkline data={ix.spark} color={pos ? '#10B981' : '#EF4444'} w={260} h={40} />
+      </div>
+    </div>
+  );
 }
 
 export default function MarketPage() {
-    const [stocks, setStocks] = useState<Stock[]>([]);
-    const [total, setTotal] = useState(0);
-    const [sectors, setSectors] = useState<string[]>([]);
-    const [loading, setLoading] = useState(true);
+  const { data: mktData, isLoading: loading } = useGetMarketOverviewQuery();
+  const { data: sectorsData } = useGetMarketSectorsQuery();
+  const [drawer, setDrawer] = useState<string | null>(null);
 
-    // Server-side params
-    const [page, setPage] = useState(0);
-    const [pageSize, setPageSize] = useState(25);
-    const [search, setSearch] = useState('');
-    const [selectedSector, setSelectedSector] = useState('All');
-    const [sortKey, setSortKey] = useState<string>('symbol');
-    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const indices: IndexData[]    = (mktData as any)?.indices  ?? [];
+  const fiiDii:  FIIDIIBar[]   = (mktData as any)?.fii_dii  ?? [];
+  const heatmap: HeatmapSector[] = [...(sectorsData ?? (mktData as any)?.heatmap ?? [])].sort((a: HeatmapSector, b: HeatmapSector) => b.change - a.change);
+  const gainers: Stock[]        = (mktData as any)?.gainers  ?? [];
+  const losers:  Stock[]        = (mktData as any)?.losers   ?? [];
+  const breadth: Breadth | null = (mktData as any)?.breadth  ?? null;
 
-    // Debounced search
-    const [debouncedSearch, setDebouncedSearch] = useState('');
-    useEffect(() => {
-        const t = setTimeout(() => setDebouncedSearch(search), 400);
-        return () => clearTimeout(t);
-    }, [search]);
+  const vix = indices.find(ix => ix.name === 'INDIA VIX');
+  const adRatio = breadth ? (breadth.advances / breadth.declines).toFixed(2) : '—';
 
-    const fetchData = useCallback(async () => {
-        setLoading(true);
-        try {
-            const res = await getAllStocks({
-                page,
-                size: pageSize,
-                sort: sortKey,
-                order: sortDir,
-                globalFilter: debouncedSearch || undefined,
-                sector: selectedSector !== 'All' ? selectedSector : undefined,
-            });
-            setStocks(res.stocks || res.data || []);
-            setTotal(res.total ?? res.stocks?.length ?? 0);
-            if (res.sectors?.length) setSectors(res.sectors);
-        } catch {
-            setStocks([]);
-        } finally {
-            setLoading(false);
-        }
-    }, [page, pageSize, sortKey, sortDir, debouncedSearch, selectedSector]);
+  const stockRow = (s: Stock) => (
+    <tr key={s.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => setDrawer(s.symbol)}>
+      <td style={tdS}><SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} /></td>
+      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(s.price)}</td>
+      <td style={{ ...tdS, textAlign: 'right' }}><Delta value={s.change} size={13} showIcon={false} /></td>
+      <td style={tdS}><SignalBadge signal={s.signal} /></td>
+    </tr>
+  );
 
-    useEffect(() => { fetchData(); }, [fetchData]);
+  return (
+    <div className="flex flex-col dgap animate-page-in">
 
-    // Reset page on filter change
-    useEffect(() => { setPage(0); }, [debouncedSearch, selectedSector]);
-
-    const handleSort = (key: string) => {
-        if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-        else { setSortKey(key); setSortDir('asc'); }
-        setPage(0);
-    };
-
-    const fmt = (n: number) => n != null ? n.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—';
-    const volFmt = (v: number) => v >= 10000000 ? `${(v / 10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v?.toLocaleString();
-
-    return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-white text-2xl font-bold flex items-center gap-2"><BarChart3 className="w-6 h-6 text-primary" /> Market</h1>
-                    <p className="text-slate-400 text-sm mt-1">Nifty 500 Stocks — {total.toLocaleString()} stocks</p>
-                </div>
-            </div>
-
-            {/* Search + Sector Filter */}
-            <div className="flex gap-3 items-center flex-wrap">
-                <div className="relative flex-1 min-w-[200px] max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                    <input
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        placeholder="Search stocks..."
-                        className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-surface-dark border border-slate-800 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-primary/50"
-                    />
-                </div>
-                <div className="flex items-center gap-2">
-                    <Filter className="w-4 h-4 text-slate-400" />
-                    <select
-                        value={selectedSector}
-                        onChange={e => setSelectedSector(e.target.value)}
-                        className="bg-surface-dark border border-slate-800 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary/50"
-                    >
-                        <option value="All">All Sectors</option>
-                        {sectors.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                </div>
-            </div>
-
-            {/* Table */}
-            <div className="rounded-xl border border-slate-800 bg-surface-dark overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-b border-slate-800">
-                                {[
-                                    { key: 'name', label: 'Stock' },
-                                    { key: 'sector', label: 'Sector' },
-                                    { key: 'close', label: 'Price' },
-                                    { key: 'change_pct', label: 'Change %' },
-                                    { key: 'volume', label: 'Volume' },
-                                    { key: 'open', label: 'Open' },
-                                    { key: 'high', label: 'High' },
-                                    { key: 'low', label: 'Low' },
-                                ].map(col => (
-                                    <th key={col.key}
-                                        onClick={() => handleSort(col.key)}
-                                        className="text-left text-slate-400 text-xs font-semibold uppercase tracking-wider p-4 cursor-pointer hover:text-white transition-colors select-none"
-                                    >
-                                        <span className="flex items-center gap-1">
-                                            {col.label}
-                                            {sortKey === col.key && (
-                                                <span className="text-primary">{sortDir === 'asc' ? '↑' : '↓'}</span>
-                                            )}
-                                        </span>
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {loading ? (
-                                <tr><td colSpan={8} className="p-16 text-center">
-                                    <div className="flex items-center justify-center gap-3 text-slate-400">
-                                        <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                                        Loading stocks...
-                                    </div>
-                                </td></tr>
-                            ) : stocks.length === 0 ? (
-                                <tr><td colSpan={8} className="p-16 text-center text-slate-500">No stocks found</td></tr>
-                            ) : (
-                                stocks.map(s => {
-                                    const isUp = s.change_pct >= 0;
-                                    return (
-                                        <tr key={s.symbol} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors group">
-                                            <td className="p-4">
-                                                <Link to={`/market/${s.symbol.replace('.NS', '')}`} className="flex items-center gap-3 group-hover:text-primary transition-colors">
-                                                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white text-xs font-bold ${isUp ? 'bg-green-600/80' : 'bg-red-600/80'}`}>
-                                                        {s.symbol.replace('.NS', '').slice(0, 3)}
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-white font-semibold text-sm">{s.name}</p>
-                                                        <p className="text-slate-500 text-xs">{s.symbol.replace('.NS', '')}</p>
-                                                    </div>
-                                                </Link>
-                                            </td>
-                                            <td className="p-4 text-slate-400 text-xs">{s.sector}</td>
-                                            <td className="p-4 text-white font-semibold">₹{fmt(s.close)}</td>
-                                            <td className="p-4">
-                                                <div className={`flex items-center gap-1 font-semibold text-sm ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                                    {isUp ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                                                    {isUp ? '+' : ''}{s.change_pct?.toFixed(2)}%
-                                                </div>
-                                            </td>
-                                            <td className="p-4 text-slate-300 text-sm">{volFmt(s.volume)}</td>
-                                            <td className="p-4 text-slate-400">₹{fmt(s.open)}</td>
-                                            <td className="p-4 text-green-400/80">₹{fmt(s.high)}</td>
-                                            <td className="p-4 text-red-400/80">₹{fmt(s.low)}</td>
-                                        </tr>
-                                    );
-                                })
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                <Pagination
-                    page={page}
-                    pageSize={pageSize}
-                    total={total}
-                    onPageChange={setPage}
-                    onPageSizeChange={setPageSize}
-                    loading={loading}
-                />
-            </div>
+      {/* ── Header ── */}
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-bold tracking-tight m-0 text-ink" style={{ fontSize: 'calc(25px * var(--u))' }}>Market Overview</h1>
+          <p className="text-ink-2 text-[13.5px] mt-1 m-0">Live indices, institutional flows &amp; sector rotation · NSE</p>
         </div>
-    );
+        <div className="flex items-center gap-2 h-9 px-[13px] rounded-full text-[12.5px] font-semibold border border-line text-gain bg-gain-soft">
+          <span className="w-2 h-2 rounded-full bg-[var(--green)] animate-pulse-dot" />
+          MARKET OPEN
+          <span className="text-ink-3 font-medium font-mono text-[11.5px]">15:24:08</span>
+        </div>
+      </div>
+
+      {/* ── 4 index cards ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 'calc(16px * var(--u))' }}>
+        {loading
+          ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} h={150} rounded="14px" />)
+          : indices.map(ix => <IndexCard key={ix.name} ix={ix} />)
+        }
+      </div>
+
+      {/* ── FII/DII + Breadth ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: 'calc(16px * var(--u))' }}>
+        <Card title="FII / DII Activity" sub="Net buy / sell · last 10 sessions (₹ Cr)"
+          icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20v-3"/></svg>}>
+          <div className="dp" style={{ paddingTop: 8 }}>
+            {loading ? <Skeleton h={210} /> : <FlowBars data={fiiDii} h={210} />}
+          </div>
+        </Card>
+
+        <Card title="Market Breadth" sub="Advance / Decline"
+          icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 11V7h-4"/></svg>}>
+          <div className="dp flex flex-col gap-4">
+            {loading ? <Skeleton h={120} /> : breadth ? <>
+              <div className="flex h-[14px] rounded-full overflow-hidden gap-[2px]">
+                <div style={{ flex: breadth.advances, background: 'var(--green)', height: '100%' }} />
+                <div style={{ flex: breadth.unchanged, background: 'var(--text-3)', height: '100%' }} />
+                <div style={{ flex: breadth.declines, background: 'var(--red)', height: '100%' }} />
+              </div>
+              <div className="flex justify-between">
+                <div className="flex flex-col gap-[1px]">
+                  <span className="font-mono text-[22px] font-bold text-gain">{breadth.advances}</span>
+                  <span className="text-[11.5px] text-ink-3">Advancing</span>
+                </div>
+                <div className="flex flex-col gap-[1px] items-center">
+                  <span className="font-mono text-[22px] font-bold text-ink-2">{breadth.unchanged}</span>
+                  <span className="text-[11.5px] text-ink-3">Unchanged</span>
+                </div>
+                <div className="flex flex-col gap-[1px] items-end">
+                  <span className="font-mono text-[22px] font-bold text-loss">{breadth.declines}</span>
+                  <span className="text-[11.5px] text-ink-3">Declining</span>
+                </div>
+              </div>
+              <div className="h-px bg-[var(--border)]" />
+              <div className="flex justify-between items-center">
+                <span className="text-[13px] text-ink-2">Advance / Decline Ratio</span>
+                <span className="font-mono font-bold text-[16px] text-gain">{adRatio}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-[13px] text-ink-2">India VIX</span>
+                <span className="font-mono font-bold text-[16px]" style={{ color: (vix?.pct ?? 0) <= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {vix ? vix.value.toFixed(2) : '—'}
+                  {vix && <span className="text-[12px]"> {pct(vix.pct)}</span>}
+                </span>
+              </div>
+            </> : null}
+          </div>
+        </Card>
+      </div>
+
+      {/* ── Sector heatmap ── */}
+      <Card title="Sector Heatmap" sub="12 sectors · % change today"
+        icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>}
+        pad={false}>
+        <div className="dp">
+          {loading ? <Skeleton h={170} /> : (
+            <div className="grid grid-cols-4 gap-2">
+              {heatmap.map(h => (
+                <div key={h.sector}
+                  className="flex flex-col gap-[3px] min-h-[78px] justify-between cursor-default transition-transform hover:-translate-y-0.5 border"
+                  style={{ borderRadius: 'var(--radius-sm,9px)', padding: 13, borderColor: 'rgba(255,255,255,.06)', background: heatColor(h.change) }}>
+                  <span className="text-[12px] font-semibold opacity-95 text-ink">{h.sector}</span>
+                  <div className="flex justify-between items-end">
+                    <span className="font-mono text-[17px] font-bold" style={{ color: h.change >= 0 ? 'var(--green)' : 'var(--red)' }}>{pct(h.change)}</span>
+                    <span className="text-[10.5px] text-ink-3">{h.stock_count ?? '—'} stocks</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* ── Gainers / Losers ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'calc(16px * var(--u))' }}>
+        {([
+          ['Top Gainers', gainers, true],
+          ['Top Losers',  losers,  false],
+        ] as const).map(([title, list, isGain]) => (
+          <Card key={title as string} title={title as string} pad={false}
+            icon={isGain
+              ? <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 11V7h-4"/></svg>
+              : <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 7l6 6 4-4 8 8"/><path d="M21 13v4h-4"/></svg>
+            }>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-[13px]">
+                <thead>
+                  <tr>
+                    {['Stock', 'LTP', 'Change', 'Signal'].map((h, i) => (
+                      <th key={h} style={{ ...thS, textAlign: i >= 1 && i <= 2 ? 'right' : 'left' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? <SkeletonRows cols={4} rows={5} /> : (list as Stock[]).map(s => stockRow(s))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      <StockDrawer symbol={drawer} onClose={() => setDrawer(null)} />
+    </div>
+  );
 }
+
+const thS: React.CSSProperties = {
+  fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase',
+  color: 'var(--text-3)', padding: 'calc(11px * var(--u)) 14px', borderBottom: '1px solid var(--border)',
+  whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1,
+};
+const tdS: React.CSSProperties = {
+  padding: 'calc(12px * var(--u)) 14px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
+};

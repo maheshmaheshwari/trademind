@@ -7,9 +7,10 @@ GET /api/signals/top-sells?limit=10
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from database.db import get_top_signals
+from api.routes.trading import get_current_user as _get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -80,3 +81,17 @@ async def top_sells(
     except Exception as e:
         logger.error(f"Error fetching top sells: {e}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@router.post("/signals/refresh")
+async def refresh_signals(background_tasks: BackgroundTasks, user=Depends(_get_current_user)):
+    """Trigger async regeneration of all trade signals from stored ML models."""
+    def _run():
+        try:
+            from generate_trades import generate_signals
+            generate_signals()
+        except Exception as e:
+            logger.error(f"Background signal refresh failed: {e}")
+
+    background_tasks.add_task(_run)
+    return {"status": "ok", "message": "Signal refresh started in background"}

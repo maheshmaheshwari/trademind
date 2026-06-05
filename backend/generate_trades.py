@@ -97,67 +97,155 @@ def calculate_trade_levels(df, signal, horizon, model_target_pct):
     }
 
 
-def calculate_position_sizing(df, signal, buy_price):
+def _get_delivery_pct(symbol: str) -> float:
+    """Fetch latest delivery % for a symbol from DB. Returns 50.0 if not available."""
+    try:
+        from database.db import get_connection, _execute
+        conn = get_connection()
+        cur = _execute(conn,
+            "SELECT delivery_pct FROM delivery_data WHERE symbol = ? ORDER BY date DESC LIMIT 1",
+            (symbol,))
+        row = cur.fetchone()
+        conn.close()
+        return float(row[0]) if row and row[0] else 50.0
+    except Exception:
+        return 50.0
+
+
+def _get_consumed_volume(symbol: str) -> int:
+    """Fetch already-consumed volume for the active signal of this symbol."""
+    try:
+        from database.db import get_connection, _execute
+        conn = get_connection()
+        cur = _execute(conn,
+            "SELECT consumed_volume, recommended_volume FROM trade_signals WHERE symbol = ? AND is_active = TRUE ORDER BY generated_date DESC LIMIT 1",
+            (symbol,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            consumed    = int(row[0] or 0)
+            recommended = int(row[1] or 0)
+            return consumed, recommended
+        return 0, 0
+    except Exception:
+        return 0, 0
+
+
+def calculate_market_impact(qty: int, adv: int, price: float, volatility_pct: float) -> float:
     """
-    Calculate safe position size based on average daily volume.
-    
-    Key rule: Never recommend more than 2% of avg daily volume.
-    This prevents our users from moving the stock price.
-    
-    For a product with many users, further divide by estimated
-    concurrent users acting on the same signal.
+    Square-root market impact model (industry standard).
+
+    Impact = σ × sqrt(Q / ADV)
+    where:
+        σ   = daily volatility (as fraction)
+        Q   = order quantity
+        ADV = average daily volume
+
+    Returns expected price impact as a percentage.
+    For Indian markets, this is well-calibrated for orders < 5% ADV.
     """
-    # Average daily volume (20-day and 50-day)
+    if adv <= 0 or price <= 0:
+        return 0.0
+    sigma = volatility_pct / 100.0
+    participation = qty / adv
+    impact_pct = sigma * (participation ** 0.5) * 100
+    return round(impact_pct, 3)
+
+
+def calculate_position_sizing(df, signal, buy_price, symbol: str = ""):
+    """
+    Calculate safe position size using market impact model.
+
+    Uses the square-root market impact formula + delivery % adjustment:
+    - High delivery % (>60%) → institutional stock, can absorb more volume
+    - Low delivery  % (<30%) → speculative stock, reduce safe qty
+    - Checks already-consumed volume from active signal
+    - Ensures per-user order won't move the market price by > 0.5%
+    """
     vol_20d = int(df["volume"].tail(20).mean()) if len(df) >= 20 else int(df["volume"].mean())
     vol_50d = int(df["volume"].tail(50).mean()) if len(df) >= 50 else vol_20d
-    
-    # Use more conservative (lower) volume estimate
     avg_daily_volume = min(vol_20d, vol_50d)
-    
-    # Max safe quantity: 2% of average daily volume
-    # This is the industry standard for avoiding market impact
-    SAFE_VOLUME_PCT = 0.02  # 2% of ADV
-    max_safe_qty = int(avg_daily_volume * SAFE_VOLUME_PCT)
-    
-    # For a product with N concurrent users, divide further
-    # Assume 100 users might act on the same signal
-    ESTIMATED_CONCURRENT_USERS = 100
-    max_qty_per_user = max(1, int(max_safe_qty / ESTIMATED_CONCURRENT_USERS))
-    
-    # Calculate max safe investment amount
+
     price = buy_price if buy_price else float(df["close"].iloc[-1])
-    max_safe_investment = round(max_safe_qty * price, 2) if price > 0 else 0
-    max_investment_per_user = round(max_qty_per_user * price, 2) if price > 0 else 0
-    
-    # Liquidity rating based on avg daily turnover (volume × price)
+
+    # Daily volatility (annualised → daily)
+    returns = df["close"].pct_change().dropna()
+    volatility_pct = float(returns.tail(20).std() * 100) if len(returns) >= 5 else 2.0
+
+    # ── Delivery % adjustment ──────────────────────────────────────────────
+    delivery_pct = _get_delivery_pct(symbol) if symbol else 50.0
+    if delivery_pct >= 60:
+        delivery_factor = 1.3    # institutional stock — can absorb more
+    elif delivery_pct >= 45:
+        delivery_factor = 1.0    # normal
+    elif delivery_pct >= 30:
+        delivery_factor = 0.75   # moderate caution
+    else:
+        delivery_factor = 0.5    # speculative — reduce significantly
+
+    # ── Base safe qty: 2% of ADV × delivery factor ────────────────────────
+    SAFE_VOLUME_PCT       = 0.02
+    ESTIMATED_USERS       = 100
+    max_safe_qty_raw      = int(avg_daily_volume * SAFE_VOLUME_PCT * delivery_factor)
+
+    # ── Market impact check: ensure per-platform order < 0.5% price impact ─
+    # Solve: σ × sqrt(Q/ADV) = 0.005  →  Q = ADV × (0.005/σ)²
+    target_impact_pct = 0.5
+    sigma = volatility_pct / 100.0
+    if sigma > 0:
+        impact_limit_qty = int(avg_daily_volume * (target_impact_pct / 100.0 / sigma) ** 2)
+    else:
+        impact_limit_qty = max_safe_qty_raw
+
+    max_safe_qty = min(max_safe_qty_raw, impact_limit_qty)
+    max_qty_per_user = max(1, int(max_safe_qty / ESTIMATED_USERS))
+
+    # ── Remaining capacity (subtract already-consumed volume) ──────────────
+    consumed_volume, recommended_volume = _get_consumed_volume(symbol) if symbol else (0, max_safe_qty)
+    remaining_platform = max(0, (recommended_volume or max_safe_qty) - consumed_volume)
+    remaining_per_user = max(1, int(remaining_platform / ESTIMATED_USERS))
+    # Use minimum of calculated safe qty and remaining capacity
+    effective_qty_per_user = min(max_qty_per_user, remaining_per_user)
+
+    # Actual price impact for the per-user order
+    price_impact = calculate_market_impact(effective_qty_per_user, avg_daily_volume, price, volatility_pct)
+
+    # ── Turnover and liquidity ─────────────────────────────────────────────
     daily_turnover = avg_daily_volume * price
-    if daily_turnover >= 50_00_00_000:      # ₹50 Cr+
+    if daily_turnover >= 50_00_00_000:
         liquidity = "VERY_HIGH"
-    elif daily_turnover >= 10_00_00_000:     # ₹10 Cr+
+    elif daily_turnover >= 10_00_00_000:
         liquidity = "HIGH"
-    elif daily_turnover >= 2_00_00_000:      # ₹2 Cr+
+    elif daily_turnover >= 2_00_00_000:
         liquidity = "MEDIUM"
-    elif daily_turnover >= 50_00_000:        # ₹50 L+
+    elif daily_turnover >= 50_00_000:
         liquidity = "LOW"
     else:
         liquidity = "VERY_LOW"
-    
-    # Minimum lot size (practical: at least ₹5000 worth)
+
     min_qty = max(1, int(5000 / price)) if price > 0 else 1
-    
+
     return {
-        "avg_daily_volume": avg_daily_volume,
-        "avg_daily_volume_20d": vol_20d,
-        "avg_daily_volume_50d": vol_50d,
-        "daily_turnover_cr": round(daily_turnover / 1_00_00_000, 2),
-        "max_safe_qty_total": max_safe_qty,
-        "max_qty_per_user": max_qty_per_user,
-        "max_safe_investment": max_safe_investment,
-        "max_investment_per_user": max_investment_per_user,
-        "min_qty": min_qty,
-        "liquidity": liquidity,
-        "safe_volume_pct": SAFE_VOLUME_PCT * 100,
-        "estimated_concurrent_users": ESTIMATED_CONCURRENT_USERS,
+        "avg_daily_volume":         avg_daily_volume,
+        "avg_daily_volume_20d":     vol_20d,
+        "avg_daily_volume_50d":     vol_50d,
+        "daily_turnover_cr":        round(daily_turnover / 1_00_00_000, 2),
+        "max_safe_qty_total":       max_safe_qty,
+        "max_qty_per_user":         effective_qty_per_user,
+        "max_safe_investment":      round(max_safe_qty * price, 2),
+        "max_investment_per_user":  round(effective_qty_per_user * price, 2),
+        "min_qty":                  min_qty,
+        "liquidity":                liquidity,
+        "safe_volume_pct":          SAFE_VOLUME_PCT * 100,
+        "estimated_concurrent_users": ESTIMATED_USERS,
+        # Market impact analytics
+        "volatility_pct":           round(volatility_pct, 2),
+        "delivery_pct":             round(delivery_pct, 1),
+        "delivery_factor":          delivery_factor,
+        "price_impact_pct":         price_impact,
+        "consumed_volume":          consumed_volume,
+        "remaining_volume":         remaining_platform,
+        "volume_utilisation_pct":   round(consumed_volume / max(recommended_volume or max_safe_qty, 1) * 100, 1),
     }
 
 
@@ -244,7 +332,7 @@ def generate_signals():
             levels = calculate_trade_levels(df, signal, horizon, target_pct)
             
             # Calculate position sizing with volume caps
-            position = calculate_position_sizing(df, signal, levels["buy_price"])
+            position = calculate_position_sizing(df, signal, levels["buy_price"], symbol=symbol)
             
             # Feature importance — top 5
             top_features = []
@@ -274,14 +362,21 @@ def generate_signals():
                     "expected_return_pct": levels["expected_return_pct"],
                 },
                 "position": {
-                    "avg_daily_volume": position["avg_daily_volume"],
-                    "daily_turnover_cr": position["daily_turnover_cr"],
-                    "liquidity": position["liquidity"],
-                    "max_safe_qty": position["max_safe_qty_total"],
-                    "max_qty_per_user": position["max_qty_per_user"],
-                    "max_investment_per_user": position["max_investment_per_user"],
-                    "min_qty": position["min_qty"],
-                    "recommended_volume": position["max_safe_qty_total"],
+                    "avg_daily_volume":          position["avg_daily_volume"],
+                    "daily_turnover_cr":         position["daily_turnover_cr"],
+                    "liquidity":                 position["liquidity"],
+                    "max_safe_qty":              position["max_safe_qty_total"],
+                    "max_qty_per_user":          position["max_qty_per_user"],
+                    "max_investment_per_user":   position["max_investment_per_user"],
+                    "min_qty":                   position["min_qty"],
+                    "recommended_volume":        position["max_safe_qty_total"],
+                    # Market impact analytics
+                    "volatility_pct":            position["volatility_pct"],
+                    "delivery_pct":              position["delivery_pct"],
+                    "price_impact_pct":          position["price_impact_pct"],
+                    "consumed_volume":           position["consumed_volume"],
+                    "remaining_volume":          position["remaining_volume"],
+                    "volume_utilisation_pct":    position["volume_utilisation_pct"],
                 },
                 "price": {
                     "current": levels["current_price"],

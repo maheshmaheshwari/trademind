@@ -78,11 +78,26 @@ SQL_RISK_SETTINGS = """
 CREATE TABLE IF NOT EXISTS risk_settings (
     id               BIGSERIAL PRIMARY KEY,
     user_id          BIGINT NOT NULL UNIQUE REFERENCES users(id),
-    max_daily_loss   DOUBLE PRECISION DEFAULT 5000,
+    max_daily_loss   DOUBLE PRECISION DEFAULT 10000,
     max_daily_trades INTEGER DEFAULT 10,
     max_position_pct DOUBLE PRECISION DEFAULT 20,
-    auto_stop_loss   BOOLEAN DEFAULT TRUE,
-    auto_target      BOOLEAN DEFAULT TRUE
+    max_position_size DOUBLE PRECISION DEFAULT 50000,
+    stop_loss_pct    DOUBLE PRECISION DEFAULT 7,
+    target_pct       DOUBLE PRECISION DEFAULT 15,
+    auto_stop_loss   INTEGER DEFAULT 1,
+    auto_target      INTEGER DEFAULT 1,
+    mode             TEXT DEFAULT 'PAPER'
+);
+
+CREATE TABLE IF NOT EXISTS user_signal_volume (
+    id                BIGSERIAL PRIMARY KEY,
+    user_id           BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    trade_signal_id   BIGINT NOT NULL REFERENCES trade_signals(id) ON DELETE CASCADE,
+    symbol            TEXT NOT NULL,
+    quantity_consumed INTEGER NOT NULL DEFAULT 0,
+    investment_amount DOUBLE PRECISION DEFAULT 0,
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, trade_signal_id)
 );
 """
 
@@ -119,6 +134,7 @@ CREATE TABLE IF NOT EXISTS trade_signals (
     sentiment               TEXT,
     generated_date          DATE NOT NULL,
     generated_at            TIMESTAMPTZ NOT NULL,
+    is_active               BOOLEAN DEFAULT TRUE,
     UNIQUE(symbol, generated_date)
 );
 """
@@ -161,10 +177,11 @@ CREATE TABLE IF NOT EXISTS orders (
     fill_price    DOUBLE PRECISION,
     fees          DOUBLE PRECISION DEFAULT 0,
     pnl           DOUBLE PRECISION,
-    gtt_rule_id   TEXT,
-    gtt_status    TEXT,
-    created_at    TIMESTAMPTZ DEFAULT NOW(),
-    updated_at    TIMESTAMPTZ DEFAULT NOW()
+    gtt_rule_id      TEXT,
+    gtt_status       TEXT,
+    trade_signal_id  BIGINT REFERENCES trade_signals(id) ON DELETE SET NULL,
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
 """
 
@@ -187,6 +204,31 @@ CREATE TABLE IF NOT EXISTS positions (
     bracket_id         TEXT,
     updated_at         TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id, symbol)
+);
+"""
+
+SQL_WATCHLIST = """
+CREATE TABLE IF NOT EXISTS watchlist (
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    symbol      TEXT   NOT NULL,
+    alert_above DOUBLE PRECISION,
+    alert_below DOUBLE PRECISION,
+    added_at    TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, symbol)
+);
+"""
+
+SQL_NOTIFICATIONS = """
+CREATE TABLE IF NOT EXISTS notifications (
+    id         BIGSERIAL PRIMARY KEY,
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL CHECK (type IN ('trade','signal','price','news','system')),
+    title      TEXT NOT NULL,
+    message    TEXT,
+    icon       TEXT,
+    color      TEXT,
+    is_read    BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 """
 
@@ -393,6 +435,8 @@ SQL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_positions_symbol   ON positions (symbol);",
     "CREATE INDEX IF NOT EXISTS idx_port_stocks_pid    ON portfolio_stocks (portfolio_id);",
     "CREATE INDEX IF NOT EXISTS idx_port_sectors_pid   ON portfolio_sectors (portfolio_id);",
+    "CREATE INDEX IF NOT EXISTS idx_watchlist_user      ON watchlist(user_id);",
+    "CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read) WHERE is_read = FALSE;",
 ]
 
 
@@ -413,7 +457,7 @@ def init_timescale(conn) -> None:
     for sql in [
         SQL_USERS, SQL_PORTFOLIOS, SQL_PORTFOLIO_SECTORS, SQL_PORTFOLIO_STOCKS,
         SQL_RISK_SETTINGS, SQL_TRADE_SIGNALS, SQL_AI_SIGNALS,
-        SQL_ORDERS, SQL_POSITIONS, SQL_MARKET_OVERVIEW,
+        SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS, SQL_MARKET_OVERVIEW,
     ]:
         cur.execute(sql)
 

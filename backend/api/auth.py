@@ -9,8 +9,14 @@ import jwt
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 
-# JWT secret — use env var in production, fallback for dev
-JWT_SECRET = os.getenv("JWT_SECRET", "trademind-ai-secret-key-change-in-production")
+# JWT secret — must be set via environment variable
+_jwt_secret = os.getenv("JWT_SECRET")
+if not _jwt_secret:
+    raise RuntimeError(
+        "JWT_SECRET environment variable is not set. "
+        "Set it to a strong random string before starting the server."
+    )
+JWT_SECRET = _jwt_secret
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24 * 7  # 7 days
 

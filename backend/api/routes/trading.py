@@ -96,8 +96,8 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
 @router.post("/register")
 async def api_register(req: RegisterRequest):
     """Create a new account with hashed password. Returns JWT token."""
-    if len(req.password) < 4:
-        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
     try:
         pw_hash = hash_password(req.password)
         user = create_user(req.username, pw_hash, req.display_name, req.email)
@@ -165,38 +165,45 @@ async def api_get_user_by_username(username: str):
 # ==========================================
 
 @router.post("/execute-signal")
-async def api_execute_signal(req: ExecuteSignalRequest):
+async def api_execute_signal(req: ExecuteSignalRequest, user=Depends(get_current_user)):
     """
     One-click trade: AI signal → auto bracket order (BUY + SL + TARGET).
-    
+
     Runs 6 risk checks, then creates:
     1. BUY order (executed immediately)
     2. STOP_LOSS order (pending, auto-triggers)
     3. TARGET order (pending, auto-triggers)
     """
+    from api.server import run_in_thread
+
+    # Always use the authenticated user's ID — ignore any user_id in the request body
+    auth_user_id = user["id"]
+
     # Calculate quantity for risk check
     quantity = int(req.investment_amount / req.buy_price) if req.buy_price > 0 else 0
-    
-    # Run risk checks
-    approved, reason, checks = check_order(
-        user_id=req.user_id,
+
+    # B4: Run blocking risk check + order execution in thread pool — not blocking event loop
+    approved, reason, checks = await run_in_thread(
+        check_order,
+        user_id=auth_user_id,
         symbol=req.symbol,
         investment_amount=req.investment_amount,
         quantity=quantity,
         max_safe_qty=req.max_safe_qty,
     )
-    
+
     if not approved:
         return {
             "status": "rejected",
             "reason": reason,
             "risk_checks": checks,
         }
-    
-    # Execute the bracket order
+
+    # Execute the bracket order (blocking DB write — offloaded to thread pool)
     try:
-        result = execute_signal(
-            user_id=req.user_id,
+        result = await run_in_thread(
+            execute_signal,
+            user_id=auth_user_id,
             symbol=req.symbol,
             name=req.name or req.symbol.replace(".NS", ""),
             investment_amount=req.investment_amount,
@@ -225,8 +232,11 @@ async def api_get_positions(
     page: int = 0, size: int = 25,
     sort: Optional[str] = None, order: Optional[str] = "asc",
     globalFilter: Optional[str] = None, filters: Optional[str] = None,
+    user=Depends(get_current_user),
 ):
     """Get all open positions with unrealized P&L (paginated)."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     update_position_prices(user_id)
     positions = get_positions(user_id)
 
@@ -268,8 +278,11 @@ async def api_get_orders(
     page: int = 0, size: int = 25,
     sort: Optional[str] = None, order: Optional[str] = "desc",
     globalFilter: Optional[str] = None, filters: Optional[str] = None,
+    user=Depends(get_current_user),
 ):
     """Get order history (paginated)."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     orders = get_orders(user_id, limit)
 
     # Global filter
@@ -306,8 +319,10 @@ async def api_get_orders(
 
 
 @router.post("/square-off/{user_id}/{symbol}")
-async def api_square_off(user_id: int, symbol: str, req: SquareOffRequest = None):
+async def api_square_off(user_id: int, symbol: str, req: SquareOffRequest = None, user=Depends(get_current_user)):
     """Sell an entire position."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     try:
         sell_price = req.sell_price if req else None
         result = square_off(user_id, symbol, sell_price)
@@ -317,8 +332,10 @@ async def api_square_off(user_id: int, symbol: str, req: SquareOffRequest = None
 
 
 @router.post("/square-off-all/{user_id}")
-async def api_square_off_all(user_id: int):
+async def api_square_off_all(user_id: int, user=Depends(get_current_user)):
     """Emergency kill switch: sell ALL positions."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     result = square_off_all(user_id)
     return {"status": "success", **result}
 
@@ -328,8 +345,10 @@ async def api_square_off_all(user_id: int):
 # ==========================================
 
 @router.get("/portfolio/{user_id}")
-async def api_portfolio_summary(user_id: int):
+async def api_portfolio_summary(user_id: int, user=Depends(get_current_user)):
     """Full portfolio summary: balance, invested, P&L, win rate, positions."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     try:
         # Update prices before summary
         update_position_prices(user_id)
@@ -340,15 +359,19 @@ async def api_portfolio_summary(user_id: int):
 
 
 @router.get("/risk-settings/{user_id}")
-async def api_get_risk_settings(user_id: int):
+async def api_get_risk_settings(user_id: int, user=Depends(get_current_user)):
     """Get risk management settings."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     settings = get_risk_settings(user_id)
     return settings
 
 
 @router.put("/risk-settings/{user_id}")
-async def api_update_risk_settings(user_id: int, req: RiskSettingsRequest):
+async def api_update_risk_settings(user_id: int, req: RiskSettingsRequest, user=Depends(get_current_user)):
     """Update risk management settings."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     updates = {k: v for k, v in req.dict().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No settings to update")
@@ -357,8 +380,10 @@ async def api_update_risk_settings(user_id: int, req: RiskSettingsRequest):
 
 
 @router.get("/pnl/today/{user_id}")
-async def api_today_pnl(user_id: int):
+async def api_today_pnl(user_id: int, user=Depends(get_current_user)):
     """Get today's realized P&L."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     from database.db import get_connection, _execute
     from datetime import datetime
 
@@ -382,5 +407,33 @@ async def api_today_pnl(user_id: int):
         "profit": round(row[0], 2),
         "loss": round(row[1], 2),
         "net_pnl": round(row[2], 2),
+        "today_pnl": round(row[2], 2),
+        "today_pnl_pct": 0.0,
         "trades_closed": row[3],
     }
+
+
+@router.get("/analytics/{user_id}")
+async def api_user_analytics(user_id: int, user=Depends(get_current_user)):
+    """
+    Comprehensive user trading analytics:
+    - Overall win/loss summary
+    - P&L breakdown by signal type, horizon, confidence band
+    - AI signal accuracy (did signals the user acted on turn out correct?)
+    - Per-signal volume consumed
+    - Best and worst trades
+    """
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    from database.db import get_user_analytics
+    return get_user_analytics(user_id)
+
+
+@router.get("/analytics/{user_id}/volume")
+async def api_user_signal_volume(user_id: int, user=Depends(get_current_user)):
+    """Per-user breakdown of AI signal volume consumed."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    from database.db import get_user_signal_volume
+    data = get_user_signal_volume(user_id)
+    return {"data": data, "total": len(data), "user_id": user_id}

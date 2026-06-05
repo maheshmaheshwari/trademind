@@ -123,10 +123,13 @@ def fetch_candles(
     return rows
 
 
-def main():
+def main(days: int = None):
     parser = argparse.ArgumentParser(description="Update stock data via Angel One")
     parser.add_argument("--days", type=int, default=5, help="Days of history to fetch for new stocks (default: 5)")
     args = parser.parse_args()
+    # Allow programmatic override of --days without mutating sys.argv
+    if days is not None:
+        args.days = days
 
     init_database()
 

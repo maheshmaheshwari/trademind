@@ -30,22 +30,50 @@ PGPORT     = int(os.getenv("PGPORT", "5433"))
 PGDATABASE = os.getenv("PGDATABASE", "trademind")
 PGUSER     = os.getenv("PGUSER", "trademind")
 PGPASSWORD = os.getenv("PGPASSWORD", "trademind")
+PGSSLMODE  = os.getenv("PGSSLMODE", "prefer")
 
 
 # ---------------------------------------------------------------------------
-# Connection helpers
+# Connection pool
 # ---------------------------------------------------------------------------
+
+_pool = None
+
+
+def _get_pool():
+    """Return (and lazily initialize) the shared connection pool."""
+    global _pool
+    if _pool is None:
+        from psycopg2 import pool as pg_pool
+        _pool = pg_pool.ThreadedConnectionPool(
+            minconn=2,
+            maxconn=10,
+            host=PGHOST,
+            port=PGPORT,
+            dbname=PGDATABASE,
+            user=PGUSER,
+            password=PGPASSWORD,
+            sslmode=PGSSLMODE,
+        )
+    return _pool
+
 
 def get_connection():
-    """Return a psycopg2 connection to TimescaleDB."""
-    import psycopg2
-    conn = psycopg2.connect(
-        host=PGHOST, port=PGPORT, dbname=PGDATABASE,
-        user=PGUSER, password=PGPASSWORD,
-        sslmode="require",
-    )
+    """Return a psycopg2 connection drawn from the pool."""
+    conn = _get_pool().getconn()
     conn.autocommit = False
     return conn
+
+
+def release_connection(conn) -> None:
+    """Return a connection to the pool."""
+    try:
+        _get_pool().putconn(conn)
+    except Exception:
+        try:
+            release_connection(conn)
+        except Exception:
+            pass
 
 
 def _rows_to_dicts(cursor) -> List[Dict]:
@@ -116,7 +144,7 @@ def init_database() -> None:
     try:
         init_timescale(conn)
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +179,7 @@ def insert_price(
         logger.error(f"insert_price {symbol} {date}: {e}")
         return False
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def insert_prices_batch(rows: List[Tuple], sync: bool = True) -> int:
@@ -174,7 +202,7 @@ def insert_prices_batch(rows: List[Tuple], sync: bool = True) -> int:
         logger.error(f"insert_prices_batch: {e}")
         return 0
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def insert_indicators(
@@ -228,7 +256,7 @@ def insert_indicators(
         return False
     finally:
         if not conn:
-            db_conn.close()
+            release_connection(db_conn)
 
 
 def insert_news(
@@ -245,7 +273,8 @@ def insert_news(
         _execute(conn,
             """INSERT INTO news_sentiment
                (headline, source, published_at, symbol, sentiment, confidence, url)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT DO NOTHING""",
             (headline, source, published_at, symbol, sentiment, confidence, url),
         )
         conn.commit()
@@ -255,7 +284,7 @@ def insert_news(
         logger.error(f"insert_news: {e}")
         return False
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def insert_market_overview(data: Dict[str, Any]) -> bool:
@@ -289,7 +318,7 @@ def insert_market_overview(data: Dict[str, Any]) -> bool:
         logger.error(f"insert_market_overview: {e}")
         return False
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def insert_ai_signal(
@@ -324,7 +353,7 @@ def insert_ai_signal(
         return False
     finally:
         if not conn:
-            db_conn.close()
+            release_connection(db_conn)
 
 
 def insert_trade_signals_batch(
@@ -354,6 +383,15 @@ def insert_trade_signals_batch(
              "atr_14", "atr_pct", "model_name", "model_horizon",
              "model_accuracy", "model_precision", "top_drivers", "sentiment", "generated_at"],
         )
+        # Deactivate all previous signals for each symbol before inserting new ones
+        symbols = [t["symbol"] for t in trades]
+        if symbols:
+            placeholders = ",".join(["?" ] * len(symbols))
+            _execute(conn,
+                f"UPDATE trade_signals SET is_active = FALSE WHERE symbol IN ({placeholders}) AND generated_date < ?",
+                (*symbols, generated_date),
+            )
+
         count = 0
         for t in trades:
             _execute(conn, sql, (
@@ -387,7 +425,7 @@ def insert_trade_signals_batch(
         logger.error(f"insert_trade_signals_batch: {e}")
         return 0
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +444,7 @@ def get_prices(symbol: str, days: int = 90, interval: str = "1d") -> List[Dict]:
         )
         return _rows_to_dicts(cur)
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def get_all_prices_df(symbol: str, days: int = 365) -> List[Dict]:
@@ -421,7 +459,7 @@ def get_all_prices_df(symbol: str, days: int = 365) -> List[Dict]:
         )
         return _rows_to_dicts(cur)
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def get_latest_indicators(symbol: str) -> Optional[Dict]:
@@ -434,7 +472,7 @@ def get_latest_indicators(symbol: str) -> Optional[Dict]:
         )
         return _row_to_dict(cur)
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def get_recent_news(limit: int = 20, symbol: Optional[str] = None) -> List[Dict]:
@@ -452,7 +490,262 @@ def get_recent_news(limit: int = 20, symbol: Optional[str] = None) -> List[Dict]
             )
         return _rows_to_dicts(cur)
     finally:
-        conn.close()
+        release_connection(conn)
+
+
+def get_news_for_user_watchlist(user_id: int, limit: int = 50) -> List[Dict]:
+    """
+    Return recent news for all stocks in a user's watchlist + market-wide news.
+    Used for per-user news feed.
+    """
+    conn = get_connection()
+    try:
+        cur = _execute(conn, """
+            SELECT n.*
+            FROM news_sentiment n
+            WHERE n.symbol IN (
+                SELECT symbol FROM watchlist WHERE user_id = ?
+            )
+            OR n.symbol IS NULL
+            ORDER BY n.published_at DESC
+            LIMIT ?
+        """, (user_id, limit))
+        return _rows_to_dicts(cur)
+    finally:
+        release_connection(conn)
+
+
+def get_news_summary_for_user(user_id: int) -> Dict:
+    """
+    Aggregate sentiment summary for a user's watchlist stocks over last 7 days.
+    Returns per-stock sentiment + overall portfolio sentiment.
+    """
+    conn = get_connection()
+    try:
+        # Per-stock sentiment for watchlist
+        cur = _execute(conn, """
+            SELECT
+                n.symbol,
+                COUNT(*)                                    AS article_count,
+                AVG(CAST(n.sentiment AS FLOAT))             AS avg_sentiment,
+                SUM(CASE WHEN CAST(n.sentiment AS FLOAT) > 0 THEN 1 ELSE 0 END) AS positive,
+                SUM(CASE WHEN CAST(n.sentiment AS FLOAT) < 0 THEN 1 ELSE 0 END) AS negative,
+                MAX(n.published_at)                         AS latest_article
+            FROM news_sentiment n
+            JOIN watchlist w ON w.symbol = n.symbol AND w.user_id = ?
+            WHERE n.published_at >= NOW() - INTERVAL '7 days'
+            GROUP BY n.symbol
+            ORDER BY AVG(CAST(n.sentiment AS FLOAT)) DESC
+        """, (user_id,))
+        per_stock = _rows_to_dicts(cur)
+
+        # Overall portfolio sentiment
+        cur2 = _execute(conn, """
+            SELECT
+                COUNT(*)                                    AS total_articles,
+                AVG(CAST(n.sentiment AS FLOAT))             AS portfolio_sentiment
+            FROM news_sentiment n
+            JOIN watchlist w ON w.symbol = n.symbol AND w.user_id = ?
+            WHERE n.published_at >= NOW() - INTERVAL '7 days'
+        """, (user_id,))
+        row = cur2.fetchone()
+        overall = {
+            "total_articles": row[0] or 0,
+            "portfolio_sentiment": round(float(row[1] or 0), 4),
+        }
+
+        return {"per_stock": per_stock, "overall": overall}
+    finally:
+        release_connection(conn)
+
+
+def get_user_signal_history(user_id: int, limit: int = 50) -> List[Dict]:
+    """
+    Return AI trade signals that a user has acted on (linked via trade_signal_id in orders).
+    User-wise classification of which AI signals were used.
+    """
+    conn = get_connection()
+    try:
+        cur = _execute(conn, """
+            SELECT DISTINCT
+                ts.symbol, ts.signal, ts.confidence, ts.model_horizon,
+                ts.buy_price, ts.target_price, ts.stop_loss,
+                ts.generated_date, ts.is_active,
+                o.created_at AS traded_at,
+                o.status     AS order_status,
+                o.fill_price
+            FROM orders o
+            JOIN trade_signals ts ON ts.id = o.trade_signal_id
+            WHERE o.user_id = ? AND o.order_purpose = 'ENTRY'
+            ORDER BY o.created_at DESC
+            LIMIT ?
+        """, (user_id, limit))
+        return _rows_to_dicts(cur)
+    finally:
+        release_connection(conn)
+
+
+def get_user_analytics(user_id: int) -> Dict:
+    """
+    Comprehensive per-user trading performance analytics.
+    Covers: P&L breakdown, win/loss by signal type, horizon, confidence band,
+    AI signal accuracy, volume consumed, and best/worst trades.
+    """
+    conn = get_connection()
+    try:
+        # ── Overall summary ───────────────────────────────────────────────
+        cur = _execute(conn, """
+            SELECT
+                COUNT(*)                                        AS total_orders,
+                SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)       AS wins,
+                SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END)      AS losses,
+                SUM(COALESCE(pnl, 0))                           AS total_realized_pnl,
+                AVG(COALESCE(pnl, 0))                           AS avg_pnl_per_trade,
+                MAX(COALESCE(pnl, 0))                           AS best_trade_pnl,
+                MIN(COALESCE(pnl, 0))                           AS worst_trade_pnl,
+                SUM(price * quantity)                           AS total_invested
+            FROM orders
+            WHERE user_id = ? AND order_purpose = 'ENTRY' AND status = 'EXECUTED'
+        """, (user_id,))
+        summary_row = cur.fetchone()
+        summary = {
+            "total_trades":      summary_row[0] or 0,
+            "wins":              summary_row[1] or 0,
+            "losses":            summary_row[2] or 0,
+            "win_rate":          round((summary_row[1] or 0) / max(summary_row[0] or 1, 1) * 100, 1),
+            "total_realized_pnl": round(float(summary_row[3] or 0), 2),
+            "avg_pnl_per_trade": round(float(summary_row[4] or 0), 2),
+            "best_trade_pnl":    round(float(summary_row[5] or 0), 2),
+            "worst_trade_pnl":   round(float(summary_row[6] or 0), 2),
+            "total_invested":    round(float(summary_row[7] or 0), 2),
+        }
+
+        # ── P&L by signal type (BUY/SELL) ────────────────────────────────
+        cur = _execute(conn, """
+            SELECT signal,
+                COUNT(*)                                AS trade_count,
+                SUM(COALESCE(pnl, 0))                  AS total_pnl,
+                AVG(COALESCE(pnl, 0))                  AS avg_pnl,
+                SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins
+            FROM orders
+            WHERE user_id = ? AND order_purpose = 'ENTRY' AND status = 'EXECUTED'
+            GROUP BY signal
+        """, (user_id,))
+        by_signal = _rows_to_dicts(cur)
+
+        # ── P&L by horizon ────────────────────────────────────────────────
+        cur = _execute(conn, """
+            SELECT horizon,
+                COUNT(*)                                AS trade_count,
+                SUM(COALESCE(pnl, 0))                  AS total_pnl,
+                AVG(COALESCE(pnl, 0))                  AS avg_pnl,
+                SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins
+            FROM orders
+            WHERE user_id = ? AND order_purpose = 'ENTRY' AND status = 'EXECUTED'
+              AND horizon IS NOT NULL
+            GROUP BY horizon ORDER BY total_pnl DESC
+        """, (user_id,))
+        by_horizon = _rows_to_dicts(cur)
+
+        # ── P&L by confidence band ────────────────────────────────────────
+        cur = _execute(conn, """
+            SELECT
+                CASE
+                    WHEN confidence >= 90 THEN '90-100%'
+                    WHEN confidence >= 80 THEN '80-90%'
+                    WHEN confidence >= 70 THEN '70-80%'
+                    WHEN confidence >= 60 THEN '60-70%'
+                    ELSE '<60%'
+                END AS confidence_band,
+                COUNT(*)                                AS trade_count,
+                SUM(COALESCE(pnl, 0))                  AS total_pnl,
+                AVG(COALESCE(pnl, 0))                  AS avg_pnl,
+                SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins
+            FROM orders
+            WHERE user_id = ? AND order_purpose = 'ENTRY' AND status = 'EXECUTED'
+              AND confidence IS NOT NULL
+            GROUP BY confidence_band ORDER BY confidence_band DESC
+        """, (user_id,))
+        by_confidence = _rows_to_dicts(cur)
+
+        # ── AI signal accuracy (acted signals vs outcome) ─────────────────
+        cur = _execute(conn, """
+            SELECT
+                ts.signal          AS ai_signal,
+                ts.is_active       AS signal_still_active,
+                ts.model_horizon   AS horizon,
+                o.pnl              AS realized_pnl,
+                o.symbol,
+                o.created_at       AS traded_at
+            FROM orders o
+            JOIN trade_signals ts ON ts.id = o.trade_signal_id
+            WHERE o.user_id = ? AND o.order_purpose = 'ENTRY' AND o.status = 'EXECUTED'
+            ORDER BY o.created_at DESC
+            LIMIT 20
+        """, (user_id,))
+        signal_accuracy = _rows_to_dicts(cur)
+
+        # ── Volume consumed per signal ────────────────────────────────────
+        cur = _execute(conn, """
+            SELECT usv.symbol, usv.quantity_consumed, usv.investment_amount,
+                   ts.signal, ts.is_active, ts.confidence, ts.model_horizon,
+                   usv.created_at
+            FROM user_signal_volume usv
+            JOIN trade_signals ts ON ts.id = usv.trade_signal_id
+            WHERE usv.user_id = ?
+            ORDER BY usv.created_at DESC
+        """, (user_id,))
+        volume_consumed = _rows_to_dicts(cur)
+
+        # ── Best and worst trades ─────────────────────────────────────────
+        cur = _execute(conn, """
+            SELECT symbol, signal, pnl, price, quantity, created_at
+            FROM orders
+            WHERE user_id = ? AND order_purpose = 'ENTRY' AND status = 'EXECUTED'
+              AND pnl IS NOT NULL
+            ORDER BY pnl DESC LIMIT 5
+        """, (user_id,))
+        best_trades = _rows_to_dicts(cur)
+
+        cur = _execute(conn, """
+            SELECT symbol, signal, pnl, price, quantity, created_at
+            FROM orders
+            WHERE user_id = ? AND order_purpose = 'ENTRY' AND status = 'EXECUTED'
+              AND pnl IS NOT NULL
+            ORDER BY pnl ASC LIMIT 5
+        """, (user_id,))
+        worst_trades = _rows_to_dicts(cur)
+
+        return {
+            "user_id":        user_id,
+            "summary":        summary,
+            "by_signal":      by_signal,
+            "by_horizon":     by_horizon,
+            "by_confidence":  by_confidence,
+            "signal_accuracy": signal_accuracy,
+            "volume_consumed": volume_consumed,
+            "best_trades":    best_trades,
+            "worst_trades":   worst_trades,
+        }
+    finally:
+        release_connection(conn)
+
+
+def get_user_signal_volume(user_id: int) -> List[Dict]:
+    """How much of each AI signal this user has consumed."""
+    conn = get_connection()
+    try:
+        cur = _execute(conn, """
+            SELECT usv.*, ts.signal, ts.confidence, ts.is_active,
+                   ts.recommended_volume, ts.max_qty_per_user
+            FROM user_signal_volume usv
+            JOIN trade_signals ts ON ts.id = usv.trade_signal_id
+            WHERE usv.user_id = ?
+            ORDER BY usv.created_at DESC
+        """, (user_id,))
+        return _rows_to_dicts(cur)
+    finally:
+        release_connection(conn)
 
 
 def get_market_overview(days: int = 30) -> List[Dict]:
@@ -465,7 +758,7 @@ def get_market_overview(days: int = 30) -> List[Dict]:
         )
         return _rows_to_dicts(cur)
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def get_top_signals(signal_type: str = "BUY", limit: int = 10) -> List[Dict]:
@@ -473,22 +766,38 @@ def get_top_signals(signal_type: str = "BUY", limit: int = 10) -> List[Dict]:
     try:
         today = datetime.now().strftime("%Y-%m-%d")
         like_val = f"%{signal_type}%"
+        # Filter by is_active=TRUE — only current signals, not superseded ones
         cur = _execute(conn,
-            """SELECT * FROM trade_signals WHERE signal LIKE ? AND generated_date = ?
+            """SELECT * FROM trade_signals
+               WHERE signal LIKE ? AND generated_date = ? AND is_active = TRUE
                ORDER BY confidence DESC LIMIT ?""",
             (like_val, today, limit),
         )
         results = _rows_to_dicts(cur)
         if not results:
             cur = _execute(conn,
-                """SELECT * FROM trade_signals WHERE signal LIKE ?
+                """SELECT * FROM trade_signals WHERE signal LIKE ? AND is_active = TRUE
                    ORDER BY generated_date DESC, confidence DESC LIMIT ?""",
                 (like_val, limit),
             )
             results = _rows_to_dicts(cur)
         return results
     finally:
-        conn.close()
+        release_connection(conn)
+
+
+def get_active_signal_id(symbol: str) -> Optional[int]:
+    """Return the id of the current active trade_signal for a symbol, or None."""
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT id FROM trade_signals WHERE symbol = ? AND is_active = TRUE ORDER BY generated_date DESC LIMIT 1",
+            (symbol,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        release_connection(conn)
 
 
 def get_trade_signals(
@@ -507,12 +816,12 @@ def get_trade_signals(
 
         if signal_type:
             cur = _execute(conn,
-                f"SELECT * FROM trade_signals WHERE generated_date = ? AND signal LIKE ? {vol_filter} ORDER BY confidence DESC LIMIT ?",
+                f"SELECT * FROM trade_signals WHERE generated_date = ? AND signal LIKE ? AND is_active = TRUE {vol_filter} ORDER BY confidence DESC LIMIT ?",
                 (date, f"%{signal_type}%", limit),
             )
         else:
             cur = _execute(conn,
-                f"SELECT * FROM trade_signals WHERE generated_date = ? {vol_filter} ORDER BY confidence DESC LIMIT ?",
+                f"SELECT * FROM trade_signals WHERE generated_date = ? AND is_active = TRUE {vol_filter} ORDER BY confidence DESC LIMIT ?",
                 (date, limit),
             )
         return _rows_to_dicts(cur)
@@ -520,7 +829,7 @@ def get_trade_signals(
         logger.error(f"get_trade_signals: {e}")
         return []
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def get_db_stats() -> Dict[str, int]:
@@ -534,7 +843,7 @@ def get_db_stats() -> Dict[str, int]:
             stats[table] = cur.fetchone()[0]
         return stats
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def get_all_symbols() -> List[str]:
@@ -545,7 +854,7 @@ def get_all_symbols() -> List[str]:
         )
         return [row[0] for row in cur.fetchall()]
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def get_latest_date(symbol: str) -> Optional[str]:
@@ -559,7 +868,7 @@ def get_latest_date(symbol: str) -> Optional[str]:
         val = row[0] if row and row[0] else None
         return str(val) if val else None
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def get_trade_signals_formatted(
@@ -574,12 +883,12 @@ def get_trade_signals_formatted(
             date = str(row[0]) if row and row[0] else datetime.now().strftime("%Y-%m-%d")
 
         cur = _execute(conn,
-            "SELECT * FROM trade_signals WHERE generated_date = ? ORDER BY confidence DESC",
+            "SELECT * FROM trade_signals WHERE generated_date = ? AND is_active = TRUE ORDER BY confidence DESC",
             (date,),
         )
         rows = _rows_to_dicts(cur)
     finally:
-        conn.close()
+        release_connection(conn)
 
     formatted = [_format_trade_signal(r) for r in rows]
     if signal_filter:
@@ -626,7 +935,101 @@ def get_signal_history(limit: int = 30) -> List[Dict]:
         )
         return _rows_to_dicts(cur)
     finally:
-        conn.close()
+        release_connection(conn)
+
+
+# ---------------------------------------------------------------------------
+# Watchlist helpers
+# ---------------------------------------------------------------------------
+
+def get_watchlist(user_id: int) -> List[Dict]:
+    conn = get_connection()
+    try:
+        cur = _execute(conn, "SELECT * FROM watchlist WHERE user_id = ? ORDER BY added_at DESC", (user_id,))
+        return _rows_to_dicts(cur)
+    finally:
+        release_connection(conn)
+
+
+def add_to_watchlist(user_id: int, symbol: str) -> None:
+    conn = get_connection()
+    try:
+        sql = _on_conflict_ignore(
+            "INSERT INTO watchlist (user_id, symbol) VALUES (?, ?)",
+            ["user_id", "symbol"],
+        )
+        _execute(conn, sql, (user_id, symbol))
+        conn.commit()
+    finally:
+        release_connection(conn)
+
+
+def remove_from_watchlist(user_id: int, symbol: str) -> None:
+    conn = get_connection()
+    try:
+        _execute(conn, "DELETE FROM watchlist WHERE user_id = ? AND symbol = ?", (user_id, symbol))
+        conn.commit()
+    finally:
+        release_connection(conn)
+
+
+def update_watchlist_alerts(user_id: int, symbol: str, alert_above: float = None, alert_below: float = None) -> None:
+    conn = get_connection()
+    try:
+        _execute(conn,
+            "UPDATE watchlist SET alert_above = ?, alert_below = ? WHERE user_id = ? AND symbol = ?",
+            (alert_above, alert_below, user_id, symbol))
+        conn.commit()
+    finally:
+        release_connection(conn)
+
+
+# ---------------------------------------------------------------------------
+# Notification helpers
+# ---------------------------------------------------------------------------
+
+def get_notifications(user_id: int, limit: int = 50) -> Dict:
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit))
+        rows = _rows_to_dicts(cur)
+        unread = sum(1 for r in rows if not r.get("is_read"))
+        return {"data": rows, "unread": unread}
+    finally:
+        release_connection(conn)
+
+
+def mark_notifications_read(user_id: int) -> None:
+    conn = get_connection()
+    try:
+        _execute(conn,
+            "UPDATE notifications SET is_read = TRUE WHERE user_id = ? AND is_read = FALSE",
+            (user_id,))
+        conn.commit()
+    finally:
+        release_connection(conn)
+
+
+def delete_notification(notif_id: int, user_id: int) -> None:
+    conn = get_connection()
+    try:
+        _execute(conn, "DELETE FROM notifications WHERE id = ? AND user_id = ?", (notif_id, user_id))
+        conn.commit()
+    finally:
+        release_connection(conn)
+
+
+def insert_notification(user_id: int, type: str, title: str, message: str = None, icon: str = None, color: str = None) -> None:
+    conn = get_connection()
+    try:
+        _execute(conn,
+            "INSERT INTO notifications (user_id, type, title, message, icon, color) VALUES (?,?,?,?,?,?)",
+            (user_id, type, title, message, icon, color))
+        conn.commit()
+    finally:
+        release_connection(conn)
 
 
 def _format_trade_signal(row: Dict) -> Dict:

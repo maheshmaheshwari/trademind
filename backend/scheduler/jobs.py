@@ -399,6 +399,24 @@ def sync_gtt_status_job():
         logger.error(f"GTT sync failed: {e}")
 
 
+def sync_autopilot_job():
+    """Every 5 min: check GTT statuses for EXECUTED autopilot mandates and settle them."""
+    logger.info("⏰ Syncing autopilot mandate statuses...")
+    try:
+        from trading.gtt_manager import sync_autopilot_statuses
+        settled = sync_autopilot_statuses()
+        if settled:
+            for s in settled:
+                logger.warning(
+                    f"⚡ Autopilot settled: {s['symbol']} → {s['status']} "
+                    f"P&L=₹{s['actual_pnl']:+,.2f}"
+                )
+        else:
+            logger.debug("No autopilot mandates settled this cycle")
+    except Exception as e:
+        logger.error(f"Autopilot sync failed: {e}")
+
+
 def start_scheduler() -> None:
     """
     Start the APScheduler with all configured jobs.
@@ -555,6 +573,8 @@ def _add_all_jobs(scheduler):
     scheduler.add_job(price_monitor_job, CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="price_monitor", name="Price Monitor (SL/Target)", misfire_grace_time=300, replace_existing=True)
     # Every 5 min: GTT status sync
     scheduler.add_job(sync_gtt_status_job, CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="gtt_sync", name="GTT Status Sync (Angel One)", misfire_grace_time=300, replace_existing=True)
+    # Every 5 min: Autopilot mandate settlement
+    scheduler.add_job(sync_autopilot_job, CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="autopilot_sync", name="Autopilot Mandate Sync", misfire_grace_time=300, replace_existing=True)
 
     # WEEKLY JOBS — Sunday 8 PM IST
     scheduler.add_job(cleanup_old_data_job, CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="Asia/Kolkata"), id="cleanup", name="Weekly Data Cleanup", misfire_grace_time=7200, replace_existing=True)

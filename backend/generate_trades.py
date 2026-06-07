@@ -99,29 +99,29 @@ def calculate_trade_levels(df, signal, horizon, model_target_pct):
 
 def _get_delivery_pct(symbol: str) -> float:
     """Fetch latest delivery % for a symbol from DB. Returns 50.0 if not available."""
+    from database.db import get_connection, release_connection, _execute
+    conn = get_connection()
     try:
-        from database.db import get_connection, _execute
-        conn = get_connection()
         cur = _execute(conn,
             "SELECT delivery_pct FROM delivery_data WHERE symbol = ? ORDER BY date DESC LIMIT 1",
             (symbol,))
         row = cur.fetchone()
-        conn.close()
         return float(row[0]) if row and row[0] else 50.0
     except Exception:
         return 50.0
+    finally:
+        release_connection(conn)
 
 
 def _get_consumed_volume(symbol: str) -> int:
     """Fetch already-consumed volume for the active signal of this symbol."""
+    from database.db import get_connection, release_connection, _execute
+    conn = get_connection()
     try:
-        from database.db import get_connection, _execute
-        conn = get_connection()
         cur = _execute(conn,
             "SELECT consumed_volume, recommended_volume FROM trade_signals WHERE symbol = ? AND is_active = TRUE ORDER BY generated_date DESC LIMIT 1",
             (symbol,))
         row = cur.fetchone()
-        conn.close()
         if row:
             consumed    = int(row[0] or 0)
             recommended = int(row[1] or 0)
@@ -129,6 +129,8 @@ def _get_consumed_volume(symbol: str) -> int:
         return 0, 0
     except Exception:
         return 0, 0
+    finally:
+        release_connection(conn)
 
 
 def calculate_market_impact(qty: int, adv: int, price: float, volatility_pct: float) -> float:
@@ -263,7 +265,7 @@ def generate_signals():
         for sym, info in tokens.items():
             name_map[f"{sym}.NS"] = info.get("name", sym)
     
-    model_files = sorted([f for f in os.listdir(FINAL_DIR) if f.endswith("_final.pkl")])
+    model_files = sorted([f for f in os.listdir(FINAL_DIR) if f.endswith("_final.pkl") and ".NS_final.pkl" in f])
     print(f"📊 {len(model_files)} final models found\n")
     
     trades = []
@@ -310,8 +312,28 @@ def generate_signals():
             latest = latest.replace([np.inf, -np.inf], 0).fillna(0)
             
             # Predict
-            prob = model.predict_proba(latest)[0]
-            buy_prob = prob[1] if len(prob) > 1 else prob[0]
+            if model is not None:
+                prob = model.predict_proba(latest)[0]
+                buy_prob = prob[1] if len(prob) > 1 else prob[0]
+            else:
+                # Ensemble / StackEnsemble: weighted average of sub-models
+                sub_models = artifact.get("sub_models") or {}
+                sub_weights = artifact.get("sub_weights") or {}
+                probs, weights = [], []
+                for mn, sm in sub_models.items():
+                    if sm is None:
+                        continue
+                    try:
+                        p = sm.predict_proba(latest)[0]
+                        probs.append(p[1] if len(p) > 1 else p[0])
+                        weights.append(abs(sub_weights.get(mn, 1.0)))
+                    except Exception:
+                        pass
+                if not probs:
+                    print(f"Skipping {symbol}: no valid sub-models")
+                    continue
+                total_w = sum(weights) or 1.0
+                buy_prob = sum(p * w / total_w for p, w in zip(probs, weights))
             
             acc = metrics["accuracy"]
             prec = metrics["precision"]
@@ -408,6 +430,7 @@ def generate_signals():
             
         except Exception as e:
             errors.append({"symbol": symbol, "error": str(e)})
+            print(f"   ❌ {symbol}: {e}")
     
     # Sort by signal priority + confidence
     signal_order = {"STRONG BUY": 0, "BUY": 1, "HOLD": 2, "SELL": 3, "STRONG SELL": 4}

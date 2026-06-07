@@ -179,10 +179,17 @@ def retrain_all(symbol_filter: Optional[str] = None,
     logger.info(f"   Stocks: {total}  |  Workers: {workers}")
     logger.info(f"{'='*70}\n")
 
+    # Pre-fetch ALL stock data from DB once — zero DB queries during training
+    logger.info("⏳ Pre-fetching all stock data from DB...")
+    from analysis.model_training import prefetch_all_data, precompute_sector_returns
+    prefetch_all_data(symbols=pending)     # only fetch symbols we'll actually train
+    precompute_sector_returns()            # sector returns from the cached price data
+    logger.info("✅ All data cached — starting training (zero DB queries from here)\n")
+
     results = []
     done = 0
     ok = 0
-    failed = 0
+    failed = []
 
     # Write CSV header
     csv_fields = ["symbol","status","best_model","horizon",
@@ -194,17 +201,29 @@ def retrain_all(symbol_filter: Optional[str] = None,
     if write_header:
         writer.writeheader()
 
+    WORKER_TIMEOUT = 600  # 10 minutes max per stock — auto-skip if stuck
+
     if workers > 1:
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futs = {pool.submit(_worker, s): s for s in pending}
             for fut in as_completed(futs):
-                r = fut.result()
+                sym = futs[fut]
+                try:
+                    r = fut.result(timeout=WORKER_TIMEOUT)
+                except Exception as e:
+                    # Timeout or crash — log and skip, don't stall the whole run
+                    err_msg = f"timeout after {WORKER_TIMEOUT}s" if "TimeoutError" in type(e).__name__ else str(e)
+                    logger.error(f"❌ {sym}: {err_msg} — skipping")
+                    r = {"symbol": sym, "status": "error", "error": err_msg,
+                         "best_model": "", "horizon": "", "accuracy": 0,
+                         "precision": 0, "recall": 0, "f1": 0,
+                         "train_rows": 0, "test_rows": 0, "elapsed_s": WORKER_TIMEOUT}
+                    failed.append(sym)
                 results.append(r)
                 writer.writerow({k: r.get(k,"") for k in csv_fields})
                 csv_fh.flush()
                 done += 1
                 if r["status"] == "ok": ok += 1
-                else: failed += 1
                 pct = done / total * 100
                 logger.info(f"[{done}/{total} {pct:.0f}%] {r['symbol']} → {r['status']}")
     else:
@@ -215,7 +234,7 @@ def retrain_all(symbol_filter: Optional[str] = None,
             csv_fh.flush()
             done += 1
             if r["status"] == "ok": ok += 1
-            else: failed += 1
+            else: failed.append(r["symbol"])
             pct = done / total * 100
             eta_min = (total - done) * (sum(r2["elapsed_s"] for r2 in results) / done) / 60
             logger.info(f"[{done}/{total} {pct:.0f}%] ETA ~{eta_min:.0f}min")
@@ -226,7 +245,9 @@ def retrain_all(symbol_filter: Optional[str] = None,
     logger.info(f"\n{'='*70}")
     logger.info(f"📊 Retraining Complete")
     logger.info(f"   ✅ Saved  : {ok}")
-    logger.info(f"   ⚠️  Below threshold / no data: {failed}")
+    logger.info(f"   ⚠️  Below threshold / no data / timeout: {len(failed)}")
+    if failed:
+        logger.info(f"   Failed: {', '.join(failed[:20])}")
     logger.info(f"   📄 Results: {RESULTS_CSV}")
 
     # Print top 20 by accuracy
@@ -244,7 +265,7 @@ def retrain_all(symbol_filter: Optional[str] = None,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Walk-forward model retraining")
     parser.add_argument("--symbol",  type=str, default=None, help="Single symbol e.g. HDFCBANK.NS")
-    parser.add_argument("--workers", type=int, default=1,    help="Parallel processes (default 1)")
+    parser.add_argument("--workers", type=int, default=2,    help="Parallel processes (default 2)")
     parser.add_argument("--resume",  action="store_true", default=True,
                         help="Skip already-trained symbols (default True)")
     parser.add_argument("--no-resume", dest="resume", action="store_false",

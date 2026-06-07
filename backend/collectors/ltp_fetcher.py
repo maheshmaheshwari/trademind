@@ -37,7 +37,7 @@ def _get_angel_session():
 
         api_key = os.getenv("ANGEL_API_KEY")
         client_id = os.getenv("ANGEL_CLIENT_ID")
-        password = os.getenv("ANGEL_PASSWORD")
+        password = os.getenv("ANGEL_MPIN") or os.getenv("ANGEL_PASSWORD")
         totp_secret = os.getenv("ANGEL_TOTP_SECRET")
 
         if not all([api_key, client_id, password, totp_secret]):

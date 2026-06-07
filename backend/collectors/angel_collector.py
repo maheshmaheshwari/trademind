@@ -129,7 +129,7 @@ class AngelCollector:
         self.api_key = os.getenv("ANGEL_API_KEY", "")
         self.secret_key = os.getenv("ANGEL_SECRET_KEY", "")
         self.client_id = os.getenv("ANGEL_CLIENT_ID", "")
-        self.password = os.getenv("ANGEL_PASSWORD", "")
+        self.password = os.getenv("ANGEL_MPIN", "") or os.getenv("ANGEL_PASSWORD", "")
         self.totp_secret = os.getenv("ANGEL_TOTP_SECRET", "")
         self.smart_api = None
         self.auth_token = None

@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { Bookmark, RefreshCw, ChevronRight } from 'lucide-react';
 import { useAuth } from '../AuthContext';
+import { useTheme } from '../ThemeContext';
 import { useToast } from '../components/ui';
 import {
   useGetPortfolioSummaryQuery, useGetTodayPnlQuery, useGetActionableSignalsQuery,
@@ -60,15 +61,63 @@ function StatCard({
   );
 }
 
-function SignalCard({ s, onClick }: { s: Stock; onClick: () => void }) {
-  const col = s.signal === 'BUY' ? 'var(--green)' : s.signal === 'SELL' ? 'var(--red)' : 'var(--gold)';
+function SignalCard({ s, variant = 'rich', onClick }: { s: Stock; variant?: 'rich' | 'compact' | 'bold'; onClick: () => void }) {
+  const col       = s.signal === 'BUY' ? 'var(--green)' : s.signal === 'SELL' ? 'var(--red)' : 'var(--gold)';
   const sparkColor = s.signal === 'SELL' ? '#EF4444' : s.signal === 'HOLD' ? '#F59E0B' : '#10B981';
+  const expStr    = (s.expReturn >= 0 ? '+' : '') + s.expReturn.toFixed(2) + '%';
+
+  const base = "text-left font-sans text-ink bg-surface-2 border border-line cursor-pointer w-full transition-all hover:border-line-strong hover:bg-surface-hover hover:-translate-y-0.5";
+
+  // ── compact: single row ──────────────────────────────────────────────────
+  if (variant === 'compact') {
+    return (
+      <button onClick={onClick} className={base}
+        style={{ borderRadius: 'var(--radius,14px)', display: 'grid', gridTemplateColumns: '1.5fr auto 1fr 90px', alignItems: 'center', gap: 14, padding: '11px 15px' }}>
+        <SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector />
+        <div className="flex items-center gap-1.5">
+          <SignalBadge signal={s.signal} />
+          <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s.horizon}</span>
+        </div>
+        <div className="flex flex-col items-end gap-[2px]">
+          <span className="font-mono font-bold text-[13.5px]">{inr(s.price)}</span>
+          <Delta value={s.change} size={11.5} />
+        </div>
+        <div style={{ width: 64 }}><Conf value={s.confidence} /></div>
+      </button>
+    );
+  }
+
+  // ── bold: left accent bar, large return ──────────────────────────────────
+  if (variant === 'bold') {
+    return (
+      <button onClick={onClick} className={base}
+        style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(15px * var(--u))', borderLeft: `3px solid ${col}` }}>
+        <div className="flex items-center justify-between">
+          <SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector={false} />
+          <SignalBadge signal={s.signal} />
+        </div>
+        <div className="flex items-end justify-between mt-[14px]">
+          <div className="flex flex-col gap-[1px]">
+            <span className="text-[11px] text-ink-3 font-semibold uppercase tracking-[.04em]">Expected · {s.horizon}</span>
+            <span className="font-mono text-[24px] font-bold tracking-tight" style={{ color: col }}>{expStr}</span>
+          </div>
+          <Sparkline data={s.spark} color={sparkColor} w={92} h={42} />
+        </div>
+        <div className="flex items-center justify-between mt-3">
+          <span className="text-[11.5px] text-ink-2">Confidence</span>
+          <span className="font-mono font-bold" style={{ color: col }}>{s.confidence}%</span>
+        </div>
+        <div className="conf-track mt-[5px]">
+          <div style={{ width: s.confidence + '%', height: '100%', borderRadius: 999, background: col }} />
+        </div>
+      </button>
+    );
+  }
+
+  // ── rich (default) ───────────────────────────────────────────────────────
   return (
-    <button
-      onClick={onClick}
-      className="text-left font-sans text-ink bg-surface-2 border border-line cursor-pointer w-full transition-all hover:border-line-strong hover:bg-surface-hover hover:-translate-y-0.5"
-      style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(15px * var(--u))' }}
-    >
+    <button onClick={onClick} className={base}
+      style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(15px * var(--u))' }}>
       <div className="flex items-center justify-between">
         <SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector={false} />
         <SignalBadge signal={s.signal} />
@@ -88,9 +137,7 @@ function SignalCard({ s, onClick }: { s: Stock; onClick: () => void }) {
         </div>
         <div className="flex flex-col gap-[2px] items-end">
           <span className="text-[11px] text-ink-3">Exp. Return</span>
-          <span className="font-mono font-bold text-[13.5px]" style={{ color: col }}>
-            {(s.expReturn >= 0 ? '+' : '') + s.expReturn.toFixed(2) + '%'}
-          </span>
+          <span className="font-mono font-bold text-[13.5px]" style={{ color: col }}>{expStr}</span>
         </div>
       </div>
       <div className="flex items-center justify-between mt-[11px] gap-[10px]">
@@ -103,6 +150,7 @@ function SignalCard({ s, onClick }: { s: Stock; onClick: () => void }) {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { signalStyle } = useTheme();
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -275,12 +323,18 @@ export default function DashboardPage() {
         <div className="dp">
           {loading ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(216px,1fr))', gap: 'calc(13px * var(--u))' }}>
-              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} h={190} rounded="12px" />)}
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} h={signalStyle === 'compact' ? 56 : 190} rounded="12px" />)}
+            </div>
+          ) : signalStyle === 'compact' ? (
+            <div className="flex flex-col gap-2">
+              {signals.map(s => (
+                <SignalCard key={s.symbol} s={s} variant="compact" onClick={() => navigate('/signals')} />
+              ))}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(216px,1fr))', gap: 'calc(13px * var(--u))' }}>
               {signals.map(s => (
-                <SignalCard key={s.symbol} s={s} onClick={() => navigate('/signals')} />
+                <SignalCard key={s.symbol} s={s} variant={signalStyle} onClick={() => navigate('/signals')} />
               ))}
             </div>
           )}

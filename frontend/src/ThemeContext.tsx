@@ -2,19 +2,24 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 
 type Theme = 'dark' | 'light';
 type Density = 'compact' | 'balanced' | 'comfy';
+export type SignalStyle = 'rich' | 'compact' | 'bold';
 
 interface ThemeContextType {
   theme: Theme;
   density: Density;
+  signalStyle: SignalStyle;
   toggleTheme: () => void;
   setDensity: (d: Density) => void;
+  setSignalStyle: (s: SignalStyle) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType>({
   theme: 'dark',
   density: 'balanced',
+  signalStyle: 'rich',
   toggleTheme: () => {},
   setDensity: () => {},
+  setSignalStyle: () => {},
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -28,11 +33,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return (saved === 'compact' || saved === 'comfy') ? saved : 'balanced';
   });
 
+  const [signalStyle, setSignalStyleState] = useState<SignalStyle>(() => {
+    const saved = localStorage.getItem('trademind-signal-style');
+    return (saved === 'compact' || saved === 'bold') ? saved : 'rich';
+  });
+
   useEffect(() => {
     const root = document.documentElement;
-    // data-theme drives CSS variables + Tailwind's dark: selector
     root.setAttribute('data-theme', theme);
-    // Keep dark class in sync for any legacy Tailwind dark: usage
     root.classList.toggle('dark', theme === 'dark');
     root.classList.toggle('light', theme === 'light');
     localStorage.setItem('trademind-theme', theme);
@@ -43,11 +51,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('trademind-density', density);
   }, [density]);
 
-  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-  const setDensity = (d: Density) => setDensityState(d);
+  useEffect(() => {
+    localStorage.setItem('trademind-signal-style', signalStyle);
+  }, [signalStyle]);
+
+  const toggleTheme   = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  const setDensity    = (d: Density) => setDensityState(d);
+  const setSignalStyle = (s: SignalStyle) => setSignalStyleState(s);
 
   return (
-    <ThemeContext.Provider value={{ theme, density, toggleTheme, setDensity }}>
+    <ThemeContext.Provider value={{ theme, density, signalStyle, toggleTheme, setDensity, setSignalStyle }}>
       {children}
     </ThemeContext.Provider>
   );

@@ -232,6 +232,43 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 """
 
+SQL_AUTHORIZED_TRADES = """
+CREATE TABLE IF NOT EXISTS authorized_trades (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    symbol      TEXT NOT NULL,
+    name        TEXT,
+    sector      TEXT,
+    signal      TEXT NOT NULL DEFAULT 'BUY',
+    mode        TEXT DEFAULT 'PAPER',
+    qty         INTEGER NOT NULL DEFAULT 0,
+    amount      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    entry       DOUBLE PRECISION,
+    target      DOUBLE PRECISION,
+    sl          DOUBLE PRECISION,
+    exp_profit  DOUBLE PRECISION DEFAULT 0,
+    max_loss    DOUBLE PRECISION DEFAULT 0,
+    cmp         DOUBLE PRECISION,
+    actual_pnl  DOUBLE PRECISION,
+    status      TEXT DEFAULT 'PENDING'
+                    CHECK (status IN ('PENDING','EXECUTED','COMPLETED','STOPPED')),
+    bracket_id  TEXT,
+    sl_gtt_id   TEXT,
+    target_gtt_id TEXT,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
+SQL_AUTOPILOT_SETTINGS = """
+CREATE TABLE IF NOT EXISTS autopilot_settings (
+    id         BIGSERIAL PRIMARY KEY,
+    user_id    BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    enabled    BOOLEAN DEFAULT FALSE,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
 SQL_MARKET_OVERVIEW = """
 CREATE TABLE IF NOT EXISTS market_overview (
     date                    DATE PRIMARY KEY,
@@ -457,7 +494,8 @@ def init_timescale(conn) -> None:
     for sql in [
         SQL_USERS, SQL_PORTFOLIOS, SQL_PORTFOLIO_SECTORS, SQL_PORTFOLIO_STOCKS,
         SQL_RISK_SETTINGS, SQL_TRADE_SIGNALS, SQL_AI_SIGNALS,
-        SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS, SQL_MARKET_OVERVIEW,
+        SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS,
+        SQL_AUTHORIZED_TRADES, SQL_AUTOPILOT_SETTINGS, SQL_MARKET_OVERVIEW,
     ]:
         cur.execute(sql)
 

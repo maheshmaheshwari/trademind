@@ -1,17 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
-
-function relativeTime(isoStr: string): string {
-  const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
-  if (diff < 60)   return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
 import { useNavigate } from 'react-router-dom';
 import { PanelLeft, Search, Bell, Sun, Moon, User, Settings, Shield, LogOut } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../ThemeContext';
 import { useGetNotificationsQuery, useMarkNotificationsReadMutation } from '../services/tradeMindApiService';
+
+function relativeTime(isoStr: string): string {
+  const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+  if (diff < 60)    return 'just now';
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
 
 interface NavbarProps {
   collapsed: boolean;
@@ -24,6 +24,7 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
   const navigate = useNavigate();
   const [menuOpen,  setMenuOpen]  = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [clock,     setClock]     = useState('');
   const menuRef  = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
 
@@ -31,6 +32,7 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
   const [markRead] = useMarkNotificationsReadMutation();
   const unread: number = (notifData as any)?.unread ?? 0;
 
+  // Close popovers on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (menuRef.current  && !menuRef.current.contains(e.target as Node))  setMenuOpen(false);
@@ -40,15 +42,32 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Live IST clock
+  useEffect(() => {
+    function tick() {
+      setClock(new Date().toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit',
+      }));
+    }
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const initials = user?.display_name
     ? user.display_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
     : 'U';
 
-  // Determine market open (9:15 AM – 3:30 PM IST Mon–Fri)
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-  const day = now.getDay();
-  const mins = now.getHours() * 60 + now.getMinutes();
+  // Market open: 9:15 AM – 3:30 PM IST Mon–Fri
+  const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const day  = nowIST.getDay();
+  const mins = nowIST.getHours() * 60 + nowIST.getMinutes();
   const marketOpen = day >= 1 && day <= 5 && mins >= 555 && mins <= 930;
+
+  function goSettings(tab: string) {
+    setMenuOpen(false);
+    navigate('/settings', { state: { tab } });
+  }
 
   function handleLogout() {
     setMenuOpen(false);
@@ -70,13 +89,11 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
         <PanelLeft size={18} />
       </button>
 
-      {/* Brand — only visible when sidebar is collapsed */}
+      {/* Brand — only when sidebar collapsed */}
       {collapsed && (
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span
-            className="w-[30px] h-[30px] rounded-[9px] grid place-items-center flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg,var(--accent),#1E40AF)', boxShadow: '0 4px 14px rgba(59,130,246,.4)' }}
-          >
+          <span className="w-[30px] h-[30px] rounded-[9px] grid place-items-center flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg,var(--accent),#1E40AF)', boxShadow: '0 4px 14px rgba(59,130,246,.4)' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 17l5-5 4 3 8-9"/><path d="M21 6v4h-4"/>
             </svg>
@@ -101,35 +118,56 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
 
       {/* Right actions */}
       <div className="flex items-center gap-2.5">
-        {/* Market status */}
+
+        {/* Market status + live clock */}
         <div className={`flex items-center gap-2 h-9 px-3 rounded-full text-[12.5px] font-semibold border ${marketOpen ? 'text-gain bg-gain-soft border-line' : 'text-loss bg-loss-soft border-line'}`}>
-          <span className={`w-2 h-2 rounded-full ${marketOpen ? 'bg-gain animate-pulse-dot' : 'bg-loss'}`} />
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${marketOpen ? 'bg-gain animate-pulse-dot' : 'bg-loss'}`} />
           {marketOpen ? 'MARKET OPEN' : 'MARKET CLOSED'}
-          <span className="hidden sm:inline text-ink-3 font-normal font-mono text-[11.5px]">NSE</span>
+          <span className="hidden sm:inline text-ink-3 font-normal font-mono text-[11.5px]">
+            NSE · {clock}
+          </span>
         </div>
 
         {/* Notifications */}
         <div className="relative hidden sm:block" ref={notifRef}>
           <button
             onClick={() => { setNotifOpen(o => !o); if (!notifOpen && unread > 0) markRead(); }}
-            className="w-[38px] h-[38px] rounded-[10px] border border-line bg-transparent text-ink-2 grid place-items-center hover:bg-surface-hover hover:text-ink transition-colors relative">
+            className="w-[38px] h-[38px] rounded-[10px] border border-line bg-transparent text-ink-2 grid place-items-center hover:bg-surface-hover hover:text-ink transition-colors relative"
+          >
             <Bell size={19} />
             {unread > 0 && <span className="absolute top-[7px] right-[8px] w-[7px] h-[7px] rounded-full bg-gold border-2 border-surface" />}
           </button>
+
           {notifOpen && (
             <div className="notif-pop">
               <div className="notif-head">
-                <span className="text-[14px] font-semibold text-ink">Notifications</span>
-                {unread > 0 && <span className="inline-flex items-center h-[20px] px-[8px] rounded-full text-[11px] font-bold bg-gold-soft text-gold">{unread} new</span>}
+                <div className="flex items-center gap-2">
+                  <span className="text-[14.5px] font-bold text-ink">Notifications</span>
+                  {unread > 0 && (
+                    <span className="inline-flex items-center h-[20px] px-2 rounded-full text-[11px] font-bold bg-accent-soft text-accent-2">
+                      {unread} new
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={markRead as any}
+                  className="text-[12.5px] font-semibold text-accent-2 border-none bg-transparent cursor-pointer hover:underline"
+                >
+                  Mark all read
+                </button>
               </div>
               <div className="notif-list">
                 {((notifData as any)?.data ?? []).slice(0, 6).map((n: any) => (
                   <div key={n.id} className={`notif-item ${!n.is_read ? 'unread' : ''}`}>
-                    <span className="notif-ic" style={{ background: (n.color || '#3B82F6') + '22', color: n.color || '#3B82F6' }}>{n.icon}</span>
-                    <div className="flex flex-col gap-[2px] min-w-0">
-                      <span className="text-[13px] font-semibold text-ink truncate">{n.title}</span>
-                      <span className="text-[12px] text-ink-2 truncate">{n.message}</span>
-                      <span className="text-[11px] text-ink-3">{n.created_at ? relativeTime(n.created_at) : ''}</span>
+                    <span className="notif-ic" style={{ background: (n.color || '#3B82F6') + '22', color: n.color || '#3B82F6' }}>
+                      {n.icon || '🔔'}
+                    </span>
+                    <div className="flex flex-col gap-[2px] flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[13px] font-semibold text-ink truncate">{n.title}</span>
+                        <span className="text-[11px] text-ink-3 flex-shrink-0">{n.created_at ? relativeTime(n.created_at) : ''}</span>
+                      </div>
+                      <span className="text-[12px] text-ink-2 line-clamp-2">{n.message}</span>
                     </div>
                   </div>
                 ))}
@@ -137,7 +175,7 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
                   <div className="text-center py-8 text-[13px] text-ink-3">No notifications yet</div>
                 )}
               </div>
-              <button className="notif-foot" onClick={() => { navigate('/settings', { state: { tab: 'notifications' } }); setNotifOpen(false); }}>
+              <button className="notif-foot" onClick={() => { goSettings('notifications'); setNotifOpen(false); }}>
                 <Settings size={14} /> Notification settings
               </button>
             </div>
@@ -164,7 +202,6 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
 
           {menuOpen && (
             <div className="absolute right-0 top-[46px] bg-surface border border-line-strong rounded-[13px] shadow-lg z-10 overflow-hidden p-1.5" style={{ width: 230 }}>
-              {/* User info */}
               <div className="px-3 py-2.5">
                 <div className="font-semibold text-[13.5px] text-ink">{user?.display_name ?? 'User'}</div>
                 <div className="text-[11.5px] text-ink-3 mt-0.5">{user?.username} · Paper trading</div>
@@ -172,20 +209,15 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
 
               <div className="h-px bg-line mx-1.5 my-1" />
 
-              {/* Density control */}
+              {/* Quick density picker */}
               <div className="px-3 py-2">
                 <div className="text-[10.5px] font-semibold tracking-[.08em] uppercase text-ink-3 mb-2">Density</div>
                 <div className="flex gap-1">
                   {(['compact', 'balanced', 'comfy'] as const).map(d => (
-                    <button
-                      key={d}
-                      onClick={() => setDensity(d)}
+                    <button key={d} onClick={() => setDensity(d)}
                       className={`flex-1 h-7 rounded-[7px] text-[11.5px] font-semibold border-none cursor-pointer capitalize transition-colors ${
-                        density === d
-                          ? 'bg-accent text-white'
-                          : 'bg-transparent text-ink-3 hover:text-ink hover:bg-surface-hover'
-                      }`}
-                    >
+                        density === d ? 'bg-accent text-white' : 'bg-transparent text-ink-3 hover:text-ink hover:bg-surface-hover'
+                      }`}>
                       {d[0].toUpperCase() + d.slice(1, 3)}
                     </button>
                   ))}
@@ -194,31 +226,23 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
 
               <div className="h-px bg-line mx-1.5 my-1" />
 
-              {/* Nav links */}
-              <button
-                onClick={() => { navigate('/settings'); setMenuOpen(false); }}
-                className="flex items-center gap-3 w-full h-[38px] px-3 rounded-[9px] text-[14px] font-medium text-ink-2 hover:bg-surface-hover hover:text-ink transition-colors border-none bg-transparent"
-              >
-                <Settings size={17} /> Preferences
-              </button>
-              <button
-                onClick={() => setMenuOpen(false)}
-                className="flex items-center gap-3 w-full h-[38px] px-3 rounded-[9px] text-[14px] font-medium text-ink-2 hover:bg-surface-hover hover:text-ink transition-colors border-none bg-transparent"
-              >
-                <User size={17} /> Profile
-              </button>
-              <button
-                onClick={() => setMenuOpen(false)}
-                className="flex items-center gap-3 w-full h-[38px] px-3 rounded-[9px] text-[14px] font-medium text-ink-2 hover:bg-surface-hover hover:text-ink transition-colors border-none bg-transparent"
-              >
-                <Shield size={17} /> Security
-              </button>
+              {[
+                ['profile',       <User size={17} />,     'Profile'],
+                ['appearance',    <Settings size={17} />, 'Preferences'],
+                ['notifications', <Bell size={17} />,     'Notifications'],
+                ['security',      <Shield size={17} />,   'Security'],
+              ].map(([tab, icon, label]) => (
+                <button key={tab as string}
+                  onClick={() => goSettings(tab as string)}
+                  className="flex items-center gap-3 w-full h-[38px] px-3 rounded-[9px] text-[14px] font-medium text-ink-2 hover:bg-surface-hover hover:text-ink transition-colors border-none bg-transparent"
+                >
+                  {icon} {label}
+                </button>
+              ))}
 
               <div className="h-px bg-line mx-1.5 my-1" />
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-3 w-full h-[38px] px-3 rounded-[9px] text-[14px] font-medium text-loss hover:bg-loss-soft transition-colors border-none bg-transparent"
-              >
+              <button onClick={handleLogout}
+                className="flex items-center gap-3 w-full h-[38px] px-3 rounded-[9px] text-[14px] font-medium text-loss hover:bg-loss-soft transition-colors border-none bg-transparent">
                 <LogOut size={17} /> Log out
               </button>
             </div>

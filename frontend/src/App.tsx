@@ -3,14 +3,16 @@ import { AuthProvider, useAuth } from './AuthContext';
 import { ThemeProvider } from './ThemeContext';
 import { ToastProvider } from './components/ui';
 import Layout from './components/Layout';
-import AuthPage      from './pages/AuthPage';
-import DashboardPage from './pages/DashboardPage';
-import AISignalsPage from './pages/AISignalsPage';
-import MarketPage    from './pages/MarketPage';
-import PortfolioPage from './pages/PortfolioPage';
-import TradesPage    from './pages/TradesPage';
-import WatchlistPage from './pages/WatchlistPage';
-import SettingsPage  from './pages/SettingsPage';
+import AuthPage       from './pages/AuthPage';
+import DashboardPage  from './pages/DashboardPage';
+import AISignalsPage  from './pages/AISignalsPage';
+import AutopilotPage  from './pages/AutopilotPage';
+import MarketPage     from './pages/MarketPage';
+import PortfolioPage  from './pages/PortfolioPage';
+import TradesPage     from './pages/TradesPage';
+import WatchlistPage  from './pages/WatchlistPage';
+import SettingsPage   from './pages/SettingsPage';
+import BacktestPage   from './pages/BacktestPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -37,10 +39,12 @@ function AppRoutes() {
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/signals"   element={<AISignalsPage />} />
+        <Route path="/autopilot" element={<AutopilotPage />} />
         <Route path="/market"    element={<MarketPage />} />
         <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/orders"    element={<TradesPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
+        <Route path="/backtest"  element={<BacktestPage />} />
         <Route path="/settings"  element={<SettingsPage />} />
         {/* Legacy redirect */}
         <Route path="/settings/risk" element={<Navigate to="/settings" replace />} />

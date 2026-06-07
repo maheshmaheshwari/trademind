@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis.indicators import calculate_all
 from database.db import (
     get_connection,
+    release_connection,
     init_database,
     _execute,
     _executemany,
@@ -143,7 +144,7 @@ def backfill_symbol(symbol: str, conn=None) -> int:
         return 0
     finally:
         if own_conn:
-            conn.close()
+            release_connection(conn)
 
 
 def backfill_all(symbol_filter: str = None):
@@ -154,7 +155,7 @@ def backfill_all(symbol_filter: str = None):
         "SELECT DISTINCT symbol FROM prices WHERE interval = '1d' ORDER BY symbol"
     )
     all_symbols = [r[0] for r in cur.fetchall()]
-    conn.close()
+    release_connection(conn)
 
     if symbol_filter:
         all_symbols = [s for s in all_symbols if s == symbol_filter]

@@ -229,7 +229,7 @@ function NotificationsTab() {
   );
 }
 
-function AppearanceTab({ theme, toggleTheme, density, setDensity }: any) {
+function AppearanceTab({ theme, toggleTheme, density, setDensity, signalStyle, setSignalStyle }: any) {
   const [accent, setAccent] = useState('#3B82F6');
 
   useEffect(() => {
@@ -289,6 +289,25 @@ function AppearanceTab({ theme, toggleTheme, density, setDensity }: any) {
               onChange={setDensity}
               labels={{ compact: 'Compact', balanced: 'Balanced', comfy: 'Comfy' }}
             />
+          </div>
+        </SectionBody>
+      </SectionCard>
+
+      <SectionCard>
+        <SectionHead title="Signal Card Style" sub="How AI signal cards appear on the Dashboard" />
+        <SectionBody>
+          <div className="py-4">
+            <Seg
+              options={['rich', 'compact', 'bold'] as const}
+              value={signalStyle}
+              onChange={setSignalStyle}
+              labels={{ rich: 'Rich', compact: 'Compact', bold: 'Bold' }}
+            />
+            <p className="text-[11.5px] text-ink-3 mt-2 m-0">
+              {signalStyle === 'rich' && 'Full card with sparkline, horizon, expected return, and confidence bar.'}
+              {signalStyle === 'compact' && 'Single-row list view — fits more signals on screen.'}
+              {signalStyle === 'bold' && 'Left-border accent card with large expected return percentage.'}
+            </p>
           </div>
         </SectionBody>
       </SectionCard>
@@ -422,7 +441,7 @@ function RiskPanel({ user, toast }: { user: any; toast: any }) {
 
 export default function SettingsPage() {
   const { user }   = useAuth();
-  const { theme, toggleTheme, density, setDensity } = useTheme();
+  const { theme, toggleTheme, density, setDensity, signalStyle, setSignalStyle } = useTheme();
   const toast      = useToast();
   const location   = useLocation();
 
@@ -472,7 +491,7 @@ export default function SettingsPage() {
           {tab === 'profile'       && <ProfileTab user={user} />}
           {tab === 'brokers'       && <BrokersTab />}
           {tab === 'notifications' && <NotificationsTab />}
-          {tab === 'appearance'    && <AppearanceTab theme={theme} toggleTheme={toggleTheme} density={density} setDensity={setDensity} />}
+          {tab === 'appearance'    && <AppearanceTab theme={theme} toggleTheme={toggleTheme} density={density} setDensity={setDensity} signalStyle={signalStyle} setSignalStyle={setSignalStyle} />}
           {tab === 'security'      && <SecurityTab />}
           {tab === ('risk' as any) && <RiskPanel user={user} toast={toast} />}
         </div>

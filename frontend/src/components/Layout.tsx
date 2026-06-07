@@ -3,17 +3,19 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, LineChart, PieChart,
   ArrowLeftRight, Bookmark, Settings, PanelLeft,
-  TrendingUp,
+  TrendingUp, BrainCircuit, FlaskConical,
 } from 'lucide-react';
 import Navbar from './Navbar';
 import { useAuth } from '../AuthContext';
 
 const NAV = [
-  { id: 'dashboard', path: '/dashboard', label: 'Dashboard',      Icon: LayoutDashboard },
-  { id: 'signals',   path: '/signals',   label: 'AI Signals',     Icon: TrendingUp },
+  { id: 'dashboard', path: '/dashboard', label: 'Dashboard',       Icon: LayoutDashboard },
+  { id: 'signals',   path: '/signals',   label: 'AI Signals',      Icon: TrendingUp },
+  { id: 'autopilot', path: '/autopilot', label: 'AI Authorized',   Icon: BrainCircuit },
   { id: 'market',    path: '/market',    label: 'Market Overview', Icon: LineChart },
-  { id: 'portfolio', path: '/portfolio', label: 'Portfolio',      Icon: PieChart },
+  { id: 'portfolio', path: '/portfolio', label: 'Portfolio',       Icon: PieChart },
   { id: 'trades',    path: '/orders',    label: 'Trades & Orders', Icon: ArrowLeftRight },
+  { id: 'backtest',  path: '/backtest',  label: 'AI Performance',  Icon: FlaskConical   },
 ];
 
 const ACCOUNT = [
@@ -116,7 +118,8 @@ export default function Layout() {
 
         {/* Footer user */}
         <div className="border-t border-line p-3 flex-shrink-0">
-          <div className="flex items-center gap-2.5 p-2 rounded-[9px] cursor-pointer hover:bg-surface-hover transition-colors duration-150" onClick={() => navigate('/settings')}>
+          <div className="flex items-center gap-2.5 p-2 rounded-[9px] cursor-pointer hover:bg-surface-hover transition-colors duration-150"
+               onClick={() => navigate('/settings')}>
             <div className="w-[34px] h-[34px] rounded-[10px] bg-gradient-to-br from-indigo-500 to-accent grid place-items-center font-bold text-[13px] text-white flex-shrink-0">
               {initials}
             </div>
@@ -141,5 +144,4 @@ export default function Layout() {
   );
 }
 
-// Sidebar collapse toggle button exposed for Navbar
 export { PanelLeft };

@@ -31,7 +31,7 @@ try:
 except ImportError:
     _CATBOOST_AVAILABLE = False
 
-from database.db import get_connection
+from database.db import get_connection, release_connection
 import json as _json
 import os as _os
 
@@ -45,6 +45,203 @@ try:
     _SECTOR_MAP = {f"{sym}.NS": info.get("sector", "Unknown") for sym, info in _raw.items()}
 except Exception:
     pass
+
+# ── Sector returns cache (pre-computed once, reused for all stocks) ─────────
+# Dict: {sector_name: pd.Series(index=date, values=avg_daily_return)}
+_SECTOR_RETURNS_CACHE: dict = {}
+
+# ── Full data cache — pre-fetched from DB once for all symbols ──────────────
+# Dict: {symbol: pd.DataFrame} — eliminates all per-stock DB queries during training
+_DATA_CACHE: dict = {}
+
+
+def prefetch_all_data(symbols: list = None) -> None:
+    """
+    Pre-fetch ALL training data from DB in bulk — one query per table.
+    After this runs, load_data_for_symbol() returns instantly from memory.
+
+    symbols: list of symbols to fetch (None = all from prices table)
+    """
+    global _DATA_CACHE
+    import logging
+    log = logging.getLogger(__name__)
+    log.info("📦 Pre-fetching all stock data from DB (one-time batch)...")
+
+    conn = get_connection()
+    try:
+        # ── 1. Prices + indicators + market overview + delivery (one big JOIN) ──
+        log.info("   Loading prices + indicators + market + delivery...")
+        conn.cursor().execute("SET statement_timeout = '120s'")
+        df_all = _query_to_df(conn, """
+            SELECT
+                p.symbol, p.date,
+                p.close, p.open, p.high, p.low, p.volume,
+                i.rsi_14, i.macd, i.macd_signal, i.macd_hist,
+                i.bb_upper, i.bb_lower, i.bb_middle,
+                i.sma_20, i.sma_50, i.sma_200, i.ema_9, i.ema_21,
+                i.atr_14, i.adx_14, i.stoch_k, i.stoch_d, i.obv,
+                m.india_vix, m.fii_net, m.dii_net,
+                m.nifty500_close, m.nifty500_change_pct,
+                COALESCE(d.delivery_pct, 50.0) AS delivery_pct
+            FROM prices p
+            LEFT JOIN technical_indicators i ON p.symbol = i.symbol AND p.date = i.date
+            LEFT JOIN market_overview m      ON p.date = m.date
+            LEFT JOIN delivery_data d        ON p.symbol = d.symbol AND p.date = d.date
+            WHERE p.interval = '1d'
+            ORDER BY p.symbol, p.date ASC
+        """, timeout="120s")
+        log.info(f"   Prices loaded: {len(df_all):,} rows across {df_all['symbol'].nunique()} symbols")
+
+        # ── 2. Stock-level news sentiment ─────────────────────────────────────
+        log.info("   Loading stock news sentiment...")
+        df_sent = _query_to_df(conn, """
+            SELECT symbol, date,
+                   avg_sentiment   AS sent_stock,
+                   news_count      AS news_count_stock,
+                   positive_count  AS news_pos,
+                   negative_count  AS news_neg,
+                   max_positive    AS sent_max_pos,
+                   max_negative    AS sent_max_neg
+            FROM news_daily_sentiment
+            WHERE symbol IS NOT NULL
+            ORDER BY symbol, date ASC
+        """, timeout="60s")
+        log.info(f"   Sentiment loaded: {len(df_sent):,} rows")
+
+        # ── 3. Market-wide sentiment ──────────────────────────────────────────
+        log.info("   Loading market sentiment...")
+        df_mkt = _query_to_df(conn, """
+            SELECT date,
+                   avg_sentiment AS mkt_sentiment,
+                   news_count    AS mkt_news_count
+            FROM news_daily_sentiment
+            WHERE symbol IS NULL
+            ORDER BY date ASC
+        """, timeout="30s")
+        log.info(f"   Market sentiment: {len(df_mkt):,} rows")
+
+    finally:
+        release_connection(conn)
+
+    # ── Prepare market sentiment as a Series ──────────────────────────────────
+    df_mkt['date'] = pd.to_datetime(df_mkt['date'])
+    if df_mkt['date'].dt.tz is not None:
+        df_mkt['date'] = df_mkt['date'].dt.tz_convert(None)
+    df_mkt = df_mkt.set_index('date')
+    for col in ['mkt_sentiment', 'mkt_news_count']:
+        df_mkt[col] = pd.to_numeric(df_mkt[col], errors='coerce').fillna(0)
+
+    # ── Prepare stock sentiment as dict ───────────────────────────────────────
+    df_sent['date'] = pd.to_datetime(df_sent['date'])
+    if df_sent['date'].dt.tz is not None:
+        df_sent['date'] = df_sent['date'].dt.tz_convert(None)
+    df_sent = df_sent.set_index(['symbol', 'date'])
+
+    # ── Split prices by symbol and build per-symbol DataFrames ───────────────
+    df_all['date'] = pd.to_datetime(df_all['date'])
+    if df_all['date'].dt.tz is not None:
+        df_all['date'] = df_all['date'].dt.tz_convert(None)
+
+    numeric_cols = ['close','open','high','low','volume',
+                    'india_vix','fii_net','dii_net','nifty500_close','nifty500_change_pct']
+
+    sent_fill_cols = ['sent_stock','news_count_stock','news_pos','news_neg',
+                      'sent_max_pos','sent_max_neg']
+
+    target_symbols = symbols if symbols else df_all['symbol'].unique().tolist()
+
+    for sym in target_symbols:
+        sym_df = df_all[df_all['symbol'] == sym].copy()
+        if sym_df.empty:
+            continue
+        sym_df = sym_df.drop(columns=['symbol']).set_index('date').sort_index()
+
+        # Coerce numerics
+        for col in numeric_cols:
+            if col in sym_df.columns:
+                sym_df[col] = pd.to_numeric(sym_df[col], errors='coerce')
+
+        # Join market sentiment
+        sym_df = sym_df.join(df_mkt, how='left')
+
+        # Join stock sentiment
+        if sym in df_sent.index.get_level_values(0):
+            s_sent = df_sent.loc[sym].copy()
+            sym_df = sym_df.join(s_sent, how='left')
+
+        # Fill missing sentiment columns with 0
+        for col in sent_fill_cols + ['mkt_sentiment', 'mkt_news_count']:
+            if col not in sym_df.columns:
+                sym_df[col] = 0.0
+            sym_df[col] = pd.to_numeric(sym_df[col], errors='coerce').fillna(0)
+
+        _DATA_CACHE[sym] = sym_df
+
+    log.info(f"✅ Data cache ready: {len(_DATA_CACHE)} symbols in memory")
+
+
+def _SECTOR_RETURNS_CACHE_RESET():
+    global _SECTOR_RETURNS_CACHE
+    _SECTOR_RETURNS_CACHE = {}
+
+
+def precompute_sector_returns() -> None:
+    """
+    Pre-compute daily average returns for every sector using a single DB query.
+    Results are cached in _SECTOR_RETURNS_CACHE and reused during training —
+    eliminates per-stock sector DB queries that caused hangs on large sectors.
+
+    Call this once before training starts in retrain_walk_forward.py.
+    """
+    global _SECTOR_RETURNS_CACHE
+    if _SECTOR_RETURNS_CACHE:
+        return  # Already computed
+
+    import logging
+    log = logging.getLogger(__name__)
+    log.info("Pre-computing sector returns (one-time, all sectors)...")
+
+    try:
+        conn = get_connection()
+        # One query: daily returns for all symbols
+        df_all = _query_to_df(conn, """
+            SELECT
+                date,
+                symbol,
+                (close - LAG(close) OVER (PARTITION BY symbol ORDER BY date)) /
+                NULLIF(LAG(close) OVER (PARTITION BY symbol ORDER BY date), 0) AS daily_return
+            FROM prices
+            WHERE interval = '1d'
+            ORDER BY date
+        """)
+        release_connection(conn)
+
+        if df_all.empty:
+            log.warning("No price data for sector pre-computation")
+            return
+
+        df_all['date']         = pd.to_datetime(df_all['date'])
+        df_all['daily_return'] = pd.to_numeric(df_all['daily_return'], errors='coerce')
+        df_all['sector']       = df_all['symbol'].map(_SECTOR_MAP)
+        df_all = df_all.dropna(subset=['sector', 'daily_return'])
+        df_all = df_all[df_all['sector'] != 'Unknown']
+
+        # Aggregate: mean daily return per sector per date
+        sector_daily = (
+            df_all.groupby(['sector', 'date'])['daily_return']
+            .mean()
+            .reset_index()
+        )
+
+        # Store as dict of Series indexed by date
+        for sector, grp in sector_daily.groupby('sector'):
+            s = grp.set_index('date')['daily_return']
+            s.index = s.index.normalize()  # strip time component
+            _SECTOR_RETURNS_CACHE[sector] = s
+
+        log.info(f"Sector returns cached for {len(_SECTOR_RETURNS_CACHE)} sectors")
+    except Exception as e:
+        log.warning(f"Sector pre-computation failed (sector features disabled): {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -83,48 +280,57 @@ class PurgedTimeSeriesSplit:
             yield list(range(0, train_end)), list(range(val_start, val_end))
 
 
-def _query_to_df(conn, sql: str, params: tuple = ()) -> pd.DataFrame:
-    """Execute a query and return a DataFrame."""
+def _query_to_df(conn, sql: str, params: tuple = (), timeout: str = "30s") -> pd.DataFrame:
+    """Execute a query and return a DataFrame. Times out after `timeout` to prevent hangs."""
     cur = conn.cursor()
+    cur.execute(f"SET statement_timeout = '{timeout}'")
     cur.execute(sql, params)
     cols = [d[0] for d in cur.description]
     rows = cur.fetchall()
+    cur.execute("SET statement_timeout = 0")  # reset after query
     cur.close()
     return pd.DataFrame(rows, columns=cols)
 
 
 def load_data_for_symbol(symbol: str) -> pd.DataFrame:
+    # ── Serve from pre-fetched cache if available (zero DB queries) ──────────
+    if _DATA_CACHE and symbol in _DATA_CACHE:
+        return _DATA_CACHE[symbol].copy()
+
+    # ── Fallback: fetch from DB (used when cache not pre-built) ──────────────
     conn = get_connection()
     ph = _PH
-    query = f"""
-    SELECT
-        p.date, p.close, p.open, p.high, p.low, p.volume,
-        i.rsi_14, i.macd, i.macd_signal, i.macd_hist,
-        i.bb_upper, i.bb_lower, i.bb_middle,
-        i.sma_20, i.sma_50, i.sma_200, i.ema_9, i.ema_21,
-        i.atr_14, i.adx_14, i.stoch_k, i.stoch_d, i.obv,
-        m.india_vix, m.fii_net, m.dii_net,
-        m.nifty500_close, m.nifty500_change_pct,
-        COALESCE(d.delivery_pct, 50.0) as delivery_pct
-    FROM prices p
-    LEFT JOIN technical_indicators i ON p.symbol = i.symbol AND p.date = i.date
-    LEFT JOIN market_overview m ON p.date = m.date
-    LEFT JOIN delivery_data d  ON p.symbol = d.symbol AND p.date = d.date
-    WHERE p.symbol = {ph} AND p.interval = '1d'
-    ORDER BY p.date ASC
-    """
-    df = _query_to_df(conn, query, (symbol,))
-    stock_sent = _query_to_df(conn, f"""
-        SELECT date, avg_sentiment as sent_stock, news_count as news_count_stock,
-               positive_count as news_pos, negative_count as news_neg,
-               max_positive as sent_max_pos, max_negative as sent_max_neg
-        FROM news_daily_sentiment WHERE symbol = {ph} ORDER BY date""",
-        (symbol,))
-    mkt_sent = _query_to_df(conn, """
-        SELECT date, avg_sentiment as mkt_sentiment, news_count as mkt_news_count
-        FROM news_daily_sentiment WHERE symbol IS NULL ORDER BY date""",
-        ())
-    conn.close()
+    try:
+        query = f"""
+        SELECT
+            p.date, p.close, p.open, p.high, p.low, p.volume,
+            i.rsi_14, i.macd, i.macd_signal, i.macd_hist,
+            i.bb_upper, i.bb_lower, i.bb_middle,
+            i.sma_20, i.sma_50, i.sma_200, i.ema_9, i.ema_21,
+            i.atr_14, i.adx_14, i.stoch_k, i.stoch_d, i.obv,
+            m.india_vix, m.fii_net, m.dii_net,
+            m.nifty500_close, m.nifty500_change_pct,
+            COALESCE(d.delivery_pct, 50.0) as delivery_pct
+        FROM prices p
+        LEFT JOIN technical_indicators i ON p.symbol = i.symbol AND p.date = i.date
+        LEFT JOIN market_overview m ON p.date = m.date
+        LEFT JOIN delivery_data d  ON p.symbol = d.symbol AND p.date = d.date
+        WHERE p.symbol = {ph} AND p.interval = '1d'
+        ORDER BY p.date ASC
+        """
+        df = _query_to_df(conn, query, (symbol,))
+        stock_sent = _query_to_df(conn, f"""
+            SELECT date, avg_sentiment as sent_stock, news_count as news_count_stock,
+                   positive_count as news_pos, negative_count as news_neg,
+                   max_positive as sent_max_pos, max_negative as sent_max_neg
+            FROM news_daily_sentiment WHERE symbol = {ph} ORDER BY date""",
+            (symbol,))
+        mkt_sent = _query_to_df(conn, """
+            SELECT date, avg_sentiment as mkt_sentiment, news_count as mkt_news_count
+            FROM news_daily_sentiment WHERE symbol IS NULL ORDER BY date""",
+            ())
+    finally:
+        release_connection(conn)
 
     for col in ['india_vix', 'fii_net', 'dii_net', 'nifty500_close', 'nifty500_change_pct']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -152,38 +358,20 @@ def load_data_for_symbol(symbol: str) -> pd.DataFrame:
             df[col] = 0.0
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    # ── Priority 7: Sector-relative return ───────────────────────────────────
+    # ── Priority 7: Sector-relative return (from pre-computed cache) ─────────
+    # No DB query here — _SECTOR_RETURNS_CACHE was built once before training started
     sector = _SECTOR_MAP.get(symbol, "")
-    if sector and sector != "Unknown":
+    if sector and sector != "Unknown" and sector in _SECTOR_RETURNS_CACHE:
         try:
-            conn2 = get_connection()
-            # Get symbols in same sector
-            sector_symbols = [s for s, sec in _SECTOR_MAP.items() if sec == sector and s != symbol]
-            if sector_symbols:
-                placeholders = ",".join([_PH] * len(sector_symbols))
-                sect_ret = _query_to_df(conn2, f"""
-                    SELECT date,
-                           AVG((close - LAG(close) OVER (PARTITION BY symbol ORDER BY date)) /
-                               NULLIF(LAG(close) OVER (PARTITION BY symbol ORDER BY date), 0)) AS sector_return_1d
-                    FROM prices
-                    WHERE symbol IN ({placeholders}) AND interval = '1d'
-                    GROUP BY date
-                    ORDER BY date
-                """, tuple(sector_symbols))
-                if not sect_ret.empty:
-                    sect_ret['date'] = pd.to_datetime(sect_ret['date'])
-                    def _norm(s):
-                        s2 = pd.to_datetime(s)
-                        return s2.dt.tz_convert(None) if hasattr(s2, 'dt') and s2.dt.tz is not None else s2
-                    sect_ret['date'] = _norm(sect_ret['date'])
-                    sect_ret.set_index('date', inplace=True)
-                    sect_ret['sector_return_1d'] = pd.to_numeric(sect_ret['sector_return_1d'], errors='coerce').fillna(0)
-                    df = df.join(sect_ret, how='left')
-                    df['sector_return_1d'] = df['sector_return_1d'].fillna(0)
-            conn2.close()
+            sect_series = _SECTOR_RETURNS_CACHE[sector]
+            # Align to df's date index
+            df_idx = df.index.normalize()
+            sect_aligned = sect_series.reindex(df_idx).values
+            df['sector_return_1d'] = sect_aligned
+            df['sector_return_1d'] = pd.to_numeric(df['sector_return_1d'], errors='coerce').fillna(0)
         except Exception:
-            pass
-    if 'sector_return_1d' not in df.columns:
+            df['sector_return_1d'] = 0.0
+    else:
         df['sector_return_1d'] = 0.0
 
     return df
@@ -551,15 +739,19 @@ def _build_stacking_ensemble(horizon_probas: dict, yte: pd.Series, all_results: 
         f = f1_score(y_meta_te, yp, zero_division=0)
 
         weights = {mn: float(c) for mn, c in zip(names, meta_clf.coef_[0])}
+        # Get fwd/tgt_pct from one of the base results
+        _base = all_results.get(f"{label}|{names[0]}", {})
         return {
             "model":        None,
             "model_name":   "StackEnsemble",
             "meta_learner": meta_clf,
             "horizon":      label,
+            "fwd":          _base.get("fwd", 0),
+            "tgt_pct":      _base.get("tgt_pct", 0),
             "acc": a, "prec": p, "rec": r, "f1": f,
             "blended_prec": p,
             "thr":          best_thr,
-            "features":     all_results[f"{label}|{names[0]}"]["features"],
+            "features":     _base.get("features", []),
             "report":       classification_report(y_meta_te, yp, zero_division=0),
             "sub_models":   {mn: None for mn in names},
             "sub_weights":  weights,

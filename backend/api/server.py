@@ -92,6 +92,8 @@ from api.routes.watchlist import router as watchlist_router
 from api.routes.notifications import router as notifications_router
 from api.routes.orders import router as orders_router
 from api.routes.news import router as news_router, signals_router as user_signals_router
+from api.routes.autopilot import router as autopilot_router
+from api.routes.backtest import router as backtest_router
 app.include_router(portfolio_routes.router)
 app.include_router(trades_routes.router)
 app.include_router(trading_router)
@@ -100,6 +102,8 @@ app.include_router(notifications_router)
 app.include_router(orders_router)
 app.include_router(news_router)
 app.include_router(user_signals_router)
+app.include_router(autopilot_router)
+app.include_router(backtest_router)
 
 
 # ==========================================

@@ -62,7 +62,7 @@ def _angel_login() -> SmartConnect:
     totp = pyotp.TOTP(os.getenv("ANGEL_TOTP_SECRET", "")).now()
     data = smart_api.generateSession(
         os.getenv("ANGEL_CLIENT_ID", ""),
-        os.getenv("ANGEL_PASSWORD", ""),
+        os.getenv("ANGEL_MPIN", "") or os.getenv("ANGEL_PASSWORD", ""),
         totp,
     )
     if not data.get("status"):

@@ -398,6 +398,129 @@ def place_bracket_gtts(
     }
 
 
+def sync_autopilot_statuses() -> List[Dict]:
+    """
+    Sync GTT statuses for all EXECUTED autopilot mandates.
+
+    For each authorized_trade with status = EXECUTED and GTT IDs:
+      - If SL GTT triggered  → status = STOPPED,  actual_pnl = (sl - entry) * qty
+      - If Target GTT triggered → status = COMPLETED, actual_pnl = (target - entry) * qty
+      - Cancel the other leg after either triggers
+
+    Returns list of settled mandates (for logging/notification).
+    """
+    from database.db import get_connection, _execute, _rows_to_dicts, insert_notification
+
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            """SELECT * FROM authorized_trades
+               WHERE status = 'EXECUTED'
+                 AND (sl_gtt_id IS NOT NULL OR target_gtt_id IS NOT NULL)""")
+        active_mandates = _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+    if not active_mandates:
+        return []
+
+    smart_api = _get_angel_session()
+    if not smart_api:
+        logger.warning("sync_autopilot_statuses: Angel One session unavailable")
+        return []
+
+    settled = []
+
+    for mandate in active_mandates:
+        triggered_by = None   # "sl" or "target"
+        actual_pnl   = None
+
+        for leg, field in [("sl", "sl_gtt_id"), ("target", "target_gtt_id")]:
+            gtt_id = mandate.get(field)
+            if not gtt_id:
+                continue
+            try:
+                details = smart_api.gttDetails(int(gtt_id))
+                status = ""
+                if isinstance(details, dict):
+                    status = details.get("status", "").upper()
+                elif isinstance(details, list) and details:
+                    status = details[0].get("status", "").upper()
+
+                if status in ("TRIGGERED", "SENTTOEXCHANGE", "FORALL"):
+                    triggered_by = leg
+                    break
+            except Exception as e:
+                logger.warning(f"Could not check GTT {gtt_id} for mandate {mandate['id']}: {e}")
+
+        if not triggered_by:
+            continue
+
+        # Calculate actual P&L
+        qty    = mandate.get("qty") or 0
+        entry  = mandate.get("entry") or 0
+        sl     = mandate.get("sl")    or entry
+        target = mandate.get("target") or entry
+
+        if triggered_by == "sl":
+            new_status = "STOPPED"
+            actual_pnl = round((sl - entry) * qty, 2)
+            other_field = "target_gtt_id"
+        else:
+            new_status = "COMPLETED"
+            actual_pnl = round((target - entry) * qty, 2)
+            other_field = "sl_gtt_id"
+
+        # Cancel the other leg
+        other_id = mandate.get(other_field)
+        if other_id:
+            try:
+                cancel_gtt(int(other_id))
+            except Exception as e:
+                logger.warning(f"Could not cancel other GTT {other_id}: {e}")
+
+        # Update the mandate
+        conn = get_connection()
+        try:
+            _execute(conn,
+                """UPDATE authorized_trades
+                   SET status = ?, actual_pnl = ?, updated_at = NOW()
+                   WHERE id = ?""",
+                (new_status, actual_pnl, mandate["id"]))
+            conn.commit()
+        finally:
+            conn.close()
+
+        logger.info(
+            f"Autopilot mandate settled: {mandate['symbol']} → {new_status} "
+            f"P&L=₹{actual_pnl:+,.2f} (trigger={triggered_by})"
+        )
+
+        # Notify
+        try:
+            icon  = "CheckCircle" if new_status == "COMPLETED" else "AlertCircle"
+            color = "#10B981"     if new_status == "COMPLETED" else "#EF4444"
+            insert_notification(
+                user_id=mandate["user_id"], type="trade",
+                title=f"Autopilot {'target hit' if new_status == 'COMPLETED' else 'stopped'}: {mandate['symbol']}",
+                message=f"{'Profit' if actual_pnl >= 0 else 'Loss'}: ₹{actual_pnl:+,.2f}",
+                icon=icon, color=color,
+            )
+        except Exception:
+            pass
+
+        settled.append({
+            "id": mandate["id"],
+            "symbol": mandate["symbol"],
+            "user_id": mandate["user_id"],
+            "status": new_status,
+            "actual_pnl": actual_pnl,
+            "trigger": triggered_by,
+        })
+
+    return settled
+
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
     load_dotenv()

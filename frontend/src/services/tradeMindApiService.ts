@@ -119,6 +119,40 @@ export interface SectorPerformance {
 }
 
 // ---------------------------------------------------------------------------
+// Autopilot types
+// ---------------------------------------------------------------------------
+
+export interface AuthorizedTrade {
+  id: number;
+  user_id: number;
+  symbol: string;
+  name: string;
+  sector: string;
+  signal: 'BUY' | 'SELL' | 'HOLD';
+  mode: 'PAPER' | 'LIVE';
+  qty: number;
+  amount: number;
+  entry: number;
+  target: number;
+  sl: number;
+  exp_profit: number;
+  max_loss: number;
+  cmp: number | null;
+  actual_pnl: number | null;
+  status: 'PENDING' | 'EXECUTED' | 'COMPLETED' | 'STOPPED';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutopilotStatus {
+  enabled: boolean;
+  capital: number;
+  active: number;
+  realized_pnl: number;
+  projected_profit: number;
+}
+
+// ---------------------------------------------------------------------------
 // API Service
 // ---------------------------------------------------------------------------
 
@@ -130,6 +164,7 @@ export const tradeMindApiService = createApi({
   tagTypes: [
     'User', 'Portfolio', 'Positions', 'Orders', 'Signals',
     'Market', 'Watchlist', 'Notifications', 'Settings', 'GTT', 'Sectors',
+    'Autopilot',
   ],
   endpoints: (builder) => ({
 
@@ -315,10 +350,39 @@ export const tradeMindApiService = createApi({
       keepUnusedDataFor: 60,
     }),
 
+    // ── Autopilot ─────────────────────────────────────────────────────────
+    getAutopilotStatus: builder.query<AutopilotStatus, number>({
+      query: (userId) => ({ url: '/api/autopilot/status', params: { user_id: userId } }),
+      providesTags: ['Autopilot'],
+      keepUnusedDataFor: 30,
+    }),
+    toggleAutopilot: builder.mutation<{ enabled: boolean }, number>({
+      query: (userId) => ({ url: '/api/autopilot/toggle', method: 'POST', data: { user_id: userId } }),
+      invalidatesTags: ['Autopilot'],
+    }),
+    getAuthorizedTrades: builder.query<{ data: AuthorizedTrade[]; total: number }, { userId: number; status?: string }>({
+      query: ({ userId, status }) => ({ url: '/api/autopilot/trades', params: { user_id: userId, ...(status && status !== 'All' ? { status } : {}) } }),
+      providesTags: ['Autopilot'],
+    }),
+    authorizeTradeAuto: builder.mutation<{ status: string; data: AuthorizedTrade }, Partial<AuthorizedTrade> & { user_id: number }>({
+      query: (data) => ({ url: '/api/autopilot/trades', method: 'POST', data }),
+      invalidatesTags: ['Autopilot'],
+    }),
+    revokeAuthorizedTrade: builder.mutation<{ status: string }, number>({
+      query: (id) => ({ url: `/api/autopilot/trades/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Autopilot'],
+    }),
+
     // ── Health ────────────────────────────────────────────────────────────
     getHealth: builder.query<{ status: string; market_open: boolean }, void>({
       query: () => ({ url: '/api/health' }),
       keepUnusedDataFor: 60,
+    }),
+
+    // ── Backtest / Model Performance ──────────────────────────────────────
+    getBacktestSummary: builder.query<any, void>({
+      query: () => ({ url: '/api/backtest/summary' }),
+      keepUnusedDataFor: 300,
     }),
   }),
 });
@@ -355,6 +419,12 @@ export const {
   useGetUserWatchlistNewsQuery, useGetUserWatchlistSentimentQuery,
   useGetStockNewsQuery, useGetMarketNewsQuery,
   useGetUserSignalHistoryQuery,
+  // Autopilot
+  useGetAutopilotStatusQuery, useToggleAutopilotMutation,
+  useGetAuthorizedTradesQuery, useAuthorizeTradeAutoMutation,
+  useRevokeAuthorizedTradeMutation,
   // Health
   useGetHealthQuery,
+  // Backtest
+  useGetBacktestSummaryQuery,
 } = tradeMindApiService;

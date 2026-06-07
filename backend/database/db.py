@@ -47,7 +47,7 @@ def _get_pool():
         from psycopg2 import pool as pg_pool
         _pool = pg_pool.ThreadedConnectionPool(
             minconn=2,
-            maxconn=10,
+            maxconn=30,
             host=PGHOST,
             port=PGPORT,
             dbname=PGDATABASE,

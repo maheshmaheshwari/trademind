@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Bookmark, AlertTriangle } from 'lucide-react';
-import { useLazyGetStockDetailQuery, useGetPositionsQuery, useExecuteSignalMutation } from '../services/tradeMindApiService';
+import { useLazyGetStockDetailQuery, useGetPositionsQuery, useExecuteSignalMutation, useAddToWatchlistMutation } from '../services/tradeMindApiService';
 import { useAuth } from '../AuthContext';
 import { useToast, symColor } from './ui';
 import { AreaChart } from './Charts';
@@ -157,6 +157,17 @@ function TradePanel({ data, position, onClose }: {
   const [qty, setQty]     = useState('');
   const [partialModal, setPartialModal] = useState<{ requested: number; available: number } | null>(null);
   const [executeSignalMut, { isLoading: busy }] = useExecuteSignalMutation();
+  const [addToWatchlistMut] = useAddToWatchlistMutation();
+
+  async function handleAddToWatchlist() {
+    if (!user) { toast({ type: 'info', title: `${data?.symbol ?? ''} added to watchlist` }); return; }
+    try {
+      await addToWatchlistMut({ userId: user.id, symbol: data?.symbol ?? '' }).unwrap();
+      toast({ type: 'success', title: `${data?.symbol ?? ''} added to watchlist` });
+    } catch {
+      toast({ type: 'error', title: 'Failed to add to watchlist' });
+    }
+  }
 
   const balance   = user?.virtual_balance ?? 0;
   const price     = data?.price ?? 0;
@@ -191,7 +202,7 @@ function TradePanel({ data, position, onClose }: {
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button
-            onClick={() => toast({ type: 'info', title: `${data?.symbol ?? ''} added to watchlist` })}
+            onClick={handleAddToWatchlist}
             style={ghostBtn}
           >
             <Bookmark size={17} /> Watchlist
@@ -411,7 +422,7 @@ function TradePanel({ data, position, onClose }: {
       {/* Action buttons */}
       <div style={{ display: 'flex', gap: 10 }}>
         <button
-          onClick={() => toast({ type: 'info', title: `${data?.symbol ?? ''} added to watchlist` })}
+          onClick={handleAddToWatchlist}
           style={ghostBtn}
         >
           <Bookmark size={17} /> Watchlist

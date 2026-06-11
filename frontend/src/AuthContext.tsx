@@ -11,6 +11,12 @@ interface User {
     win_count: number;
     loss_count: number;
     mode: string;
+    email?: string;
+    phone?: string;
+    avatar_url?: string;
+    totp_enabled?: boolean;
+    default_account?: string;
+    currency?: string;
 }
 
 interface AuthContextType {

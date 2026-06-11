@@ -177,6 +177,8 @@ from api.routes.orders import router as orders_router
 from api.routes.news import router as news_router, signals_router as user_signals_router
 from api.routes.autopilot import router as autopilot_router
 from api.routes.backtest import router as backtest_router
+from api.routes.auth_routes import router as auth_routes_router
+from api.routes.broker_routes import router as broker_routes_router
 app.include_router(portfolio_routes.router)
 app.include_router(trades_routes.router)
 app.include_router(trading_router)
@@ -187,6 +189,8 @@ app.include_router(news_router)
 app.include_router(user_signals_router)
 app.include_router(autopilot_router)
 app.include_router(backtest_router)
+app.include_router(auth_routes_router)
+app.include_router(broker_routes_router)
 
 
 # ==========================================
@@ -335,6 +339,66 @@ async def health_check():
         "timestamp": now.isoformat(),
         "version": "1.0.0",
     }
+
+
+# ==========================================
+# Market Status Endpoint
+# ==========================================
+@app.get("/api/market/status", tags=["Market"])
+async def market_status():
+    """
+    Returns current NSE/BSE market session status in IST.
+
+    session values: "pre-market" | "open" | "post-market" | "closed"
+    """
+    import pytz
+    tz_ist = pytz.timezone("Asia/Kolkata")
+    now_ist = datetime.now(tz=tz_ist)
+
+    weekday = now_ist.weekday()  # 0=Mon, 6=Sun
+    is_weekday = weekday < 5
+
+    h = now_ist.hour
+    m = now_ist.minute
+    time_minutes = h * 60 + m  # minutes since midnight
+
+    # Market windows (in minutes since midnight)
+    PRE_MARKET_OPEN  = 9 * 60          # 09:00
+    MARKET_OPEN      = 9 * 60 + 15     # 09:15
+    MARKET_CLOSE     = 15 * 60 + 30    # 15:30
+    POST_MARKET_END  = 16 * 60         # 16:00
+
+    if not is_weekday:
+        is_open = False
+        session = "closed"
+    elif time_minutes < PRE_MARKET_OPEN:
+        is_open = False
+        session = "closed"
+    elif time_minutes < MARKET_OPEN:
+        is_open = False
+        session = "pre-market"
+    elif time_minutes <= MARKET_CLOSE:
+        is_open = True
+        session = "open"
+    elif time_minutes <= POST_MARKET_END:
+        is_open = False
+        session = "post-market"
+    else:
+        is_open = False
+        session = "closed"
+
+    result = {
+        "is_open": is_open,
+        "current_time": now_ist.strftime("%H:%M:%S"),
+        "timezone": "IST",
+        "session": session,
+    }
+    if is_open:
+        result["next_close"] = "15:30"
+    else:
+        result["next_open"] = "09:15"
+
+    return result
 
 
 # ==========================================

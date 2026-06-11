@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Plus } from 'lucide-react';
-import { useLazyGetStocksQuery, useExecuteSignalMutation } from '../services/tradeMindApiService';
+import { useLazyGetStocksQuery, useExecuteSignalMutation, useAddPositionMutation } from '../services/tradeMindApiService';
 import { useToast, symColor } from './ui';
 import { useAuth } from '../AuthContext';
 import type { Stock } from '../types';
@@ -29,6 +29,7 @@ export function AddPositionModal({ onClose }: Props) {
 
   const [fetchStocks, { data: stockRes }] = useLazyGetStocksQuery();
   const [executeSignal] = useExecuteSignalMutation();
+  const [addPosition] = useAddPositionMutation();
   const opts: Stock[] = (stockRes as any)?.data ?? [];
 
   useEffect(() => {
@@ -66,19 +67,30 @@ export function AddPositionModal({ onClose }: Props) {
     setBusy(true);
     const investment = +qty * +price;
     try {
-      await executeSignal({
-        user_id: user.id,
-        symbol: sel.symbol,
-        name: sel.name,
-        investment_amount: investment,
-        buy_price: +price,
-        target_price: sel.target_price ?? +price * 1.05,
-        stop_loss: sel.stop_loss ?? +price * 0.95,
-        signal: sel.signal ?? 'BUY',
-        confidence: sel.confidence ?? 0,
-        horizon: sel.horizon ?? 'Unknown',
-        mode: mode === 'live' ? 'LIVE' : 'PAPER',
-      }).unwrap();
+      // Try the portfolio positions endpoint first; fall back to executeSignal
+      try {
+        await addPosition({
+          symbol: sel.symbol,
+          quantity: +qty,
+          buy_price: +price,
+          account_type: mode === 'live' ? 'LIVE' : 'PAPER',
+        }).unwrap();
+      } catch {
+        // Fallback to trading engine if portfolio endpoint not available
+        await executeSignal({
+          user_id: user.id,
+          symbol: sel.symbol,
+          name: sel.name,
+          investment_amount: investment,
+          buy_price: +price,
+          target_price: sel.target_price ?? +price * 1.05,
+          stop_loss: sel.stop_loss ?? +price * 0.95,
+          signal: sel.signal ?? 'BUY',
+          confidence: sel.confidence ?? 0,
+          horizon: sel.horizon ?? 'Unknown',
+          mode: mode === 'live' ? 'LIVE' : 'PAPER',
+        }).unwrap();
+      }
       toast({ type: 'success', title: 'Position added', msg: `${qty} × ${sel.symbol} @ ${inr(+price)} · ${mode === 'paper' ? 'Paper' : 'Live'} account` });
       onClose();
     } catch (e: unknown) {

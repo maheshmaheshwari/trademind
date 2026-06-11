@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGetMarketOverviewQuery, useGetMarketSectorsQuery } from '../services/tradeMindApiService';
 import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell } from '../components/ui';
 import { FlowBars, Sparkline } from '../components/Charts';
@@ -36,10 +36,39 @@ function IndexCard({ ix }: { ix: IndexData }) {
   );
 }
 
+function useIsMarketOpen(): boolean {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    function check() {
+      const now = new Date();
+      const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      const day = ist.getDay(); // 0=Sun, 6=Sat
+      const hm  = ist.getHours() * 60 + ist.getMinutes();
+      setOpen(day >= 1 && day <= 5 && hm >= 555 && hm < 930); // 9:15–15:30
+    }
+    check();
+    const id = setInterval(check, 30000);
+    return () => clearInterval(id);
+  }, []);
+  return open;
+}
+
 export default function MarketPage() {
   const { data: mktData, isLoading: loading } = useGetMarketOverviewQuery();
   const { data: sectorsData } = useGetMarketSectorsQuery();
   const [drawer, setDrawer] = useState<string | null>(null);
+  const [clockTime, setClockTime] = useState('');
+  const marketOpen = useIsMarketOpen();
+
+  useEffect(() => {
+    const tick = () => {
+      const ist = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });
+      setClockTime(ist);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const indices: IndexData[]    = (mktData as any)?.indices  ?? [];
   const fiiDii:  FIIDIIBar[]   = (mktData as any)?.fii_dii  ?? [];
@@ -69,10 +98,10 @@ export default function MarketPage() {
           <h1 className="font-bold tracking-tight m-0 text-ink" style={{ fontSize: 'calc(25px * var(--u))' }}>Market Overview</h1>
           <p className="text-ink-2 text-[13.5px] mt-1 m-0">Live indices, institutional flows &amp; sector rotation · NSE</p>
         </div>
-        <div className="flex items-center gap-2 h-9 px-[13px] rounded-full text-[12.5px] font-semibold border border-line text-gain bg-gain-soft">
-          <span className="w-2 h-2 rounded-full bg-[var(--green)] animate-pulse-dot" />
-          MARKET OPEN
-          <span className="text-ink-3 font-medium font-mono text-[11.5px]">15:24:08</span>
+        <div className={`flex items-center gap-2 h-9 px-[13px] rounded-full text-[12.5px] font-semibold border ${marketOpen ? 'border-line text-gain bg-gain-soft' : 'border-line text-ink-2 bg-surface-2'}`}>
+          <span className={`w-2 h-2 rounded-full ${marketOpen ? 'bg-[var(--green)] animate-pulse-dot' : 'bg-[var(--text-3)]'}`} />
+          {marketOpen ? 'MARKET OPEN' : 'MARKET CLOSED'}
+          <span className="text-ink-3 font-medium font-mono text-[11.5px]">{clockTime}</span>
         </div>
       </div>
 

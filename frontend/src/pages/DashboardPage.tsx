@@ -6,6 +6,7 @@ import { useToast } from '../components/ui';
 import {
   useGetPortfolioSummaryQuery, useGetTodayPnlQuery, useGetActionableSignalsQuery,
   useGetOrdersQuery, useGetPositionsQuery, useGetMarketOverviewQuery, useRefreshSignalsMutation,
+  useAddToWatchlistMutation,
 } from '../services/tradeMindApiService';
 import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell, Conf, DateComponent } from '../components/ui';
 import { AreaChart, Gauge, Sparkline } from '../components/Charts';
@@ -161,6 +162,7 @@ export default function DashboardPage() {
   const { data: posData,     isLoading: loadPos     } = useGetPositionsQuery({ userId: user?.id ?? 0, size: 1 }, { skip: !user });
   const { data: mktData,     isLoading: loadMkt     } = useGetMarketOverviewQuery();
   const [refreshSignals, { isLoading: refreshing }]   = useRefreshSignalsMutation();
+  const [addToWatchlistMut] = useAddToWatchlistMutation();
 
   const loading = loadPort || loadPnl || loadSignals || loadOrders || loadPos || loadMkt;
 
@@ -190,6 +192,13 @@ export default function DashboardPage() {
     } catch {
       toast({ type: 'error', title: 'Refresh failed' });
     }
+  }
+
+  async function handleSaveTopSignals() {
+    if (!user) return;
+    const top5 = (signals ?? []).slice(0, 5).map(s => s?.symbol).filter(Boolean) as string[];
+    await Promise.all(top5.map(sym => addToWatchlistMut({ userId: user.id, symbol: sym })));
+    toast({ type: 'success', title: 'Top 5 signals saved to your watchlist' });
   }
 
   const nifty    = indices?.[0];
@@ -223,7 +232,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => toast({ type: 'info', title: 'Added to Watchlist', msg: 'Top 5 signals saved to your watchlist' })}
+            onClick={handleSaveTopSignals}
             className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border border-line bg-surface-2 text-ink transition-colors hover:bg-surface-hover"
           >
             <Bookmark size={17} /> Add to Watchlist

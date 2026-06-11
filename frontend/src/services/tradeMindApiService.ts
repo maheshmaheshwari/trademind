@@ -19,6 +19,12 @@ export interface User {
   win_count: number;
   loss_count: number;
   mode: string;
+  email?: string;
+  phone?: string;
+  avatar_url?: string;
+  totp_enabled?: boolean;
+  default_account?: string;
+  currency?: string;
 }
 
 export interface PortfolioSummary {
@@ -174,7 +180,7 @@ export const tradeMindApiService = createApi({
   tagTypes: [
     'User', 'Portfolio', 'Positions', 'Orders', 'Signals',
     'Market', 'Watchlist', 'Notifications', 'Settings', 'GTT', 'Sectors',
-    'Autopilot',
+    'Autopilot', 'Brokers', 'Sessions', 'Preferences', 'NotifPreferences',
   ],
   endpoints: (builder) => ({
 
@@ -186,8 +192,77 @@ export const tradeMindApiService = createApi({
       query: (data) => ({ url: '/api/trading/register', method: 'POST', data }),
     }),
     getMe: builder.query<User, void>({
-      query: () => ({ url: '/api/trading/me' }),
+      query: () => ({ url: '/auth/me' }),
       providesTags: ['User'],
+    }),
+    updateMe: builder.mutation<User, { display_name?: string; email?: string; phone?: string }>({
+      query: (data) => ({ url: '/auth/me', method: 'PATCH', data }),
+      invalidatesTags: ['User'],
+    }),
+    changePassword: builder.mutation<{ status: string }, { current_password: string; new_password: string }>({
+      query: (data) => ({ url: '/auth/password/change', method: 'POST', data }),
+    }),
+    requestPasswordReset: builder.mutation<{ status: string }, { email: string }>({
+      query: (data) => ({ url: '/auth/password/reset-request', method: 'POST', data }),
+    }),
+    confirmPasswordReset: builder.mutation<{ status: string }, { email: string; otp: string; new_password: string }>({
+      query: (data) => ({ url: '/auth/password/reset-confirm', method: 'POST', data }),
+    }),
+    getPreferences: builder.query<{ default_account?: string; currency?: string }, void>({
+      query: () => ({ url: '/auth/preferences' }),
+      providesTags: ['Preferences'],
+    }),
+    updatePreferences: builder.mutation<{ status: string }, { default_account?: string; currency?: string }>({
+      query: (data) => ({ url: '/auth/preferences', method: 'PUT', data }),
+      invalidatesTags: ['Preferences'],
+    }),
+    getNotifPreferences: builder.query<Record<string, boolean>, void>({
+      query: () => ({ url: '/api/notifications/preferences' }),
+      providesTags: ['NotifPreferences'],
+    }),
+    updateNotifPreferences: builder.mutation<{ status: string }, Record<string, boolean>>({
+      query: (data) => ({ url: '/api/notifications/preferences', method: 'PUT', data }),
+      invalidatesTags: ['NotifPreferences'],
+    }),
+    getBrokers: builder.query<{ data: Array<{ name: string; broker: string; connected: boolean; desc?: string }> }, void>({
+      query: () => ({ url: '/api/brokers' }),
+      providesTags: ['Brokers'],
+    }),
+    connectBrokerAngelOne: builder.mutation<{ status: string }, { client_id: string; password: string; totp: string }>({
+      query: (data) => ({ url: '/api/brokers/angel-one/connect', method: 'POST', data }),
+      invalidatesTags: ['Brokers'],
+    }),
+    disconnectBroker: builder.mutation<{ status: string }, string>({
+      query: (broker) => ({ url: `/api/brokers/${broker}/disconnect`, method: 'DELETE' }),
+      invalidatesTags: ['Brokers'],
+    }),
+    totpSetup: builder.mutation<{ qr_uri: string; secret: string }, void>({
+      query: () => ({ url: '/auth/totp/setup', method: 'POST', data: {} }),
+    }),
+    totpConfirm: builder.mutation<{ status: string }, { code: string }>({
+      query: (data) => ({ url: '/auth/totp/confirm', method: 'POST', data }),
+      invalidatesTags: ['User'],
+    }),
+    totpDisable: builder.mutation<{ status: string }, { code: string }>({
+      query: (data) => ({ url: '/auth/totp/disable', method: 'POST', data }),
+      invalidatesTags: ['User'],
+    }),
+    getSessions: builder.query<{ data: Array<{ id: string; device: string; location?: string; last_active: string; current: boolean }> }, void>({
+      query: () => ({ url: '/auth/sessions' }),
+      providesTags: ['Sessions'],
+    }),
+    revokeSession: builder.mutation<{ status: string }, string>({
+      query: (session_id) => ({ url: `/auth/sessions/${session_id}`, method: 'DELETE' }),
+      invalidatesTags: ['Sessions'],
+    }),
+    revokeAllSessions: builder.mutation<{ status: string }, void>({
+      query: () => ({ url: '/auth/sessions', method: 'DELETE' }),
+      invalidatesTags: ['Sessions'],
+    }),
+    getMarketStatus: builder.query<{ open: boolean; next_open?: string; next_close?: string }, void>({
+      query: () => ({ url: '/api/market/status' }),
+      keepUnusedDataFor: 60,
+      // pollingInterval set at call-site via refetchOnFocus / pollingInterval option
     }),
 
     // ── Portfolio / Dashboard ─────────────────────────────────────────────
@@ -201,6 +276,10 @@ export const tradeMindApiService = createApi({
     }),
 
     // ── Positions & Orders ────────────────────────────────────────────────
+    addPosition: builder.mutation<{ status: string; data: OpenPosition }, { symbol: string; quantity: number; buy_price: number; account_type?: string; notes?: string }>({
+      query: (data) => ({ url: '/api/portfolio/positions', method: 'POST', data }),
+      invalidatesTags: ['Positions', 'Portfolio'],
+    }),
     getPositions: builder.query<{ data: OpenPosition[]; total: number }, { userId: number; size?: number }>({
       query: ({ userId, size = 100 }) => ({ url: `/api/trading/positions/${userId}`, params: { size } }),
       providesTags: ['Positions'],
@@ -400,9 +479,19 @@ export const tradeMindApiService = createApi({
 export const {
   // Auth
   useLoginMutation, useRegisterMutation, useGetMeQuery,
+  useUpdateMeMutation, useChangePasswordMutation,
+  useRequestPasswordResetMutation, useConfirmPasswordResetMutation,
+  useGetPreferencesQuery, useUpdatePreferencesMutation,
+  useGetNotifPreferencesQuery, useUpdateNotifPreferencesMutation,
+  useGetBrokersQuery, useConnectBrokerAngelOneMutation,
+  useDisconnectBrokerMutation,
+  useTotpSetupMutation, useTotpConfirmMutation, useTotpDisableMutation,
+  useGetSessionsQuery, useRevokeSessionMutation, useRevokeAllSessionsMutation,
+  useGetMarketStatusQuery,
   // Portfolio
   useGetPortfolioSummaryQuery, useGetTodayPnlQuery,
   // Positions & Orders
+  useAddPositionMutation,
   useGetPositionsQuery, useGetOrdersQuery,
   useSquareOffMutation, useSquareOffAllMutation, useExecuteSignalMutation,
   // Signals

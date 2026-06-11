@@ -285,6 +285,72 @@ CREATE INDEX IF NOT EXISTS idx_sched_log_status ON scheduler_log (status, schedu
 CREATE INDEX IF NOT EXISTS idx_sched_log_job    ON scheduler_log (job_id, scheduled_at DESC);
 """
 
+SQL_PASSWORD_RESET_OTPS = """
+CREATE TABLE IF NOT EXISTS password_reset_otps (
+  id         SERIAL PRIMARY KEY,
+  email      TEXT NOT NULL,
+  otp_hash   TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used       BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
+SQL_USER_SESSIONS = """
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  token_hash  TEXT NOT NULL,
+  device      TEXT,
+  ip_address  TEXT,
+  location    TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  last_seen   TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
+SQL_NOTIFICATION_PREFERENCES = """
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  signal_change  BOOLEAN DEFAULT TRUE,
+  price_alert    BOOLEAN DEFAULT TRUE,
+  trade_executed BOOLEAN DEFAULT TRUE,
+  news_sentiment BOOLEAN DEFAULT FALSE,
+  eod_summary    BOOLEAN DEFAULT TRUE,
+  weekly_report  BOOLEAN DEFAULT FALSE,
+  ch_email       BOOLEAN DEFAULT TRUE,
+  ch_push        BOOLEAN DEFAULT TRUE,
+  ch_sms         BOOLEAN DEFAULT FALSE,
+  updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
+SQL_BROKER_CONNECTIONS = """
+CREATE TABLE IF NOT EXISTS broker_connections (
+  id             SERIAL PRIMARY KEY,
+  user_id        INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  broker         TEXT NOT NULL,
+  access_token   TEXT,
+  refresh_token  TEXT,
+  client_id      TEXT,
+  expires_at     TIMESTAMPTZ,
+  connected      BOOLEAN DEFAULT FALSE,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, broker)
+);
+"""
+
+# ALTER TABLE statements to add new columns to the existing users table (idempotent)
+SQL_USER_ALTER = """
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS default_account TEXT DEFAULT 'PAPER';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR';
+"""
+
 SQL_MARKET_OVERVIEW = """
 CREATE TABLE IF NOT EXISTS market_overview (
     date                    DATE PRIMARY KEY,
@@ -513,8 +579,20 @@ def init_timescale(conn) -> None:
         SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS,
         SQL_AUTHORIZED_TRADES, SQL_AUTOPILOT_SETTINGS, SQL_MARKET_OVERVIEW,
         SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG,
+        SQL_PASSWORD_RESET_OTPS, SQL_USER_SESSIONS,
+        SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
     ]:
         cur.execute(sql)
+
+    # Add new columns to users table (idempotent ALTER TABLE)
+    for stmt in SQL_USER_ALTER.strip().split("\n"):
+        stmt = stmt.strip()
+        if stmt:
+            try:
+                cur.execute(stmt)
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"ALTER TABLE users: {e}")
 
     # Hypertable candidates
     for sql in [SQL_PRICES, SQL_TECHNICAL_INDICATORS, SQL_NEWS_SENTIMENT]:

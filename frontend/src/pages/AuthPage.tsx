@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLoginMutation, useRegisterMutation } from '../services/tradeMindApiService';
+import { useLoginMutation, useRegisterMutation, useRequestPasswordResetMutation, useConfirmPasswordResetMutation } from '../services/tradeMindApiService';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../ThemeContext';
+import { useToast } from '../components/ui';
 
 function MiniSpark({ pts, color, w = 70, h = 26 }: { pts: number[]; color: string; w?: number; h?: number }) {
   const mn = Math.min(...pts), mx = Math.max(...pts), rng = mx - mn || 1;
@@ -75,6 +76,7 @@ export default function AuthPage() {
   const navigate              = useNavigate();
   const { login }             = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const toast                 = useToast();
 
   const [mode,     setMode]     = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
@@ -83,9 +85,54 @@ export default function AuthPage() {
   const [err,      setErr]      = useState('');
   const [remember, setRemember] = useState(true);
 
+  // Forgot password state
+  const [forgotStep,      setForgotStep]      = useState<0 | 1 | 2>(0);
+  const [forgotEmail,     setForgotEmail]     = useState('');
+  const [forgotOtp,       setForgotOtp]       = useState('');
+  const [forgotNewPw,     setForgotNewPw]     = useState('');
+  const [forgotConfirmPw, setForgotConfirmPw] = useState('');
+  const [forgotErr,       setForgotErr]       = useState('');
+  const [forgotSuccess,   setForgotSuccess]   = useState(false);
+
   const [loginMutation,    { isLoading: loggingIn }]    = useLoginMutation();
   const [registerMutation, { isLoading: registering }]  = useRegisterMutation();
+  const [requestReset,     { isLoading: sendingOtp }]   = useRequestPasswordResetMutation();
+  const [confirmReset,     { isLoading: confirmingReset }] = useConfirmPasswordResetMutation();
   const busy = loggingIn || registering;
+
+  const handleGoogleLogin = () => {
+    toast({ type: 'info', title: 'Google OAuth coming soon' });
+  };
+
+  async function handleForgotSendOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setForgotErr('');
+    if (!forgotEmail.trim()) { setForgotErr('Please enter your email'); return; }
+    try {
+      await requestReset({ email: forgotEmail.trim() }).unwrap();
+      setForgotStep(2);
+    } catch {
+      setForgotErr('Failed to send OTP. Please check your email.');
+    }
+  }
+
+  async function handleForgotConfirm(e: React.FormEvent) {
+    e.preventDefault();
+    setForgotErr('');
+    if (forgotNewPw !== forgotConfirmPw) { setForgotErr('Passwords do not match'); return; }
+    if (forgotOtp.length !== 6) { setForgotErr('OTP must be 6 digits'); return; }
+    try {
+      await confirmReset({ email: forgotEmail, otp: forgotOtp, new_password: forgotNewPw }).unwrap();
+      setForgotSuccess(true);
+    } catch {
+      setForgotErr('Invalid OTP or expired. Please try again.');
+    }
+  }
+
+  function closeForgot() {
+    setForgotStep(0); setForgotEmail(''); setForgotOtp('');
+    setForgotNewPw(''); setForgotConfirmPw(''); setForgotErr(''); setForgotSuccess(false);
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -213,7 +260,7 @@ export default function AuthPage() {
             {/* Google button */}
             <button
               type="button"
-              onClick={handleSubmit as unknown as React.MouseEventHandler}
+              onClick={handleGoogleLogin}
               className="w-full h-[46px] mb-[18px] inline-flex items-center justify-center gap-2 rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border border-line bg-surface-2 text-ink transition-colors hover:bg-surface-hover hover:border-line-strong"
             >
               <GoogleIcon size={18} />Continue with Google
@@ -294,7 +341,7 @@ export default function AuthPage() {
                     />
                     Remember me
                   </label>
-                  <a className="text-[12.5px] text-accent-2 cursor-pointer no-underline font-medium">
+                  <a className="text-[12.5px] text-accent-2 cursor-pointer no-underline font-medium" onClick={(e) => { e.preventDefault(); setForgotStep(1); }}>
                     Forgot password?
                   </a>
                 </div>
@@ -329,6 +376,78 @@ export default function AuthPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Forgot Password Modal ── */}
+      {forgotStep > 0 && (
+        <div className="fixed inset-0 z-[200] grid place-items-center p-5">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={closeForgot} />
+          <div className="relative z-[201] w-full max-w-[380px] bg-bg border border-line rounded-[16px] shadow-[0_24px_60px_rgba(0,0,0,.5)] p-7 flex flex-col gap-5">
+            <div className="flex items-center justify-between">
+              <h3 className="m-0 text-[17px] font-bold text-ink">
+                {forgotSuccess ? 'Password reset!' : forgotStep === 1 ? 'Forgot password' : 'Enter OTP'}
+              </h3>
+              <button onClick={closeForgot} className="w-8 h-8 rounded-[8px] border border-line bg-transparent text-ink-2 grid place-items-center cursor-pointer hover:bg-surface-hover">
+                <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            {forgotSuccess ? (
+              <div className="flex flex-col items-center gap-4 py-2">
+                <div className="w-14 h-14 rounded-full bg-[var(--green-soft)] grid place-items-center">
+                  <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                </div>
+                <p className="text-center text-[13.5px] text-ink-2">Your password has been reset successfully. You can now sign in with your new password.</p>
+                <button onClick={closeForgot} className="h-[42px] px-6 rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border-none bg-[var(--accent)] text-white w-full" style={{ boxShadow: '0 4px 14px rgba(59,130,246,.32)' }}>
+                  Back to Sign In
+                </button>
+              </div>
+            ) : forgotStep === 1 ? (
+              <form onSubmit={handleForgotSendOtp} className="flex flex-col gap-4">
+                <p className="text-[13px] text-ink-2 m-0">Enter your registered email address and we'll send you a one-time password.</p>
+                {forgotErr && <div className="text-loss text-[12.5px] flex items-center gap-2"><svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>{forgotErr}</div>}
+                <div className="flex flex-col gap-[7px]">
+                  <label className="text-[12.5px] font-semibold text-ink-2">Email address</label>
+                  <input
+                    type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
+                    placeholder="you@example.com" autoFocus
+                    className="h-11 px-[13px] rounded-[11px] border border-line bg-surface-2 text-ink font-sans text-sm outline-none w-full box-border transition-colors focus:border-accent"
+                  />
+                </div>
+                <button type="submit" disabled={sendingOtp} className={`h-[44px] rounded-[11px] font-sans text-[13.5px] font-semibold border-none bg-[var(--accent)] text-white transition-opacity ${sendingOtp ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`} style={{ boxShadow: '0 4px 14px rgba(59,130,246,.32)' }}>
+                  {sendingOtp ? 'Sending…' : 'Send OTP'}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleForgotConfirm} className="flex flex-col gap-4">
+                <p className="text-[13px] text-ink-2 m-0">Enter the 6-digit OTP sent to <b>{forgotEmail}</b> and set your new password.</p>
+                {forgotErr && <div className="text-loss text-[12.5px] flex items-center gap-2"><svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>{forgotErr}</div>}
+                <div className="flex flex-col gap-[7px]">
+                  <label className="text-[12.5px] font-semibold text-ink-2">OTP (6 digits)</label>
+                  <input
+                    type="text" inputMode="numeric" maxLength={6} value={forgotOtp} onChange={e => setForgotOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="123456" autoFocus
+                    className="h-11 px-[13px] rounded-[11px] border border-line bg-surface-2 text-ink font-sans text-sm outline-none w-full box-border transition-colors focus:border-accent tracking-[0.3em] font-mono text-center"
+                  />
+                </div>
+                <div className="flex flex-col gap-[7px]">
+                  <label className="text-[12.5px] font-semibold text-ink-2">New password</label>
+                  <input type="password" value={forgotNewPw} onChange={e => setForgotNewPw(e.target.value)} placeholder="••••••••" className="h-11 px-[13px] rounded-[11px] border border-line bg-surface-2 text-ink font-sans text-sm outline-none w-full box-border transition-colors focus:border-accent" />
+                </div>
+                <div className="flex flex-col gap-[7px]">
+                  <label className="text-[12.5px] font-semibold text-ink-2">Confirm new password</label>
+                  <input type="password" value={forgotConfirmPw} onChange={e => setForgotConfirmPw(e.target.value)} placeholder="••••••••" className="h-11 px-[13px] rounded-[11px] border border-line bg-surface-2 text-ink font-sans text-sm outline-none w-full box-border transition-colors focus:border-accent" />
+                </div>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setForgotStep(1)} className="flex-1 h-[44px] rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border border-line bg-surface-2 text-ink">Back</button>
+                  <button type="submit" disabled={confirmingReset} className={`flex-[2] h-[44px] rounded-[11px] font-sans text-[13.5px] font-semibold border-none bg-[var(--accent)] text-white transition-opacity ${confirmingReset ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`} style={{ boxShadow: '0 4px 14px rgba(59,130,246,.32)' }}>
+                    {confirmingReset ? 'Resetting…' : 'Reset Password'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Responsive: single column below 860px ── */}
       <style>{`

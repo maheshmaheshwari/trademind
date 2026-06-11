@@ -6,6 +6,21 @@ import { useToast } from '../components/ui';
 import {
   useGetRiskSettingsQuery,
   useUpdateRiskSettingsMutation,
+  useGetMeQuery,
+  useUpdateMeMutation,
+  useChangePasswordMutation,
+  useGetPreferencesQuery,
+  useUpdatePreferencesMutation,
+  useGetNotifPreferencesQuery,
+  useUpdateNotifPreferencesMutation,
+  useGetBrokersQuery,
+  useConnectBrokerAngelOneMutation,
+  useDisconnectBrokerMutation,
+  useTotpSetupMutation,
+  useTotpConfirmMutation,
+  useTotpDisableMutation,
+  useGetSessionsQuery,
+  useRevokeSessionMutation,
 } from '../services/tradeMindApiService';
 import { User, Link, Bell, Palette, Shield, CheckCircle, Loader2, ExternalLink } from 'lucide-react';
 
@@ -83,18 +98,56 @@ type TabId = typeof TABS[number]['id'];
 
 const ACCENT_PRESETS = ['#3B82F6', '#8B5CF6', '#14B8A6', '#F59E0B', '#EC4899', '#10B981'];
 
-const BROKERS = [
-  { name: 'Angel One', desc: 'SmartAPI · Connected', logo: '🏦', connected: true },
-  { name: 'Zerodha',   desc: 'Kite Connect · Not connected', logo: '📈', connected: false },
-  { name: 'Upstox',    desc: 'v2 API · Not connected', logo: '🚀', connected: false },
-  { name: 'Groww',     desc: 'Partner API · Not connected', logo: '🌱', connected: false },
-];
-
 const inputCls = 'h-11 px-[13px] rounded-[11px] border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] font-sans text-sm outline-none w-full box-border transition-colors focus:border-[var(--accent)]';
 
 // ── Tab panels ───────────────────────────────────────────────────────────────
 
 function ProfileTab({ user }: { user: any }) {
+  const toast = useToast();
+  const { data: meData } = useGetMeQuery();
+  const { data: prefData } = useGetPreferencesQuery();
+  const [updateMe, { isLoading: savingProfile }] = useUpdateMeMutation();
+  const [updatePreferences] = useUpdatePreferencesMutation();
+
+  const [displayName, setDisplayName] = useState('');
+  const [email,       setEmail]       = useState('');
+  const [phone,       setPhone]       = useState('');
+  const [defaultAcct, setDefaultAcct] = useState<'PAPER' | 'LIVE'>('PAPER');
+
+  useEffect(() => {
+    const src = meData ?? user;
+    if (src) {
+      setDisplayName(src?.display_name ?? '');
+      setEmail(src?.email ?? '');
+      setPhone(src?.phone ?? '');
+    }
+  }, [meData, user]);
+
+  useEffect(() => {
+    if (prefData?.default_account) {
+      setDefaultAcct((prefData.default_account as 'PAPER' | 'LIVE') ?? 'PAPER');
+    }
+  }, [prefData]);
+
+  async function handleSaveProfile() {
+    try {
+      await updateMe({ display_name: displayName, email, phone }).unwrap();
+      toast({ type: 'success', title: 'Profile saved', msg: 'Your profile has been updated' });
+    } catch {
+      toast({ type: 'error', title: 'Save failed', msg: 'Could not update profile' });
+    }
+  }
+
+  async function handleAcctChange(val: 'PAPER' | 'LIVE') {
+    setDefaultAcct(val);
+    try {
+      await updatePreferences({ default_account: val }).unwrap();
+      toast({ type: 'success', title: 'Preference saved' });
+    } catch {
+      toast({ type: 'error', title: 'Save failed' });
+    }
+  }
+
   return (
     <div className="flex flex-col gap-[calc(16px*var(--u))]">
       <SectionCard>
@@ -102,25 +155,42 @@ function ProfileTab({ user }: { user: any }) {
         <SectionBody>
           <div className="flex items-center gap-4 py-5 border-b border-[var(--border)]">
             <div className="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500 to-[var(--accent)] grid place-items-center font-bold text-[22px] text-white flex-shrink-0">
-              {user?.display_name?.split(' ')?.map((w: string) => w?.[0] ?? '').join('').slice(0, 2).toUpperCase() ?? 'U'}
+              {(meData ?? user)?.display_name?.split(' ')?.map((w: string) => w?.[0] ?? '').join('').slice(0, 2).toUpperCase() ?? 'U'}
             </div>
             <div>
-              <p className="text-[14px] font-semibold text-[var(--text)] m-0">{user?.display_name ?? 'User'}</p>
-              <p className="text-[12.5px] text-[var(--text-3)] m-0">@{user?.username}</p>
+              <p className="text-[14px] font-semibold text-[var(--text)] m-0">{(meData ?? user)?.display_name ?? 'User'}</p>
+              <p className="text-[12.5px] text-[var(--text-3)] m-0">@{(meData ?? user)?.username}</p>
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-5">
-            {[
-              ['Full Name',    user?.display_name ?? ''],
-              ['Username',     user?.username ?? ''],
-              ['Email',        'maheshmaheshwari983@gmail.com'],
-              ['Phone',        '+91 ··········'],
-            ].map(([label, val]) => (
-              <div key={label} className="flex flex-col gap-[7px]">
-                <label className="text-[12.5px] font-semibold text-[var(--text-2)]">{label}</label>
-                <input defaultValue={val} className={inputCls} readOnly={label === 'Username'} />
-              </div>
-            ))}
+            <div className="flex flex-col gap-[7px]">
+              <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Full Name</label>
+              <input value={displayName} onChange={e => setDisplayName(e.target.value)} className={inputCls} />
+            </div>
+            <div className="flex flex-col gap-[7px]">
+              <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Username</label>
+              <input defaultValue={(meData ?? user)?.username ?? ''} className={inputCls} readOnly />
+            </div>
+            <div className="flex flex-col gap-[7px]">
+              <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} placeholder="you@example.com" />
+            </div>
+            <div className="flex flex-col gap-[7px]">
+              <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Phone</label>
+              <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} className={inputCls} placeholder="+91 9876543210" />
+            </div>
+          </div>
+          <div className="flex justify-end pb-4">
+            <button
+              type="button"
+              onClick={handleSaveProfile}
+              disabled={savingProfile}
+              className={`h-10 px-6 rounded-[11px] font-sans text-[13.5px] font-semibold border-none bg-[var(--accent)] text-white inline-flex items-center gap-2 transition-opacity ${savingProfile ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
+              style={{ boxShadow: '0 4px 14px rgba(59,130,246,.32)' }}
+            >
+              {savingProfile ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle size={15} />}
+              {savingProfile ? 'Saving…' : 'Save Changes'}
+            </button>
           </div>
         </SectionBody>
       </SectionCard>
@@ -129,7 +199,7 @@ function ProfileTab({ user }: { user: any }) {
         <SectionHead title="Trading Preferences" />
         <SectionBody>
           <PrefRow label="Default account" sub="Which account new trades are placed on">
-            <Seg options={['PAPER', 'LIVE']} value="PAPER" onChange={() => {}} />
+            <Seg options={['PAPER', 'LIVE'] as const} value={defaultAcct} onChange={handleAcctChange} />
           </PrefRow>
           <PrefRow label="Currency" sub="Display currency for prices and P&L">
             <span className="inline-flex items-center h-9 px-3 rounded-[10px] bg-[var(--surface-2)] border border-[var(--border)] text-[13px] font-semibold text-[var(--text)]">
@@ -142,35 +212,143 @@ function ProfileTab({ user }: { user: any }) {
   );
 }
 
+// ── Angel One connect modal ──────────────────────────────────────────────────
+
+function AngelOneModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const toast = useToast();
+  const [clientId, setClientId] = useState('');
+  const [password, setPassword] = useState('');
+  const [totp,     setTotp]     = useState('');
+  const [connectBroker, { isLoading }] = useConnectBrokerAngelOneMutation();
+
+  async function handleConnect(e: React.FormEvent) {
+    e.preventDefault();
+    if (!clientId.trim() || !password || !totp) {
+      toast({ type: 'error', title: 'All fields required' }); return;
+    }
+    try {
+      await connectBroker({ client_id: clientId.trim(), password, totp }).unwrap();
+      toast({ type: 'success', title: 'Angel One connected!' });
+      onSuccess();
+      onClose();
+    } catch {
+      toast({ type: 'error', title: 'Connection failed', msg: 'Check your credentials and try again' });
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] grid place-items-center p-5">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-[201] w-full max-w-[380px] bg-[var(--surface)] border border-[var(--border-strong)] rounded-[16px] shadow-[var(--shadow-lg)] p-6 flex flex-col gap-5">
+        <div className="flex items-center justify-between">
+          <h3 className="m-0 text-[16px] font-bold text-[var(--text)]">Connect Angel One</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-[8px] border border-[var(--border)] bg-transparent text-[var(--text-2)] grid place-items-center cursor-pointer">
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <form onSubmit={handleConnect} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-[6px]">
+            <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Client ID</label>
+            <input value={clientId} onChange={e => setClientId(e.target.value)} placeholder="A1234567" className={inputCls} autoFocus />
+          </div>
+          <div className="flex flex-col gap-[6px]">
+            <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Password</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" className={inputCls} />
+          </div>
+          <div className="flex flex-col gap-[6px]">
+            <label className="text-[12.5px] font-semibold text-[var(--text-2)]">TOTP (from your authenticator app)</label>
+            <input type="text" inputMode="numeric" maxLength={6} value={totp} onChange={e => setTotp(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" className={`${inputCls} font-mono tracking-[0.3em] text-center`} />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 h-10 rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)]">Cancel</button>
+            <button type="submit" disabled={isLoading} className={`flex-[2] h-10 rounded-[11px] font-sans text-[13.5px] font-semibold border-none bg-[var(--accent)] text-white inline-flex items-center justify-center gap-2 transition-opacity ${isLoading ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`} style={{ boxShadow: '0 4px 14px rgba(59,130,246,.32)' }}>
+              {isLoading ? <Loader2 size={15} className="animate-spin" /> : null}
+              {isLoading ? 'Connecting…' : 'Connect'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function BrokersTab() {
+  const toast = useToast();
+  const { data: brokersData, refetch: refetchBrokers } = useGetBrokersQuery();
+  const [disconnectBroker] = useDisconnectBrokerMutation();
+  const [angelModal, setAngelModal] = useState(false);
+
+  const brokers = (brokersData as any)?.data ?? [];
+
+  // Fallback static list merged with API data
+  const STATIC_BROKERS = [
+    { name: 'Angel One', broker: 'angel', desc: 'SmartAPI', logo: '🏦' },
+    { name: 'Zerodha',   broker: 'zerodha', desc: 'Kite Connect', logo: '📈' },
+    { name: 'Upstox',    broker: 'upstox',  desc: 'v2 API', logo: '🚀' },
+    { name: 'Groww',     broker: 'groww',   desc: 'Partner API', logo: '🌱' },
+  ];
+
+  const merged = STATIC_BROKERS.map(sb => {
+    const apiEntry = (brokers ?? []).find((b: any) => b?.broker === sb.broker);
+    return { ...sb, connected: apiEntry?.connected ?? false };
+  });
+
+  async function handleDisconnect(broker: string) {
+    try {
+      await disconnectBroker(broker).unwrap();
+      toast({ type: 'success', title: 'Broker disconnected' });
+      refetchBrokers();
+    } catch {
+      toast({ type: 'error', title: 'Disconnect failed' });
+    }
+  }
+
   return (
     <div className="flex flex-col gap-[calc(16px*var(--u))]">
+      {angelModal && (
+        <AngelOneModal onClose={() => setAngelModal(false)} onSuccess={refetchBrokers} />
+      )}
       <SectionCard>
         <SectionHead title="Connected Brokers" sub="Link your broker accounts for live order execution" />
         <SectionBody>
           <div className="flex flex-col gap-3 py-4">
-            {BROKERS.map(b => (
-              <div key={b.name} className="flex items-center justify-between gap-4 p-[13px] rounded-[var(--radius-sm)] bg-[var(--surface-2)] border border-[var(--border)]">
-                <div className="flex items-center gap-3">
-                  <div className="w-[42px] h-[42px] rounded-[11px] bg-[var(--surface)] border border-[var(--border)] grid place-items-center text-xl flex-shrink-0">
-                    {b.logo}
+            {(merged ?? []).map(b => {
+              const isZerodhaOrUpstox = b?.broker === 'zerodha' || b?.broker === 'upstox' || b?.broker === 'groww';
+              return (
+                <div key={b?.name} className="flex items-center justify-between gap-4 p-[13px] rounded-[var(--radius-sm)] bg-[var(--surface-2)] border border-[var(--border)]">
+                  <div className="flex items-center gap-3">
+                    <div className="w-[42px] h-[42px] rounded-[11px] bg-[var(--surface)] border border-[var(--border)] grid place-items-center text-xl flex-shrink-0">
+                      {b?.logo}
+                    </div>
+                    <div>
+                      <div className="text-[13.5px] font-semibold text-[var(--text)]">{b?.name}</div>
+                      <div className="text-[12px] text-[var(--text-3)]">
+                        {b?.desc} · {b?.connected ? 'Connected' : 'Not connected'}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-[13.5px] font-semibold text-[var(--text)]">{b.name}</div>
-                    <div className="text-[12px] text-[var(--text-3)]">{b.desc}</div>
-                  </div>
+                  {isZerodhaOrUpstox ? (
+                    <span className="inline-flex items-center h-8 px-3 rounded-[9px] text-[12px] font-semibold bg-[var(--surface-3)] text-[var(--text-3)] border border-[var(--border)]">
+                      Coming Soon
+                    </span>
+                  ) : b?.connected ? (
+                    <button
+                      onClick={() => handleDisconnect(b?.broker ?? '')}
+                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[9px] text-[12.5px] font-semibold border cursor-pointer transition-colors bg-[var(--green-soft)] text-[var(--green)] border-transparent hover:bg-[var(--red-soft)] hover:text-[var(--red)]"
+                    >
+                      <CheckCircle size={13} /> Connected
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => { if (b?.broker === 'angel') setAngelModal(true); }}
+                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[9px] text-[12.5px] font-semibold border cursor-pointer transition-colors bg-[var(--surface)] text-[var(--text-2)] border-[var(--border)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+                    >
+                      <ExternalLink size={13} /> Connect
+                    </button>
+                  )}
                 </div>
-                <button
-                  className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-[9px] text-[12.5px] font-semibold border cursor-pointer transition-colors ${
-                    b.connected
-                      ? 'bg-[var(--green-soft)] text-[var(--green)] border-transparent hover:bg-[var(--red-soft)] hover:text-[var(--red)]'
-                      : 'bg-[var(--surface)] text-[var(--text-2)] border-[var(--border)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]'
-                  }`}
-                >
-                  {b.connected ? <><CheckCircle size={13} /> Connected</> : <><ExternalLink size={13} /> Connect</>}
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </SectionBody>
       </SectionCard>
@@ -179,14 +357,51 @@ function BrokersTab() {
 }
 
 function NotificationsTab() {
-  const [prefs, setPrefs] = useState({
-    signal_change: true, price_alert: true, trade_executed: true, news_sentiment: false,
-    eod_summary: true, weekly_report: false,
-  });
-  const [channels, setChannels] = useState({ email: true, push: true, sms: false });
+  const toast = useToast();
+  const { data: apiPrefs } = useGetNotifPreferencesQuery();
+  const [updateNotifPrefs] = useUpdateNotifPreferencesMutation();
 
-  const toggle = (k: keyof typeof prefs) => setPrefs(p => ({ ...p, [k]: !p[k] }));
-  const toggleCh = (k: keyof typeof channels) => setChannels(c => ({ ...c, [k]: !c[k] }));
+  const DEFAULT_PREFS = {
+    signal_change: true, price_alert: true, trade_executed: true,
+    news_sentiment: false, eod_summary: true, weekly_report: false,
+  };
+  const DEFAULT_CHANNELS = { email: true, push: true, sms: false };
+
+  const [prefs,    setPrefs]    = useState<Record<string, boolean>>(DEFAULT_PREFS);
+  const [channels, setChannels] = useState<Record<string, boolean>>(DEFAULT_CHANNELS);
+
+  useEffect(() => {
+    if (!apiPrefs) return;
+    const p: Record<string, boolean> = {};
+    const c: Record<string, boolean> = {};
+    Object.keys(DEFAULT_PREFS).forEach(k => { p[k] = (apiPrefs as any)?.[k] ?? DEFAULT_PREFS[k as keyof typeof DEFAULT_PREFS]; });
+    Object.keys(DEFAULT_CHANNELS).forEach(k => { c[k] = (apiPrefs as any)?.[`channel_${k}`] ?? DEFAULT_CHANNELS[k as keyof typeof DEFAULT_CHANNELS]; });
+    setPrefs(p);
+    setChannels(c);
+  }, [apiPrefs]);
+
+  async function savePrefs(updated: Record<string, boolean>) {
+    try {
+      await updateNotifPrefs(updated).unwrap();
+      toast({ type: 'success', title: 'Notification preferences saved' });
+    } catch {
+      toast({ type: 'error', title: 'Save failed' });
+    }
+  }
+
+  function toggle(k: string) {
+    const updated = { ...prefs, [k]: !prefs[k] };
+    setPrefs(updated);
+    const full = { ...updated, ...Object.fromEntries(Object.entries(channels).map(([ck, cv]) => [`channel_${ck}`, cv])) };
+    savePrefs(full);
+  }
+
+  function toggleCh(k: string) {
+    const updated = { ...channels, [k]: !channels[k] };
+    setChannels(updated);
+    const full = { ...prefs, ...Object.fromEntries(Object.entries(updated).map(([ck, cv]) => [`channel_${ck}`, cv])) };
+    savePrefs(full);
+  }
 
   return (
     <div className="flex flex-col gap-[calc(16px*var(--u))]">
@@ -202,7 +417,7 @@ function NotificationsTab() {
             ['weekly_report',  'Weekly Report',      'Weekly performance and top signals digest'],
           ].map(([key, label, sub]) => (
             <PrefRow key={key} label={label} sub={sub}>
-              <Toggle on={prefs[key as keyof typeof prefs]} onToggle={() => toggle(key as keyof typeof prefs)} />
+              <Toggle on={prefs[key] ?? false} onToggle={() => toggle(key)} />
             </PrefRow>
           ))}
         </SectionBody>
@@ -212,7 +427,7 @@ function NotificationsTab() {
         <SectionHead title="Delivery Channels" sub="How you receive notifications" />
         <SectionBody>
           <div className="flex gap-3 py-4 flex-wrap">
-            {(Object.entries(channels) as [keyof typeof channels, boolean][]).map(([key, on]) => (
+            {(Object.entries(channels)).map(([key, on]) => (
               <button key={key} onClick={() => toggleCh(key)}
                 className={`inline-flex items-center gap-2 h-9 px-4 rounded-[10px] border text-[13px] font-semibold cursor-pointer capitalize transition-all ${
                   on
@@ -316,53 +531,247 @@ function AppearanceTab({ theme, toggleTheme, density, setDensity, signalStyle, s
 }
 
 function SecurityTab() {
-  const [show, setShow] = useState(false);
+  const toast = useToast();
+  const { data: meData } = useGetMeQuery();
+  const { data: sessionsData } = useGetSessionsQuery();
+  const [changePassword, { isLoading: changingPw }] = useChangePasswordMutation();
+  const [totpSetup,    { isLoading: totpSetupLoading }] = useTotpSetupMutation();
+  const [totpConfirm,  { isLoading: totpConfirmLoading }] = useTotpConfirmMutation();
+  const [totpDisable,  { isLoading: totpDisableLoading }] = useTotpDisableMutation();
+  const [revokeSession] = useRevokeSessionMutation();
+
+  const [show,        setShow]        = useState(false);
+  const [pwCurrent,   setPwCurrent]   = useState('');
+  const [pwNew,       setPwNew]       = useState('');
+  const [pwConfirm,   setPwConfirm]   = useState('');
+
+  // TOTP state
+  const [totpQr,      setTotpQr]      = useState<string | null>(null);
+  const [totpCode,    setTotpCode]    = useState('');
+  const [totpDisCode, setTotpDisCode] = useState('');
+  const [totpMode,    setTotpMode]    = useState<'idle' | 'setup' | 'disable'>('idle');
+
+  const totpEnabled = meData?.totp_enabled ?? false;
+  const sessions    = (sessionsData as any)?.data ?? [];
+
+  async function handleChangePassword() {
+    if (pwNew !== pwConfirm) { toast({ type: 'error', title: 'Passwords do not match' }); return; }
+    if (!pwCurrent || !pwNew) { toast({ type: 'error', title: 'All fields required' }); return; }
+    try {
+      await changePassword({ current_password: pwCurrent, new_password: pwNew }).unwrap();
+      toast({ type: 'success', title: 'Password updated' });
+      setPwCurrent(''); setPwNew(''); setPwConfirm('');
+    } catch {
+      toast({ type: 'error', title: 'Password change failed', msg: 'Check your current password' });
+    }
+  }
+
+  async function handleTotpSetup() {
+    try {
+      const result = await totpSetup().unwrap();
+      setTotpQr(result?.qr_uri ?? null);
+      setTotpMode('setup');
+    } catch {
+      toast({ type: 'error', title: '2FA setup failed' });
+    }
+  }
+
+  async function handleTotpConfirm() {
+    if (totpCode.length !== 6) { toast({ type: 'error', title: 'Enter 6-digit code' }); return; }
+    try {
+      await totpConfirm({ code: totpCode }).unwrap();
+      toast({ type: 'success', title: '2FA enabled!' });
+      setTotpMode('idle'); setTotpQr(null); setTotpCode('');
+    } catch {
+      toast({ type: 'error', title: 'Invalid code' });
+    }
+  }
+
+  async function handleTotpDisable() {
+    if (totpDisCode.length !== 6) { toast({ type: 'error', title: 'Enter 6-digit code' }); return; }
+    try {
+      await totpDisable({ code: totpDisCode }).unwrap();
+      toast({ type: 'success', title: '2FA disabled' });
+      setTotpMode('idle'); setTotpDisCode('');
+    } catch {
+      toast({ type: 'error', title: 'Invalid code' });
+    }
+  }
+
+  async function handleRevokeSession(sessionId: string) {
+    try {
+      await revokeSession(sessionId).unwrap();
+      toast({ type: 'success', title: 'Session revoked' });
+    } catch {
+      toast({ type: 'error', title: 'Revoke failed' });
+    }
+  }
+
   return (
     <div className="flex flex-col gap-[calc(16px*var(--u))]">
+      {/* Change Password */}
       <SectionCard>
         <SectionHead title="Change Password" />
         <SectionBody>
           <div className="flex flex-col gap-4 py-4">
-            {['Current password', 'New password', 'Confirm new password'].map(label => (
-              <div key={label} className="flex flex-col gap-[7px]">
-                <label className="text-[12.5px] font-semibold text-[var(--text-2)]">{label}</label>
-                <input type={show ? 'text' : 'password'} placeholder="••••••••" className={inputCls} />
-              </div>
-            ))}
+            <div className="flex flex-col gap-[7px]">
+              <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Current password</label>
+              <input type={show ? 'text' : 'password'} value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} placeholder="••••••••" className={inputCls} />
+            </div>
+            <div className="flex flex-col gap-[7px]">
+              <label className="text-[12.5px] font-semibold text-[var(--text-2)]">New password</label>
+              <input type={show ? 'text' : 'password'} value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="••••••••" className={inputCls} />
+            </div>
+            <div className="flex flex-col gap-[7px]">
+              <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Confirm new password</label>
+              <input type={show ? 'text' : 'password'} value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} placeholder="••••••••" className={inputCls} />
+            </div>
             <label className="flex items-center gap-2 text-[12.5px] text-[var(--text-2)] cursor-pointer">
               <input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
               Show passwords
             </label>
-            <button className="self-start h-10 px-5 rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border-none bg-[var(--accent)] text-white shadow-[0_4px_14px_rgba(59,130,246,.32)]">
-              Update Password
+            <button
+              type="button"
+              onClick={handleChangePassword}
+              disabled={changingPw}
+              className={`self-start h-10 px-5 rounded-[11px] font-sans text-[13.5px] font-semibold border-none bg-[var(--accent)] text-white shadow-[0_4px_14px_rgba(59,130,246,.32)] inline-flex items-center gap-2 transition-opacity ${changingPw ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              {changingPw ? <Loader2 size={15} className="animate-spin" /> : null}
+              {changingPw ? 'Updating…' : 'Update Password'}
             </button>
           </div>
         </SectionBody>
       </SectionCard>
 
+      {/* TOTP */}
       <SectionCard>
         <SectionHead title="Two-Factor Authentication" sub="Add an extra layer of security to your account" />
         <SectionBody>
           <PrefRow label="TOTP Authenticator" sub="Use an app like Google Authenticator">
-            <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[9px] text-[12px] font-semibold bg-[var(--green-soft)] text-[var(--green)]">
-              <CheckCircle size={12} /> Enabled
+            <span className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-[9px] text-[12px] font-semibold ${totpEnabled ? 'bg-[var(--green-soft)] text-[var(--green)]' : 'bg-[var(--surface-3)] text-[var(--text-3)]'}`}>
+              {totpEnabled ? <><CheckCircle size={12} /> Enabled</> : 'Disabled'}
             </span>
           </PrefRow>
+
+          {totpMode === 'idle' && (
+            <div className="py-3 flex gap-3">
+              {!totpEnabled ? (
+                <button
+                  type="button"
+                  onClick={handleTotpSetup}
+                  disabled={totpSetupLoading}
+                  className="h-9 px-4 rounded-[10px] font-sans text-[13px] font-semibold cursor-pointer border border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-2)] inline-flex items-center gap-2 transition-opacity hover:opacity-90"
+                >
+                  {totpSetupLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Enable 2FA
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setTotpMode('disable')}
+                  className="h-9 px-4 rounded-[10px] font-sans text-[13px] font-semibold cursor-pointer border border-[var(--red)] bg-[var(--red-soft)] text-[var(--red)] inline-flex items-center gap-2"
+                >
+                  Disable 2FA
+                </button>
+              )}
+            </div>
+          )}
+
+          {totpMode === 'setup' && (
+            <div className="py-3 flex flex-col gap-4">
+              {totpQr && (
+                <div className="flex flex-col items-center gap-3">
+                  <img src={totpQr} alt="TOTP QR Code" className="w-40 h-40 rounded-[12px] border border-[var(--border)]" />
+                  <p className="text-[12px] text-[var(--text-3)] text-center m-0">Scan with your authenticator app, then enter the 6-digit code below to confirm.</p>
+                </div>
+              )}
+              <div className="flex flex-col gap-[6px]">
+                <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Verification code</label>
+                <input
+                  type="text" inputMode="numeric" maxLength={6}
+                  value={totpCode} onChange={e => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="123456"
+                  className={`${inputCls} font-mono tracking-[0.3em] text-center`}
+                />
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => { setTotpMode('idle'); setTotpQr(null); setTotpCode(''); }} className="flex-1 h-9 rounded-[10px] font-sans text-[13px] font-semibold cursor-pointer border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)]">Cancel</button>
+                <button type="button" onClick={handleTotpConfirm} disabled={totpConfirmLoading} className={`flex-[2] h-9 rounded-[10px] font-sans text-[13px] font-semibold border-none bg-[var(--accent)] text-white inline-flex items-center justify-center gap-2 transition-opacity ${totpConfirmLoading ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}>
+                  {totpConfirmLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Verify &amp; Enable
+                </button>
+              </div>
+            </div>
+          )}
+
+          {totpMode === 'disable' && (
+            <div className="py-3 flex flex-col gap-4">
+              <p className="text-[13px] text-[var(--text-2)] m-0">Enter the 6-digit code from your authenticator app to disable 2FA.</p>
+              <div className="flex flex-col gap-[6px]">
+                <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Authenticator code</label>
+                <input
+                  type="text" inputMode="numeric" maxLength={6}
+                  value={totpDisCode} onChange={e => setTotpDisCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="123456"
+                  className={`${inputCls} font-mono tracking-[0.3em] text-center`}
+                />
+              </div>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => { setTotpMode('idle'); setTotpDisCode(''); }} className="flex-1 h-9 rounded-[10px] font-sans text-[13px] font-semibold cursor-pointer border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)]">Cancel</button>
+                <button type="button" onClick={handleTotpDisable} disabled={totpDisableLoading} className={`flex-[2] h-9 rounded-[10px] font-sans text-[13px] font-semibold border-none bg-[var(--red)] text-white inline-flex items-center justify-center gap-2 transition-opacity ${totpDisableLoading ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}>
+                  {totpDisableLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Disable 2FA
+                </button>
+              </div>
+            </div>
+          )}
         </SectionBody>
       </SectionCard>
 
+      {/* Sessions */}
       <SectionCard>
         <SectionHead title="Active Sessions" sub="Devices currently signed in to your account" />
         <SectionBody>
-          <div className="py-3 flex items-center justify-between gap-4">
-            <div>
-              <div className="text-[13.5px] font-semibold text-[var(--text)]">macOS · Chrome</div>
-              <div className="text-[12px] text-[var(--text-3)] mt-[2px]">Current session · Mumbai, IN</div>
+          {(sessions ?? []).length === 0 ? (
+            <div className="py-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-[13.5px] font-semibold text-[var(--text)]">Current session</div>
+                  <div className="text-[12px] text-[var(--text-3)] mt-[2px]">This device</div>
+                </div>
+                <span className="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-full text-[11px] font-semibold bg-[var(--green-soft)] text-[var(--green)]">
+                  ● Active now
+                </span>
+              </div>
             </div>
-            <span className="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-full text-[11px] font-semibold bg-[var(--green-soft)] text-[var(--green)]">
-              ● Active now
-            </span>
-          </div>
+          ) : (
+            <div className="flex flex-col divide-y divide-[var(--border)]">
+              {(sessions ?? []).map((s: any) => (
+                <div key={s?.id} className="py-3 flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-[13.5px] font-semibold text-[var(--text)]">{s?.device ?? 'Unknown device'}</div>
+                    <div className="text-[12px] text-[var(--text-3)] mt-[2px]">
+                      {s?.current ? 'Current session' : `Last active: ${s?.last_active ?? '—'}`}
+                      {s?.location ? ` · ${s?.location}` : ''}
+                    </div>
+                  </div>
+                  {s?.current ? (
+                    <span className="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-full text-[11px] font-semibold bg-[var(--green-soft)] text-[var(--green)]">
+                      ● Active now
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleRevokeSession(s?.id)}
+                      className="h-7 px-3 rounded-[7px] font-sans text-[12px] font-semibold cursor-pointer border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-2)] hover:bg-[var(--red-soft)] hover:text-[var(--red)] hover:border-transparent transition-colors"
+                    >
+                      Revoke
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </SectionBody>
       </SectionCard>
     </div>

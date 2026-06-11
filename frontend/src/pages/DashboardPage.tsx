@@ -62,27 +62,27 @@ function StatCard({
 }
 
 function SignalCard({ s, variant = 'rich', onClick }: { s: Stock; variant?: 'rich' | 'compact' | 'bold'; onClick: () => void }) {
-  const col       = s.signal === 'BUY' ? 'var(--green)' : s.signal === 'SELL' ? 'var(--red)' : 'var(--gold)';
-  const sparkColor = s.signal === 'SELL' ? '#EF4444' : s.signal === 'HOLD' ? '#F59E0B' : '#10B981';
-  const expStr    = (s.expReturn >= 0 ? '+' : '') + s.expReturn.toFixed(2) + '%';
+  const col       = s?.signal === 'BUY' ? 'var(--green)' : s?.signal === 'SELL' ? 'var(--red)' : 'var(--gold)';
+  const sparkColor = s?.signal === 'SELL' ? '#EF4444' : s?.signal === 'HOLD' ? '#F59E0B' : '#10B981';
+  const expStr    = ((s?.expReturn ?? 0) >= 0 ? '+' : '') + (s?.expReturn ?? 0).toFixed(2) + '%';
 
   const base = "text-left font-sans text-ink bg-surface-2 border border-line cursor-pointer w-full transition-all hover:border-line-strong hover:bg-surface-hover hover:-translate-y-0.5";
 
   // ── compact: single row ──────────────────────────────────────────────────
   if (variant === 'compact') {
     return (
-      <button onClick={onClick} className={base}
-        style={{ borderRadius: 'var(--radius,14px)', display: 'grid', gridTemplateColumns: '1.5fr auto 1fr 90px', alignItems: 'center', gap: 14, padding: '11px 15px' }}>
-        <SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector />
+      <button onClick={onClick} className={`${base} grid grid-cols-[1.5fr_auto_1fr_90px] items-center gap-3.5 px-[15px] py-[11px]`}
+        style={{ borderRadius: 'var(--radius,14px)' }}>
+        <SymbolCell symbol={s?.symbol} name={s?.name} sector={s?.sector} showSector />
         <div className="flex items-center gap-1.5">
-          <SignalBadge signal={s.signal} />
-          <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s.horizon}</span>
+          <SignalBadge signal={s?.signal} />
+          <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s?.horizon}</span>
         </div>
         <div className="flex flex-col items-end gap-[2px]">
-          <span className="font-mono font-bold text-[13.5px]">{inr(s.price)}</span>
-          <Delta value={s.change} size={11.5} />
+          <span className="font-mono font-bold text-[13.5px]">{inr(s?.price ?? 0)}</span>
+          <Delta value={s?.change ?? 0} size={11.5} />
         </div>
-        <div style={{ width: 64 }}><Conf value={s.confidence} /></div>
+        <div style={{ width: 64 }}><Conf value={s?.confidence ?? 0} /></div>
       </button>
     );
   }
@@ -93,22 +93,22 @@ function SignalCard({ s, variant = 'rich', onClick }: { s: Stock; variant?: 'ric
       <button onClick={onClick} className={base}
         style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(15px * var(--u))', borderLeft: `3px solid ${col}` }}>
         <div className="flex items-center justify-between">
-          <SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector={false} />
-          <SignalBadge signal={s.signal} />
+          <SymbolCell symbol={s?.symbol} name={s?.name} sector={s?.sector} showSector={false} />
+          <SignalBadge signal={s?.signal} />
         </div>
         <div className="flex items-end justify-between mt-[14px]">
           <div className="flex flex-col gap-[1px]">
-            <span className="text-[11px] text-ink-3 font-semibold uppercase tracking-[.04em]">Expected · {s.horizon}</span>
+            <span className="text-[11px] text-ink-3 font-semibold uppercase tracking-[.04em]">Expected · {s?.horizon}</span>
             <span className="font-mono text-[24px] font-bold tracking-tight" style={{ color: col }}>{expStr}</span>
           </div>
-          <Sparkline data={s.spark} color={sparkColor} w={92} h={42} />
+          <Sparkline data={s?.spark ?? []} color={sparkColor} w={92} h={42} />
         </div>
         <div className="flex items-center justify-between mt-3">
           <span className="text-[11.5px] text-ink-2">Confidence</span>
-          <span className="font-mono font-bold" style={{ color: col }}>{s.confidence}%</span>
+          <span className="font-mono font-bold" style={{ color: col }}>{s?.confidence ?? 0}%</span>
         </div>
         <div className="conf-track mt-[5px]">
-          <div style={{ width: s.confidence + '%', height: '100%', borderRadius: 999, background: col }} />
+          <div style={{ width: (s?.confidence ?? 0) + '%', height: '100%', borderRadius: 999, background: col }} />
         </div>
       </button>
     );
@@ -119,21 +119,21 @@ function SignalCard({ s, variant = 'rich', onClick }: { s: Stock; variant?: 'ric
     <button onClick={onClick} className={base}
       style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(15px * var(--u))' }}>
       <div className="flex items-center justify-between">
-        <SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector={false} />
-        <SignalBadge signal={s.signal} />
+        <SymbolCell symbol={s?.symbol} name={s?.name} sector={s?.sector} showSector={false} />
+        <SignalBadge signal={s?.signal} />
       </div>
       <div className="flex items-center justify-between my-[13px] mb-[11px]">
         <div className="flex flex-col gap-[1px]">
-          <span className="font-mono text-[18px] font-bold">{inr(s.price)}</span>
-          <Delta value={s.change} size={12} />
+          <span className="font-mono text-[18px] font-bold">{inr(s?.price ?? 0)}</span>
+          <Delta value={s?.change ?? 0} size={12} />
         </div>
-        <Sparkline data={s.spark} color={sparkColor} w={88} h={38} />
+        <Sparkline data={s?.spark ?? []} color={sparkColor} w={88} h={38} />
       </div>
       <div className="h-px bg-[var(--border)] mb-[11px]" />
       <div className="flex justify-between">
         <div className="flex flex-col gap-[2px]">
           <span className="text-[11px] text-ink-3">Horizon</span>
-          <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s.horizon}</span>
+          <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s?.horizon}</span>
         </div>
         <div className="flex flex-col gap-[2px] items-end">
           <span className="text-[11px] text-ink-3">Exp. Return</span>
@@ -142,7 +142,7 @@ function SignalCard({ s, variant = 'rich', onClick }: { s: Stock; variant?: 'ric
       </div>
       <div className="flex items-center justify-between mt-[11px] gap-[10px]">
         <span className="text-[11px] text-ink-3 whitespace-nowrap">Confidence</span>
-        <div className="flex-1"><Conf value={s.confidence} /></div>
+        <div className="flex-1"><Conf value={s?.confidence ?? 0} /></div>
       </div>
     </button>
   );
@@ -154,17 +154,29 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  const { data: portData,    isLoading: loadPort    } = useGetPortfolioSummaryQuery(user!.id, { skip: !user });
-  const { data: todayPnl,    isLoading: loadPnl     } = useGetTodayPnlQuery(user!.id, { skip: !user });
+  const { data: portData,    isLoading: loadPort    } = useGetPortfolioSummaryQuery(user?.id ?? 0, { skip: !user });
+  const { data: todayPnl,    isLoading: loadPnl     } = useGetTodayPnlQuery(user?.id ?? 0, { skip: !user });
   const { data: signalsData, isLoading: loadSignals } = useGetActionableSignalsQuery();
-  const { data: ordersData,  isLoading: loadOrders  } = useGetOrdersQuery({ userId: user!.id, size: 6 }, { skip: !user });
-  const { data: posData,     isLoading: loadPos     } = useGetPositionsQuery({ userId: user!.id, size: 1 }, { skip: !user });
+  const { data: ordersData,  isLoading: loadOrders  } = useGetOrdersQuery({ userId: user?.id ?? 0, size: 6 }, { skip: !user });
+  const { data: posData,     isLoading: loadPos     } = useGetPositionsQuery({ userId: user?.id ?? 0, size: 1 }, { skip: !user });
   const { data: mktData,     isLoading: loadMkt     } = useGetMarketOverviewQuery();
   const [refreshSignals, { isLoading: refreshing }]   = useRefreshSignalsMutation();
 
   const loading = loadPort || loadPnl || loadSignals || loadOrders || loadPos || loadMkt;
 
-  const signals: Stock[] = (signalsData as any)?.data ?? [];
+  const signals: Stock[] = ((signalsData as any)?.data ?? []).map((t: any) => ({
+    ...t,
+    expReturn:    t.trade?.expected_return_pct ?? 0,
+    price:        t.price?.current             ?? 0,
+    horizon:      t.model?.horizon             ?? '',
+    signal:       t.signal?.includes('BUY') ? 'BUY' : t.signal?.includes('SELL') ? 'SELL' : 'HOLD',
+    confidence:   Math.round(t.confidence      ?? 0),
+    change:       t.change                     ?? 0,
+    spark:        t.spark                      ?? [],
+    sector:       t.sector                     ?? '',
+    target_price: t.trade?.target_price,
+    stop_loss:    t.trade?.stop_loss,
+  }));
   const trades: Trade[]  = (ordersData as any)?.data?.slice(0, 6) ?? [];
   const posCount: number = (posData as any)?.total ?? 0;
   const indices: IndexData[] = (mktData as any)?.indices ?? [];
@@ -180,8 +192,8 @@ export default function DashboardPage() {
     }
   }
 
-  const nifty    = indices[0];
-  const winRate  = user ? (user.win_count + user.loss_count > 0 ? ((user.win_count / (user.win_count + user.loss_count)) * 100).toFixed(1) : '0') : '0';
+  const nifty    = indices?.[0];
+  const winRate  = user ? ((user.win_count ?? 0) + (user.loss_count ?? 0) > 0 ? (((user.win_count ?? 0) / ((user.win_count ?? 0) + (user.loss_count ?? 0))) * 100).toFixed(1) : '0') : '0';
   const niftyLabels = ['9:15', '11:00', '12:45', '14:30', '15:30'];
 
   // Dynamic greeting based on current hour
@@ -203,7 +215,7 @@ export default function DashboardPage() {
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-bold tracking-tight m-0 text-ink" style={{ fontSize: 'calc(25px * var(--u))' }}>
-            {greeting}, {user?.display_name?.split(' ')[0] || user?.username} 👋
+            {greeting}, {user?.display_name?.split(' ')?.[0] || user?.username} 👋
           </h1>
           <p className="text-ink-2 text-[13.5px] mt-1 m-0">
             Your AI engine scanned <b className="tabular-nums">498</b> Nifty 500 stocks · last run {lastRunStr}
@@ -228,19 +240,19 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Stat cards ── */}
-      <div className="grid max-lg:grid-cols-2" style={{ gridTemplateColumns: 'repeat(4,1fr)', gap: 'calc(16px * var(--u))' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 dgap">
         {loading ? Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="bg-surface border border-line" style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(17px * var(--u))' }}>
             <Skeleton h={12} w="50%" className="mb-3" /><Skeleton h={28} w="70%" className="mb-2" /><Skeleton h={11} w="40%" />
           </div>
         )) : (<>
-          <StatCard label="Portfolio Value" value={inrCompact((portData as any)?.current_value ?? 0)} delta={todayPnlPct} iconColor="var(--accent)"
+          <StatCard label="Portfolio Value" value={inrCompact((portData as any)?.total_value ?? 0)} delta={todayPnlPct} iconColor="var(--accent)"
             icon={<svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18"/><circle cx="16.5" cy="14" r="1.3" fill="currentColor" stroke="none"/></svg>}
             spark={nifty?.spark} sparkColor="var(--accent)"
           />
           <StatCard label="Today's P&L" value={(todayPnl as any) ? ((todayPnl as any).today_pnl >= 0 ? '+' : '') + inr((todayPnl as any).today_pnl, 2).replace('₹', '') : '—'} delta={(todayPnl as any)?.today_pnl_pct ?? null} iconColor="var(--green)"
             icon={<svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 11V7h-4"/></svg>}
-            spark={indices[1]?.spark} sparkColor="var(--green)"
+            spark={indices?.[1]?.spark} sparkColor="var(--green)"
           />
           <StatCard label="Active Positions" value={String(posCount)} iconColor="var(--gold)"
             icon={<svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>}
@@ -252,14 +264,14 @@ export default function DashboardPage() {
       </div>
 
       {/* ── NIFTY chart + Sentiment ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: 'calc(16px * var(--u))' }}>
+      <div className="grid grid-cols-1 md:grid-cols-[1.7fr_1fr] dgap">
         <Card
           title="NIFTY 50" sub="NSE · Intraday" icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 2 4-6"/></svg>}
           pad={false}
           right={nifty ? (
             <div className="flex flex-col items-end">
-              <span className="font-mono text-[20px] font-bold text-ink">{nifty.value.toLocaleString('en-IN')}</span>
-              <span className="text-[12.5px] font-semibold text-gain">+{nifty.change} (+{nifty.pct.toFixed(2)}%)</span>
+              <span className="font-mono text-[20px] font-bold text-ink">{nifty?.value?.toLocaleString('en-IN')}</span>
+              <span className="text-[12.5px] font-semibold text-gain">+{nifty?.change} (+{nifty?.pct?.toFixed(2)}%)</span>
             </div>
           ) : undefined}
         >
@@ -271,12 +283,12 @@ export default function DashboardPage() {
             <div className="flex gap-2 flex-wrap mt-3">
               {loading
                 ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} h={32} w={110} rounded="9px" />)
-                : indices.map(ix => (
-                  <div key={ix.name} className="flex items-center gap-2 px-[11px] py-[7px] rounded-[9px] bg-surface-2 text-[12px]">
-                    <span className="text-ink-2 font-semibold">{ix.name}</span>
-                    <span className="font-mono font-bold text-ink">{ix.value.toLocaleString('en-IN')}</span>
-                    <span className="font-semibold tabular-nums" style={{ color: ix.pct >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {(ix.pct >= 0 ? '+' : '') + ix.pct.toFixed(2) + '%'}
+                : (indices ?? []).map(ix => (
+                  <div key={ix?.name} className="flex items-center gap-2 px-[11px] py-[7px] rounded-[9px] bg-surface-2 text-[12px]">
+                    <span className="text-ink-2 font-semibold">{ix?.name}</span>
+                    <span className="font-mono font-bold text-ink">{ix?.value?.toLocaleString('en-IN')}</span>
+                    <span className="font-semibold tabular-nums" style={{ color: (ix.pct ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {((ix.pct ?? 0) >= 0 ? '+' : '') + (ix.pct ?? 0).toFixed(2) + '%'}
                     </span>
                   </div>
                 ))
@@ -322,19 +334,19 @@ export default function DashboardPage() {
       >
         <div className="dp">
           {loading ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(216px,1fr))', gap: 'calc(13px * var(--u))' }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} h={signalStyle === 'compact' ? 56 : 190} rounded="12px" />)}
             </div>
           ) : signalStyle === 'compact' ? (
             <div className="flex flex-col gap-2">
-              {signals.map(s => (
-                <SignalCard key={s.symbol} s={s} variant="compact" onClick={() => navigate('/signals')} />
+              {(signals ?? []).map(s => (
+                <SignalCard key={s?.symbol} s={s} variant="compact" onClick={() => navigate('/signals')} />
               ))}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(216px,1fr))', gap: 'calc(13px * var(--u))' }}>
-              {signals.map(s => (
-                <SignalCard key={s.symbol} s={s} variant={signalStyle} onClick={() => navigate('/signals')} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {(signals ?? []).map(s => (
+                <SignalCard key={s?.symbol} s={s} variant={signalStyle} onClick={() => navigate('/signals')} />
               ))}
             </div>
           )}
@@ -368,24 +380,24 @@ export default function DashboardPage() {
             <tbody>
               {loading ? <SkeletonRows cols={6} rows={5} /> : trades.length === 0 ? (
                 <tr><td colSpan={6} className="text-center text-ink-3 py-10 px-5">No recent trades.</td></tr>
-              ) : trades.map(t => (
-                <tr key={t.id} className="cursor-default transition-colors hover:bg-surface-2">
+              ) : (trades ?? []).map(t => (
+                <tr key={t?.id} className="cursor-default transition-colors hover:bg-surface-2">
                   <td className="border-b border-line whitespace-nowrap" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                    <SymbolCell symbol={t.symbol} name={t.name} sector={t.sector} showSector={false} />
+                    <SymbolCell symbol={t?.symbol ?? ''} name={t?.name ?? ''} sector={t?.sector ?? ''} showSector={false} />
                   </td>
                   <td className="border-b border-line whitespace-nowrap" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
                     <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold border border-line"
-                      style={{ background: t.side === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)', color: t.side === 'BUY' ? 'var(--green)' : 'var(--red)' }}>
-                      {t.side}
+                      style={{ background: t?.order_type === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)', color: t?.order_type === 'BUY' ? 'var(--green)' : 'var(--red)' }}>
+                      {t?.order_type}
                     </span>
                   </td>
-                  <td className="border-b border-line whitespace-nowrap text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>{inr(t.price)}</td>
-                  <td className="border-b border-line whitespace-nowrap text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>{inr(t.value, 0)}</td>
+                  <td className="border-b border-line whitespace-nowrap text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>{inr(t?.price ?? 0)}</td>
+                  <td className="border-b border-line whitespace-nowrap text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>{inr(t?.value ?? 0, 0)}</td>
                   <td className="border-b border-line whitespace-nowrap text-right" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                    <Delta value={t.realized} suffix="" showIcon size={12.5} />
+                    <Delta value={t?.pnl ?? 0} suffix="" showIcon size={12.5} />
                   </td>
                   <td className="border-b border-line whitespace-nowrap text-[12px] text-ink-3 font-mono" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                    <DateComponent inputDate={String(t.date)} format="DD MMM" showTooltip={false} />
+                    <DateComponent inputDate={t?.created_at ?? ''} format="DD MMM" showTooltip={false} />
                   </td>
                 </tr>
               ))}

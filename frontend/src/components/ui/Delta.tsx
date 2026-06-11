@@ -10,7 +10,7 @@ interface DeltaProps {
 
 export function Delta({ value, suffix = '%', size = 13, showIcon = true, abs = false }: DeltaProps) {
   const pos = value >= 0;
-  const display = (pos ? '+' : '') + (abs ? Math.abs(value) : value).toFixed(2) + suffix;
+  const display = (pos ? '+' : '') + (abs ? Math?.abs(value) : value)?.toFixed(2) + suffix;
   return (
     <span
       className="inline-flex items-center gap-0.5 font-semibold font-mono"

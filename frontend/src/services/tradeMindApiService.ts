@@ -22,23 +22,33 @@ export interface User {
 }
 
 export interface PortfolioSummary {
-  id: number;
-  total_invested: number;
-  current_value: number;
+  user: { id: number; username: string; display_name: string };
+  balance: number;          // available cash
+  invested: number;         // total capital deployed
+  total_value: number;      // balance + invested + unrealized
+  realized_pnl: number;
+  unrealized_pnl: number;
   total_pnl: number;
-  total_pnl_pct: number;
   open_positions: number;
+  wins: number;
+  losses: number;
   win_rate: number;
-  virtual_balance: number;
+  positions: import('../types').OpenPosition[];
 }
 
 export interface RiskSettings {
-  max_position_size: number;
-  max_portfolio_risk: number;
+  id?: number;
+  user_id?: number;
+  max_daily_loss: number;
+  max_daily_trades: number;
+  max_position_pct: number;
+  auto_stop_loss: boolean;
+  auto_target: boolean;
   stop_loss_pct: number;
-  take_profit_pct: number;
-  max_open_positions: number;
+  target_pct: number;
+  max_position_size: number;
   mode: 'PAPER' | 'LIVE';
+  updated_at?: string;
 }
 
 export interface TradeSignal {

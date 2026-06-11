@@ -22,13 +22,12 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Configure logging
 log_level = os.getenv("LOG_LEVEL", "INFO")
-logging.basicConfig(
-    level=getattr(logging, log_level),
-    format="%(asctime)s — %(name)s — %(levelname)s — %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+
+# Initialise date-based rotating file logging (writes to logs/YYYY-MM-DD.log)
+from api.logging_setup import setup_logging
+setup_logging(log_dir="logs", level=log_level)
+
 logger = logging.getLogger("nifty500-ai")
 
 
@@ -112,13 +111,18 @@ def cmd_server():
     print(f"   ❤️  Health:    http://localhost:{port}/api/health")
     print(f"\n   Press Ctrl+C to stop.\n")
 
+    from api.logging_setup import get_uvicorn_log_config
     import uvicorn
     uvicorn.run(
         "api.server:app",
         host="0.0.0.0",
         port=port,
         reload=True,
-        log_level=log_level.lower(),
+        # Pass a custom log_config so uvicorn does NOT reset the root logger.
+        # Our DailyFileHandler (added in server.py + startup event) then
+        # survives alongside uvicorn's own uvicorn/uvicorn.error loggers.
+        log_config=get_uvicorn_log_config(log_level),
+        access_log=False,   # our middleware handles access logging
     )
 
 
@@ -131,7 +135,7 @@ def cmd_schedule():
 
 def cmd_status():
     """Show database statistics and last update times."""
-    from database.db import get_db_stats, get_connection
+    from database.db import get_db_stats, get_connection, release_connection, _execute
 
     print("\n📊 Nifty 500 AI — Database Status")
     print("=" * 50)
@@ -143,19 +147,19 @@ def cmd_status():
     # Show latest price date
     conn = get_connection()
     try:
-        row = conn.execute("SELECT MAX(date) as latest FROM prices WHERE interval='1d'").fetchone()
-        if row and row["latest"]:
-            print(f"\n  📅 Latest price data: {row['latest']}")
+        row = _execute(conn, "SELECT MAX(date) as latest FROM prices WHERE interval='1d'").fetchone()
+        if row and row[0]:
+            print(f"\n  📅 Latest price data: {row[0]}")
 
-        row = conn.execute("SELECT MAX(date) as latest FROM technical_indicators").fetchone()
-        if row and row["latest"]:
-            print(f"  📅 Latest indicators: {row['latest']}")
+        row = _execute(conn, "SELECT MAX(date) as latest FROM technical_indicators").fetchone()
+        if row and row[0]:
+            print(f"  📅 Latest indicators: {row[0]}")
 
-        row = conn.execute("SELECT COUNT(DISTINCT symbol) as count FROM prices WHERE interval='1d'").fetchone()
+        row = _execute(conn, "SELECT COUNT(DISTINCT symbol) as count FROM prices WHERE interval='1d'").fetchone()
         if row:
-            print(f"  📈 Stocks tracked:    {row['count']}")
+            print(f"  📈 Stocks tracked:    {row[0]}")
     finally:
-        conn.close()
+        release_connection(conn)
 
     print("=" * 50 + "\n")
 

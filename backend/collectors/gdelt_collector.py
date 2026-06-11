@@ -40,7 +40,7 @@ _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from database.db import insert_news, get_connection, init_database, _execute
+from database.db import insert_news, get_connection, release_connection, init_database, _execute
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -179,7 +179,7 @@ def _get_symbols_with_news() -> Set[str]:
         conn = get_connection()
         cur = _execute(conn, "SELECT DISTINCT symbol FROM news_sentiment WHERE symbol IS NOT NULL")
         symbols = {row[0] for row in cur.fetchall()}
-        conn.close()
+        release_connection(conn)
         return symbols
     except Exception as exc:
         logger.warning(f"Could not query existing news symbols: {exc}")
@@ -328,12 +328,12 @@ def score_pending_news(batch_limit: int = 500) -> int:
         ).fetchall()
     except Exception as exc:
         logger.error(f"score_pending_news: DB read error: {exc}")
-        conn.close()
+        release_connection(conn)
         return 0
 
     if not rows:
         logger.info("score_pending_news: no pending rows")
-        conn.close()
+        release_connection(conn)
         return 0
 
     logger.info(f"score_pending_news: scoring {len(rows)} headlines")
@@ -355,7 +355,7 @@ def score_pending_news(batch_limit: int = 500) -> int:
     except Exception as exc:
         logger.error(f"score_pending_news: commit error: {exc}")
 
-    conn.close()
+    release_connection(conn)
     logger.info(f"score_pending_news: {scored}/{len(rows)} headlines scored")
     print(f"Scored {scored} headlines.")
     return scored

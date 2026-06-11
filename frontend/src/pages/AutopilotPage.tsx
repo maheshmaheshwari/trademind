@@ -123,9 +123,9 @@ export default function AutopilotPage() {
   }
 
   const livePnl = (t: AuthorizedTrade) =>
-    t.status === 'EXECUTED' && t.cmp != null && t.entry != null
-      ? (t.cmp - t.entry) * t.qty
-      : t.actual_pnl ?? null;
+    t?.status === 'EXECUTED' && t?.cmp != null && t?.entry != null
+      ? (t.cmp - t.entry) * (t?.qty ?? 0)
+      : t?.actual_pnl ?? null;
 
   return (
     <div className="flex flex-col dgap animate-page-in">
@@ -166,7 +166,7 @@ export default function AutopilotPage() {
       </div>
 
       {/* ── Stat cards ── */}
-      <div className="grid max-lg:grid-cols-2" style={{ gridTemplateColumns: 'repeat(4,1fr)', gap: 'calc(16px * var(--u))' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 dgap">
         {loadStatus ? (
           Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="bg-surface border border-line" style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(17px * var(--u))' }}>
@@ -226,7 +226,7 @@ export default function AutopilotPage() {
       {/* ── Filters ── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="inline-flex bg-surface-2 border border-line rounded-[10px] p-[3px] gap-[2px]">
-          {STATUS_FILTERS.map(f => (
+          {(STATUS_FILTERS ?? []).map(f => (
             <button key={f} onClick={() => setFilter(f)}
               className="border-none font-sans text-[12.5px] font-semibold px-3 py-[6px] rounded-[7px] cursor-pointer transition-colors whitespace-nowrap"
               style={{ background: filter === f ? 'var(--accent)' : 'transparent', color: filter === f ? '#fff' : 'var(--text-2)' }}>
@@ -273,39 +273,39 @@ export default function AutopilotPage() {
                     </div>
                   </td>
                 </tr>
-              ) : trades.map(t => {
-                const meta = statusMeta(t.status);
+              ) : (trades ?? []).map(t => {
+                const meta = statusMeta(t?.status);
                 const pnl  = livePnl(t);
-                const canRevoke = t.status === 'EXECUTED' || t.status === 'PENDING';
+                const canRevoke = t?.status === 'EXECUTED' || t?.status === 'PENDING';
                 return (
-                  <tr key={t.id} className="border-b border-line transition-colors hover:bg-surface-2">
+                  <tr key={t?.id} className="border-b border-line transition-colors hover:bg-surface-2">
                     <td style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      <SymbolCell symbol={t.symbol} name={t.name ?? ''} sector={t.sector ?? ''} showSector={false} />
+                      <SymbolCell symbol={t?.symbol ?? ''} name={t?.name ?? ''} sector={t?.sector ?? ''} showSector={false} />
                     </td>
                     <td style={{ padding: 'calc(12px * var(--u)) 14px' }}>
                       <div className="flex items-center gap-1.5">
-                        <SignalBadge signal={t.signal} />
+                        <SignalBadge signal={t?.signal} />
                         <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">
-                          {t.mode}
+                          {t?.mode}
                         </span>
                       </div>
                     </td>
                     <td className="text-right font-mono tabular-nums font-semibold text-ink" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      {inr(t.amount, 0)}
+                      {inr(t?.amount, 0)}
                     </td>
                     <td className="text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      {t.qty}
+                      {t?.qty}
                     </td>
                     <td className="text-right font-mono tabular-nums text-[12px]" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      <span className="text-ink-2">{inr(t.entry, 0)}</span>
+                      <span className="text-ink-2">{inr(t?.entry, 0)}</span>
                       <span className="text-ink-3"> → </span>
-                      <span className="text-gain">{inr(t.target, 0)}</span>
+                      <span className="text-gain">{inr(t?.target, 0)}</span>
                     </td>
                     <td className="text-right font-mono tabular-nums font-semibold text-gain" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      +{inr(t.exp_profit, 0)}
+                      +{inr(t?.exp_profit, 0)}
                     </td>
                     <td className="text-right font-mono tabular-nums text-loss" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      −{inr(t.max_loss, 0)}
+                      −{inr(t?.max_loss, 0)}
                     </td>
                     <td className="text-right" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
                       {pnl != null ? (
@@ -318,9 +318,9 @@ export default function AutopilotPage() {
                     </td>
                     <td style={{ padding: 'calc(12px * var(--u)) 14px' }}>
                       <span className="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-full text-[11px] font-semibold border-none"
-                        style={{ color: meta.color, background: meta.bg }}>
-                        <meta.Icon size={11} />
-                        {meta.label}
+                        style={{ color: meta?.color, background: meta?.bg }}>
+                        {meta?.Icon && <meta.Icon size={11} />}
+                        {meta?.label}
                       </span>
                     </td>
                     <td className="text-right" style={{ padding: 'calc(12px * var(--u)) 14px' }}>

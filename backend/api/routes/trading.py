@@ -9,10 +9,18 @@ import json
 from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel
 from typing import Optional
+from api.schemas import (
+    AuthOut, UserCreateOut, UserOut, ExecuteSignalOut,
+    PaginatedPositionsOut, PaginatedOrdersOut,
+    SquareOffOut, SquareOffAllOut,
+    PortfolioSummaryOut, RiskSettingsOut, RiskSettingsUpdateOut, TodayPnlOut,
+    StatusOut,
+)
 from trading.trading_engine import (
     create_user, get_user, get_user_by_username, _safe_user,
     execute_signal, get_positions, get_orders,
     square_off, square_off_all, get_portfolio_summary,
+    PartialCapacityError,
 )
 from trading.risk_manager import (
     check_order, get_risk_settings, update_risk_settings,
@@ -93,7 +101,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
 # Auth Endpoints
 # ==========================================
 
-@router.post("/register")
+@router.post("/register", response_model=AuthOut)
 async def api_register(req: RegisterRequest):
     """Create a new account with hashed password. Returns JWT token."""
     if len(req.password) < 8:
@@ -108,7 +116,7 @@ async def api_register(req: RegisterRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/login")
+@router.post("/login", response_model=AuthOut)
 async def api_login(req: LoginRequest):
     """Login with username + password. Returns JWT token."""
     user = get_user_by_username(req.username)
@@ -121,7 +129,7 @@ async def api_login(req: LoginRequest):
     return {"status": "success", "user": safe, "token": token}
 
 
-@router.get("/me")
+@router.get("/me", response_model=UserOut)
 async def api_get_me(user=Depends(get_current_user)):
     """Get current user from JWT token."""
     return _safe_user(user)
@@ -131,7 +139,7 @@ async def api_get_me(user=Depends(get_current_user)):
 # Legacy User Endpoints (kept for compat)
 # ==========================================
 
-@router.post("/user")
+@router.post("/user", response_model=UserCreateOut)
 async def api_create_user(req: CreateUserRequest):
     """Create a virtual trading account with ₹10,00,000 (legacy, use /register)."""
     try:
@@ -142,7 +150,7 @@ async def api_create_user(req: CreateUserRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/user/{user_id}")
+@router.get("/user/{user_id}", response_model=UserOut)
 async def api_get_user(user_id: int):
     """Get user account details."""
     user = get_user(user_id)
@@ -151,7 +159,7 @@ async def api_get_user(user_id: int):
     return _safe_user(user)
 
 
-@router.get("/user/by-username/{username}")
+@router.get("/user/by-username/{username}", response_model=UserOut)
 async def api_get_user_by_username(username: str):
     """Get user by username."""
     user = get_user_by_username(username)
@@ -164,7 +172,7 @@ async def api_get_user_by_username(username: str):
 # Trade Execution
 # ==========================================
 
-@router.post("/execute-signal")
+@router.post("/execute-signal", response_model=ExecuteSignalOut)
 async def api_execute_signal(req: ExecuteSignalRequest, user=Depends(get_current_user)):
     """
     One-click trade: AI signal → auto bracket order (BUY + SL + TARGET).
@@ -218,6 +226,14 @@ async def api_execute_signal(req: ExecuteSignalRequest, user=Depends(get_current
         result["status"] = "executed"
         result["risk_checks"] = checks
         return result
+    except PartialCapacityError as e:
+        raise HTTPException(status_code=409, detail={
+            "error": "PARTIAL_CAPACITY",
+            "symbol": e.symbol,
+            "requested": e.requested,
+            "available": e.available,
+            "message": f"Only {e.available:,} shares of platform capacity remain for {e.symbol}.",
+        })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -226,7 +242,7 @@ async def api_execute_signal(req: ExecuteSignalRequest, user=Depends(get_current
 # Positions & Orders
 # ==========================================
 
-@router.get("/positions/{user_id}")
+@router.get("/positions/{user_id}", response_model=PaginatedPositionsOut)
 async def api_get_positions(
     user_id: int,
     page: int = 0, size: int = 25,
@@ -272,7 +288,7 @@ async def api_get_positions(
             "total": total, "page": page, "size": size, "count": total}
 
 
-@router.get("/orders/{user_id}")
+@router.get("/orders/{user_id}", response_model=PaginatedOrdersOut)
 async def api_get_orders(
     user_id: int, limit: int = 200,
     page: int = 0, size: int = 25,
@@ -318,7 +334,7 @@ async def api_get_orders(
             "total": total, "page": page, "size": size, "count": total}
 
 
-@router.post("/square-off/{user_id}/{symbol}")
+@router.post("/square-off/{user_id}/{symbol}", response_model=SquareOffOut)
 async def api_square_off(user_id: int, symbol: str, req: SquareOffRequest = None, user=Depends(get_current_user)):
     """Sell an entire position."""
     if user["id"] != user_id:
@@ -331,7 +347,7 @@ async def api_square_off(user_id: int, symbol: str, req: SquareOffRequest = None
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/square-off-all/{user_id}")
+@router.post("/square-off-all/{user_id}", response_model=SquareOffAllOut)
 async def api_square_off_all(user_id: int, user=Depends(get_current_user)):
     """Emergency kill switch: sell ALL positions."""
     if user["id"] != user_id:
@@ -344,7 +360,7 @@ async def api_square_off_all(user_id: int, user=Depends(get_current_user)):
 # Portfolio & Risk
 # ==========================================
 
-@router.get("/portfolio/{user_id}")
+@router.get("/portfolio/{user_id}", response_model=PortfolioSummaryOut)
 async def api_portfolio_summary(user_id: int, user=Depends(get_current_user)):
     """Full portfolio summary: balance, invested, P&L, win rate, positions."""
     if user["id"] != user_id:
@@ -358,7 +374,7 @@ async def api_portfolio_summary(user_id: int, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/risk-settings/{user_id}")
+@router.get("/risk-settings/{user_id}", response_model=RiskSettingsOut)
 async def api_get_risk_settings(user_id: int, user=Depends(get_current_user)):
     """Get risk management settings."""
     if user["id"] != user_id:
@@ -367,7 +383,7 @@ async def api_get_risk_settings(user_id: int, user=Depends(get_current_user)):
     return settings
 
 
-@router.put("/risk-settings/{user_id}")
+@router.put("/risk-settings/{user_id}", response_model=RiskSettingsUpdateOut)
 async def api_update_risk_settings(user_id: int, req: RiskSettingsRequest, user=Depends(get_current_user)):
     """Update risk management settings."""
     if user["id"] != user_id:
@@ -379,12 +395,12 @@ async def api_update_risk_settings(user_id: int, req: RiskSettingsRequest, user=
     return {"status": "updated", "settings": settings}
 
 
-@router.get("/pnl/today/{user_id}")
+@router.get("/pnl/today/{user_id}", response_model=TodayPnlOut)
 async def api_today_pnl(user_id: int, user=Depends(get_current_user)):
     """Get today's realized P&L."""
     if user["id"] != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
-    from database.db import get_connection, _execute
+    from database.db import get_connection, release_connection, _execute
     from datetime import datetime
 
     conn = get_connection()
@@ -400,7 +416,7 @@ async def api_today_pnl(user_id: int, user=Depends(get_current_user)):
         WHERE user_id = ? AND DATE(created_at) = ? AND order_purpose = 'SQUARE_OFF'
     """, (user_id, today)).fetchone()
     
-    conn.close()
+    release_connection(conn)
     
     return {
         "date": today,

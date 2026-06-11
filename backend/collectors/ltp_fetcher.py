@@ -126,12 +126,13 @@ def fetch_intraday_30min(symbols: List[str] = None) -> int:
     If symbols is None, fetches for all symbols with open positions.
     Returns the number of candles saved.
     """
-    from database.db import get_connection, insert_prices_batch
+    from database.db import get_connection, release_connection, insert_prices_batch
     
     if symbols is None:
         conn = get_connection()
-        rows = conn.execute("SELECT DISTINCT symbol FROM positions").fetchall()
-        conn.close()
+        from database.db import _execute as _ex
+        rows = _ex(conn, "SELECT DISTINCT symbol FROM positions").fetchall()
+        release_connection(conn)
         symbols = [r[0] for r in rows] if rows else []
     
     if not symbols:

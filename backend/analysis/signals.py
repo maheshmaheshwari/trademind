@@ -38,8 +38,8 @@ from database.db import (
     get_all_prices_df,
     get_all_symbols,
     get_connection,
+    release_connection,
     init_database,
-    insert_ai_signal,
     insert_indicators,
     _execute,
 )
@@ -232,7 +232,7 @@ def process_stock(symbol: str, days: int = 400, conn: Optional[Any] = None) -> O
             "resistance_2": _safe_float(latest.get("resistance_2")),
             "resistance_3": _safe_float(latest.get("resistance_3")),
             "signal": signal,
-            "signal_strength": strength,
+            "signal_strength": _safe_float(strength),
         }
 
         insert_indicators(symbol, str(latest_date), indicators_data, conn=conn)
@@ -251,20 +251,6 @@ def process_stock(symbol: str, days: int = 400, conn: Optional[Any] = None) -> O
             elif "SELL" in signal:
                 target_price = round(close_price - (2 * atr), 2)
                 stop_loss = round(close_price + (1.5 * atr), 2)
-
-        # Store AI signal
-        model_ver = "v2.0.0-ml" if any("model" in r.lower() and "horizon" in r.lower() for r in reasons) else "v1.0.0-rules-fallback"
-        insert_ai_signal(
-            symbol=symbol,
-            signal=signal,
-            confidence=strength,
-            model_version=model_ver,
-            target_price=target_price,
-            stop_loss=stop_loss,
-            reasoning=reasons,
-            features_used={"indicators": list(indicators_data.keys())},
-            conn=conn,
-        )
 
         return {
             "symbol": symbol,
@@ -297,6 +283,7 @@ def process_all_stocks() -> Dict:
     try:
         init_database()
 
+
         # Get all symbols that have price data
         conn = get_connection()
         try:
@@ -305,7 +292,7 @@ def process_all_stocks() -> Dict:
             )
             symbols = [row[0] for row in cur.fetchall()]
         finally:
-            conn.close()
+            release_connection(conn)
 
         if not symbols:
             print("⚠️  No price data in database. Run price collector first!")

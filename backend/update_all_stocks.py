@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 logger = logging.getLogger(__name__)
 
-from database.db import get_connection, init_database, insert_prices_batch, get_all_symbols, _execute
+from database.db import get_connection, release_connection, init_database, insert_prices_batch, get_all_symbols, _execute
 
 init_database()
 
@@ -33,7 +33,7 @@ rows = _execute(conn,
     "SELECT symbol, MAX(date) as latest_date FROM prices WHERE interval = '1d' GROUP BY symbol"
 ).fetchall()
 symbol_dates = {r[0]: r[1] for r in rows}
-conn.close()
+release_connection(conn)
 
 # Find stocks that need updating
 needs_update = []
@@ -189,4 +189,4 @@ rows3 = _execute(conn,
 print("   Date distribution:")
 for r in rows3:
     print(f"     {r[0]}: {r[1]} stocks")
-conn.close()
+release_connection(conn)

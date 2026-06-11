@@ -19,6 +19,17 @@ from database.db import get_connection, release_connection, _execute, get_active
 
 _angel_log = logging.getLogger(__name__)
 
+
+class PartialCapacityError(Exception):
+    """Raised when a user's requested qty exceeds remaining platform capacity for a signal."""
+    def __init__(self, symbol: str, requested: int, available: int):
+        self.symbol    = symbol
+        self.requested = requested
+        self.available = available
+        super().__init__(
+            f"{symbol}: requested {requested} shares but only {available} platform capacity remains."
+        )
+
 # ── B9: Cached Angel One session ────────────────────────────────────────────
 # One session is created and reused across all LIVE order calls.
 # Refreshed automatically when expired (every 6 hours) or on 401.
@@ -135,25 +146,27 @@ def create_user(username: str, password_hash: str, display_name: str = None, ema
 def get_user(user_id: int) -> Optional[Dict]:
     """Get user account details."""
     conn = get_connection()
-    row = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
-    if not row:
+    try:
+        row = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
+        if not row:
+            return None
+        cols = _col_names(conn, "users")
+        return dict(zip(cols, row))
+    finally:
         release_connection(conn)
-        return None
-    cols = _col_names(conn, "users")
-    conn.close()
-    return dict(zip(cols, row))
 
 
 def get_user_by_username(username: str) -> Optional[Dict]:
     """Get user by username."""
     conn = get_connection()
-    row = _fetchone(conn, "SELECT * FROM users WHERE username = ?", (username,))
-    if not row:
+    try:
+        row = _fetchone(conn, "SELECT * FROM users WHERE username = ?", (username,))
+        if not row:
+            return None
+        cols = _col_names(conn, "users")
+        return dict(zip(cols, row))
+    finally:
         release_connection(conn)
-        return None
-    cols = _col_names(conn, "users")
-    conn.close()
-    return dict(zip(cols, row))
 
 
 # ==========================================
@@ -268,6 +281,32 @@ def execute_signal(
         if existing:
             raise ValueError(f"Already have an open position in {symbol}. Square off first.")
 
+        # Hard platform-wide capacity check — the only quantity blocker.
+        # consumed_volume tracks total shares bought across ALL users for this signal.
+        # recommended_volume = 1% of avg_daily_volume (market impact ceiling).
+        # We never let the platform collectively move more than 1% of a stock's daily volume.
+        # Per-user suggested qty is a UI hint shown on the frontend — it is NOT enforced here.
+        # columns: 0=consumed_volume, 1=recommended_volume, 2=remaining_capacity
+        sig_cap = _fetchone(conn, """
+            SELECT consumed_volume, recommended_volume,
+                   GREATEST(0, COALESCE(recommended_volume, 0) - COALESCE(consumed_volume, 0)) AS remaining
+            FROM trade_signals WHERE symbol = ? AND is_active = TRUE
+            ORDER BY generated_date DESC LIMIT 1
+        """, (symbol,))
+        if sig_cap:
+            consumed  = sig_cap[0] or 0
+            rec_vol   = sig_cap[1] or 0
+            remaining = sig_cap[2] or 0
+            if rec_vol > 0 and consumed >= rec_vol:
+                raise ValueError(
+                    f"{symbol} has reached full platform capacity ({consumed:,}/{rec_vol:,} shares). "
+                    f"No more users can buy this stock until the signal refreshes."
+                )
+            # If requested qty exceeds remaining, surface it to the caller so the
+            # frontend can show a confirmation modal (Option 2). Never silently cap.
+            if rec_vol > 0 and quantity > remaining:
+                raise PartialCapacityError(symbol, quantity, remaining)
+
         # Calculate quantity
         quantity = int(investment_amount / buy_price)
         if quantity < 1:
@@ -355,13 +394,28 @@ def execute_signal(
             WHERE id = ?
         """, (actual_investment + fees, actual_investment, user_id))
 
-        # Increment consumed_volume on the trade signal (platform-wide volume tracking)
-        _execute(conn, """
-            UPDATE trade_signals SET consumed_volume = COALESCE(consumed_volume, 0) + ?
-            WHERE symbol = ? AND generated_date = (
-                SELECT MAX(generated_date) FROM trade_signals WHERE symbol = ?
-            )
-        """, (quantity, symbol, symbol))
+        # Atomically increment consumed_volume and close signal when capacity is exhausted.
+        # SELECT FOR UPDATE locks the row so concurrent trades on the same stock
+        # can't both read the same consumed_volume and double-count.
+        # columns: 0=id, 1=consumed_volume, 2=recommended_volume
+        sig_row = _fetchone(conn, """
+            SELECT id, consumed_volume, recommended_volume
+            FROM trade_signals
+            WHERE symbol = ? AND is_active = TRUE
+            ORDER BY generated_date DESC LIMIT 1
+            FOR UPDATE
+        """, (symbol,))
+
+        if sig_row:
+            new_consumed = (sig_row[1] or 0) + quantity
+            rec_vol      = sig_row[2] or 0
+            at_capacity  = rec_vol > 0 and new_consumed >= rec_vol
+            _execute(conn, """
+                UPDATE trade_signals
+                SET consumed_volume = ?,
+                    is_active = CASE WHEN ? THEN FALSE ELSE is_active END
+                WHERE id = ?
+            """, (new_consumed, at_capacity, sig_row[0]))
 
         # Per-user volume tracking — record how much of this signal each user consumed
         if trade_signal_id:
@@ -439,7 +493,7 @@ def get_positions(user_id: int) -> List[Dict]:
         (user_id,)
     )
     cols = _col_names(conn, "positions")
-    conn.close()
+    release_connection(conn)
     return [dict(zip(cols, r)) for r in rows]
 
 
@@ -452,7 +506,7 @@ def get_orders(user_id: int, limit: int = 50) -> List[Dict]:
         (user_id, limit)
     )
     cols = _col_names(conn, "orders")
-    conn.close()
+    release_connection(conn)
     return [dict(zip(cols, r)) for r in rows]
 
 
@@ -542,7 +596,7 @@ def square_off(user_id: int, symbol: str, sell_price: float = None) -> Dict:
     user = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
     user_cols = _col_names(conn, "users")
     user_dict = dict(zip(user_cols, user))
-    conn.close()
+    release_connection(conn)
 
     return {
         "symbol": symbol,

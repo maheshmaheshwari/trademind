@@ -35,6 +35,7 @@ if _BACKEND_DIR not in sys.path:
 
 from database.db import (
     get_connection,
+    release_connection,
     get_latest_date,
     init_database,
     insert_prices_batch,
@@ -145,13 +146,14 @@ def get_intraday_symbols() -> List[str]:
     """
     conn = get_connection()
     try:
-        rows = conn.execute("SELECT DISTINCT symbol FROM positions").fetchall()
+        from database.db import _execute as _ex
+        rows = _ex(conn, "SELECT DISTINCT symbol FROM positions").fetchall()
         return [row[0] for row in rows]
     except Exception as exc:
         logger.error("Failed to query open positions: %s", exc)
         return []
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def _strip_ns(symbol: str) -> str:

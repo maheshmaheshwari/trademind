@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Bookmark, AlertTriangle } from 'lucide-react';
 import { useLazyGetStockDetailQuery, useGetPositionsQuery, useExecuteSignalMutation } from '../services/tradeMindApiService';
 import { useAuth } from '../AuthContext';
@@ -16,6 +17,11 @@ interface StockDetail {
   pe: number; mcap: number; volume: number;
   sentiment: number; updatedMin: number;
   spark: number[]; news: NewsItem[]; horizons: HorizonBreakdown[];
+  // Capacity
+  suggested_qty_per_user?: number;
+  consumed_volume?: number;
+  recommended_volume?: number;
+  remaining_volume?: number;
 }
 
 interface StockDrawerProps {
@@ -47,6 +53,100 @@ const SENT_TAG: Record<string, [string, string, string]> = {
 
 // ─── TradePanel ───────────────────────────────────────────────────────────────
 
+// ─── Partial-capacity confirmation modal ─────────────────────────────────────
+function PartialCapacityModal({ symbol, requested, available, onConfirm, onCancel }: {
+  symbol: string; requested: number; available: number;
+  onConfirm: (qty: number) => void; onCancel: () => void;
+}) {
+  return createPortal(
+    <>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(3,6,15,.65)', backdropFilter: 'blur(3px)', zIndex: 9100 }} onClick={onCancel} />
+      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 9101, width: 360, maxWidth: '92vw', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '24px 22px', boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {/* Icon + title */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 13 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(245,158,11,.12)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+            <AlertTriangle size={20} style={{ color: 'var(--gold)' }} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', marginBottom: 4 }}>Your profit may be lower</div>
+            <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.55 }}>
+              Many users are buying {symbol} right now. High demand can push the stock price up before your order fills — meaning you'd pay more than the signal's target price was calculated at.
+            </div>
+          </div>
+        </div>
+
+        {/* What this means in plain terms */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 16, flexShrink: 0 }}>📈</span>
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>Higher entry price</div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>You may buy at a slightly higher price than shown — the more you buy, the bigger this effect.</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 16, flexShrink: 0 }}>📉</span>
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>Smaller profit margin</div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>Since the target price stays the same, paying more upfront means less profit when it hits.</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.55, padding: '10px 13px', background: 'rgba(245,158,11,.06)', borderRadius: 9, border: '1px solid rgba(245,158,11,.18)' }}>
+          💡 <strong style={{ color: 'var(--text-2)' }}>Tip:</strong> Buying the suggested quantity reduces this risk and keeps your trade closer to the signal's original profit target.
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel} style={ghostBtn}>Change qty</button>
+          <button
+            onClick={() => onConfirm(available ?? 0)}
+            style={{ flex: 2, ...primaryBtn('var(--accent)') }}
+          >
+            Proceed with {available?.toLocaleString('en-IN') || 0} shares
+          </button>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
+// ─── Capacity meter ───────────────────────────────────────────────────────────
+function CapacityMeter({ consumed, total, suggested }: { consumed: number; total: number; suggested: number }) {
+  if (!total) return null;
+  const pct     = Math.min(100, Math.round((consumed / total) * 100));
+  const barColor = pct >= 80 ? 'var(--red)' : pct >= 50 ? 'var(--gold)' : 'var(--green)';
+  const remaining = Math.max(0, total - consumed);
+
+  return (
+    <div style={{ padding: '11px 13px', background: 'var(--surface-2)', borderRadius: 11, border: '1px solid var(--border)', marginBottom: 13 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-2)' }}>Platform capacity</span>
+        <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono,monospace)' }}>
+          {remaining.toLocaleString('en-IN')} left · {pct}% used
+        </span>
+      </div>
+      {/* Bar */}
+      <div style={{ height: 6, borderRadius: 99, background: 'var(--surface-3)', overflow: 'hidden', marginBottom: 8 }}>
+        <div style={{ height: '100%', width: `${pct}%`, borderRadius: 99, background: barColor, transition: 'width .4s ease' }} />
+      </div>
+      {/* Suggested qty hint */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+          Suggested for you
+        </span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent-2)', fontFamily: 'var(--font-mono,monospace)' }}>
+          {suggested.toLocaleString('en-IN')} shares
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── TradePanel ───────────────────────────────────────────────────────────────
+
 function TradePanel({ data, position, onClose }: {
   data: StockDetail;
   position: OpenPosition | null;
@@ -55,13 +155,20 @@ function TradePanel({ data, position, onClose }: {
   const { user }  = useAuth();
   const toast     = useToast();
   const [qty, setQty]     = useState('');
+  const [partialModal, setPartialModal] = useState<{ requested: number; available: number } | null>(null);
   const [executeSignalMut, { isLoading: busy }] = useExecuteSignalMutation();
 
   const balance   = user?.virtual_balance ?? 0;
-  const price     = data.price;
+  const price     = data?.price ?? 0;
   const maxBuy    = price > 0 ? Math.floor(balance / price) : 0;
   const qtyNum    = Math.max(0, parseInt(qty) || 0);
   const totalCost = qtyNum * price;
+
+  // Pre-fill with suggested qty when data loads
+  const suggestedQty = data?.suggested_qty_per_user ?? 0;
+  useEffect(() => {
+    if (suggestedQty > 0 && qty === '') setQty(String(suggestedQty));
+  }, [suggestedQty]);
 
   // Estimated SL / Target based on signal
   const estSL     = +(price * 0.93).toFixed(2);
@@ -70,13 +177,13 @@ function TradePanel({ data, position, onClose }: {
   const tgtPct    = +12;
 
   // ── SELL signal — user does NOT own this stock ────────────────────────────
-  if (data.signal === 'SELL' && !position) {
+  if (data?.signal === 'SELL' && !position) {
     return (
       <div style={{ padding: '16px 22px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 12, padding: '13px 14px', background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.25)', borderRadius: 11, marginBottom: 12 }}>
           <AlertTriangle size={18} style={{ color: 'var(--gold)', flexShrink: 0, marginTop: 1 }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>You don't hold {data.symbol}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>You don't hold {data?.symbol ?? ''}</span>
             <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.5 }}>
               SELL signals indicate potential downside — avoid adding this position. TradeMind doesn't support short selling. Only stocks you already own can be sold.
             </span>
@@ -84,7 +191,7 @@ function TradePanel({ data, position, onClose }: {
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button
-            onClick={() => toast({ type: 'info', title: `${data.symbol} added to watchlist` })}
+            onClick={() => toast({ type: 'info', title: `${data?.symbol ?? ''} added to watchlist` })}
             style={ghostBtn}
           >
             <Bookmark size={17} /> Watchlist
@@ -96,17 +203,17 @@ function TradePanel({ data, position, onClose }: {
   }
 
   // ── SELL signal — user owns the stock ─────────────────────────────────────
-  if (data.signal === 'SELL' && position) {
-    const maxSell  = position.qty;
+  if (data?.signal === 'SELL' && position) {
+    const maxSell  = position?.quantity ?? 0;
     const sellQty  = Math.min(qtyNum, maxSell);
     const proceeds = sellQty * price;
-    const pnlValue = (price - position.entry) * sellQty;
-    const pnlPct   = ((price - position.entry) / position.entry) * 100;
+    const pnlValue = (price - (position?.avg_buy_price ?? 0)) * sellQty;
+    const pnlPct   = ((price - (position?.avg_buy_price ?? 0)) / (position?.avg_buy_price || 1)) * 100;
 
     async function executeSell() {
       if (!user || sellQty <= 0) return;
       try {
-        await executeSignalMut({ user_id: user.id, symbol: data.symbol, name: data.name, investment_amount: proceeds, buy_price: position!.entry, target_price: position!.target, stop_loss: position!.sl, signal: 'SELL', mode: 'PAPER' }).unwrap();
+        await executeSignalMut({ user_id: user.id, symbol: data?.symbol ?? '', name: data?.name ?? '', investment_amount: proceeds, buy_price: position?.avg_buy_price ?? 0, target_price: position?.target_price ?? 0, stop_loss: position?.stop_loss ?? 0, signal: 'SELL', mode: 'PAPER' }).unwrap();
         toast({ type: pnlValue >= 0 ? 'success' : 'info', title: `Sold ${sellQty} × ${data.symbol}`, msg: `Proceeds: ${inr(proceeds)} · P&L: ${signed(pnlValue, 0)} (${signed(pnlPct, 2)}%)` });
         onClose();
       } catch (e: unknown) {
@@ -120,16 +227,16 @@ function TradePanel({ data, position, onClose }: {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, padding: '12px 13px', background: 'var(--surface-2)', borderRadius: 11, marginBottom: 13 }}>
           <div>
             <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>You own</div>
-            <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{position.qty} shares</div>
+            <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{position?.quantity ?? 0} shares</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>Avg. cost</div>
-            <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{inr(position.entry)}</div>
+            <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{inr(position?.avg_buy_price ?? 0)}</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>Unrealised P&amp;L</div>
-            <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 14, color: position.pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {signed(position.pnl, 0)}
+            <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 14, color: (position?.unrealized_pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+              {signed(position?.unrealized_pnl ?? 0, 0)}
             </div>
           </div>
         </div>
@@ -178,7 +285,7 @@ function TradePanel({ data, position, onClose }: {
             onClick={executeSell}
             style={{ flex: 2, ...primaryBtn('#EF4444'), opacity: (busy || qtyNum <= 0 || qtyNum > maxSell) ? 0.5 : 1, cursor: busy || qtyNum <= 0 || qtyNum > maxSell ? 'not-allowed' : 'pointer' }}
           >
-            {busy ? '…' : `Sell ${qtyNum > 0 ? qtyNum : ''} ${data.symbol}`}
+            {busy ? '…' : `Sell ${qtyNum > 0 ? qtyNum : ''} ${data?.symbol ?? ''}`}
           </button>
         </div>
       </div>
@@ -186,21 +293,40 @@ function TradePanel({ data, position, onClose }: {
   }
 
   // ── BUY / HOLD — buy form ──────────────────────────────────────────────────
-  async function executeBuy() {
-    if (!user || qtyNum <= 0) return;
+  async function executeBuy(overrideQty?: number) {
+    const finalQty = overrideQty ?? qtyNum;
+    if (!user || finalQty <= 0) return;
+    const investment = finalQty * price;
     try {
-      await executeSignalMut({ user_id: user.id, symbol: data.symbol, name: data.name, investment_amount: totalCost, buy_price: price, target_price: estTarget, stop_loss: estSL, signal: data.signal, confidence: data.confidence, mode: 'PAPER' }).unwrap();
-      toast({ type: 'success', title: `Bought ${qtyNum} × ${data.symbol}`, msg: `Invested: ${inr(totalCost)} · SL: ${inr(estSL)} · Target: ${inr(estTarget)}` });
+      await executeSignalMut({ user_id: user.id, symbol: data?.symbol ?? '', name: data?.name ?? '', investment_amount: investment, buy_price: price, target_price: estTarget, stop_loss: estSL, signal: data?.signal ?? 'HOLD', confidence: data?.confidence ?? 0, mode: 'PAPER' }).unwrap();
+      toast({ type: 'success', title: `Bought ${finalQty} × ${data.symbol}`, msg: `Invested: ${inr(investment)} · SL: ${inr(estSL)} · Target: ${inr(estTarget)}` });
+      setPartialModal(null);
       onClose();
     } catch (e: unknown) {
-      toast({ type: 'error', title: 'Order failed', msg: e instanceof Error ? e.message : 'Try again' });
+      // 409 PARTIAL_CAPACITY → show confirmation modal
+      const detail = (e as any)?.data?.detail;
+      if (detail?.error === 'PARTIAL_CAPACITY') {
+        setPartialModal({ requested: detail.requested, available: detail.available });
+        return;
+      }
+      toast({ type: 'error', title: 'Order failed', msg: detail?.message ?? (e instanceof Error ? e.message : 'Try again') });
     }
   }
 
   const insufficient = qtyNum > 0 && totalCost > balance;
+  const consumed      = data?.consumed_volume ?? 0;
+  const recommended   = data?.recommended_volume ?? 0;
+  const remaining     = data?.remaining_volume ?? 0;
+  const showCapacity  = recommended > 0;
 
   return (
     <div style={{ padding: '16px 22px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+
+      {/* Capacity meter — Option 1 */}
+      {showCapacity && (
+        <CapacityMeter consumed={consumed} total={recommended} suggested={suggestedQty} />
+      )}
+
       {/* Balance + SL/Target info row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, padding: '12px 13px', background: 'var(--surface-2)', borderRadius: 11, marginBottom: 13 }}>
         <div>
@@ -226,6 +352,11 @@ function TradePanel({ data, position, onClose }: {
         <div style={{ flex: 1 }}>
           <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>
             Quantity <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>@ {inr(price)}</span>
+            {showCapacity && suggestedQty > 0 && (
+              <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--accent-2)', fontWeight: 500 }}>
+                · suggested: {suggestedQty.toLocaleString('en-IN')}
+              </span>
+            )}
           </label>
           <input
             type="number" min={1} value={qty}
@@ -236,13 +367,16 @@ function TradePanel({ data, position, onClose }: {
             onBlur={e => e.currentTarget.style.borderColor = insufficient ? 'var(--red)' : 'var(--border)'}
           />
         </div>
-        <button
-          style={{ ...allBtn, alignSelf: 'flex-end' }}
-          onClick={() => setQty(String(maxBuy))}
-          title={`Max affordable: ${maxBuy} shares`}
-        >
-          Max ({maxBuy})
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignSelf: 'flex-end' }}>
+          <button style={allBtn} onClick={() => setQty(String(maxBuy))} title={`Max affordable: ${maxBuy}`}>
+            Max ({maxBuy})
+          </button>
+          {showCapacity && suggestedQty > 0 && (
+            <button style={{ ...allBtn, color: 'var(--accent-2)', borderColor: 'var(--accent)' }} onClick={() => setQty(String(suggestedQty))}>
+              Suggested
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Validation messages */}
@@ -252,6 +386,12 @@ function TradePanel({ data, position, onClose }: {
       {insufficient && (
         <p style={{ fontSize: 12, color: 'var(--red)', margin: '0 0 8px' }}>
           Total cost {inr(totalCost)} exceeds available balance {inrCompact(balance)}.
+        </p>
+      )}
+      {showCapacity && qtyNum > remaining && remaining > 0 && !insufficient && (
+        <p style={{ fontSize: 12, color: 'var(--gold)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 5, lineHeight: 1.5 }}>
+          <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+          High demand — buying this many shares may raise your entry price and reduce your profit. We'll show you the impact before confirming.
         </p>
       )}
 
@@ -271,23 +411,34 @@ function TradePanel({ data, position, onClose }: {
       {/* Action buttons */}
       <div style={{ display: 'flex', gap: 10 }}>
         <button
-          onClick={() => toast({ type: 'info', title: `${data.symbol} added to watchlist` })}
+          onClick={() => toast({ type: 'info', title: `${data?.symbol ?? ''} added to watchlist` })}
           style={ghostBtn}
         >
           <Bookmark size={17} /> Watchlist
         </button>
         <button
           disabled={busy || qtyNum <= 0 || insufficient || maxBuy === 0}
-          onClick={executeBuy}
+          onClick={() => executeBuy()}
           style={{ flex: 2, ...primaryBtn('var(--accent)'), opacity: (busy || qtyNum <= 0 || insufficient || maxBuy === 0) ? 0.5 : 1, cursor: (busy || qtyNum <= 0 || insufficient || maxBuy === 0) ? 'not-allowed' : 'pointer' }}
         >
-          {data.signal === 'SELL'
+          {data?.signal === 'SELL'
             ? <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M6 11l6 6 6-6"/></svg>
             : <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
           }
-          {busy ? 'Placing order…' : `Buy ${qtyNum > 0 ? qtyNum : ''} ${data.symbol}`}
+          {busy ? 'Placing order…' : `Buy ${qtyNum > 0 ? qtyNum : ''} ${data?.symbol ?? ''}`}
         </button>
       </div>
+
+      {/* Option 2: Partial capacity confirmation modal */}
+      {partialModal && (
+        <PartialCapacityModal
+          symbol={data?.symbol ?? ''}
+          requested={partialModal.requested}
+          available={partialModal.available}
+          onConfirm={(qty) => executeBuy(qty)}
+          onCancel={() => setPartialModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -340,7 +491,7 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
 
   const loading  = loadDetail || loadPos;
   const data: StockDetail | null = (detailRes as any)?.data ?? null;
-  const position: OpenPosition | null = ((posRes as any)?.data ?? []).find((p: OpenPosition) => p.symbol === symbol) ?? null;
+  const position: OpenPosition | null = ((posRes as any)?.data ?? []).find((p: OpenPosition) => p?.symbol === symbol) ?? null;
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -352,10 +503,10 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
 
   if (!symbol) return null;
 
-  const color   = data ? symColor(data.symbol) : '#3B82F6';
+  const color   = data ? symColor(data?.symbol ?? '') : '#3B82F6';
   const sigCol  = data?.signal === 'BUY' ? 'var(--green)' : data?.signal === 'SELL' ? 'var(--red)' : 'var(--gold)';
   const sigBg   = data?.signal === 'BUY' ? 'var(--green-soft)' : data?.signal === 'SELL' ? 'var(--red-soft)' : 'var(--gold-soft)';
-  const lineCol = data && data.change >= 0 ? '#10B981' : '#EF4444';
+  const lineCol = data && (data?.change ?? 0) >= 0 ? '#10B981' : '#EF4444';
   const sigArrow = data?.signal === 'BUY' ? '↑' : data?.signal === 'SELL' ? '↓' : '●';
 
   const rangeBtn = (r: typeof chartRange): React.CSSProperties => ({
@@ -373,16 +524,16 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
     display: 'flex', alignItems: 'center', gap: 9,
   };
 
-  return (
+  return createPortal(
     <>
-      {/* Scrim */}
+      {/* Scrim — covers full viewport including sidebar */}
       <div
-        style={{ position: 'fixed', inset: 0, background: 'rgba(3,6,15,.55)', backdropFilter: 'blur(2px)', zIndex: 90 }}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(3,6,15,.55)', backdropFilter: 'blur(2px)', zIndex: 9000 }}
         onClick={onClose}
       />
 
       {/* Panel */}
-      <aside style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 520, maxWidth: '92vw', background: 'var(--surface)', borderLeft: '1px solid var(--border)', zIndex: 95, display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-lg)', animation: 'slideIn .3s cubic-bezier(.4,0,.2,1) both' }}>
+      <aside style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 520, maxWidth: '92vw', background: 'var(--surface)', borderLeft: '1px solid var(--border)', zIndex: 9001, display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-lg)', animation: 'slideIn .3s cubic-bezier(.4,0,.2,1) both' }}>
 
         {/* ── Header ── */}
         <div style={{ padding: '20px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 14, flexShrink: 0 }}>
@@ -398,19 +549,19 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
                 </div>
               ) : data ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontWeight: 700, fontSize: 17, color: 'var(--text)' }}>{data.symbol}</span>
+                  <span style={{ fontWeight: 700, fontSize: 17, color: 'var(--text)' }}>{data?.symbol}</span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', height: 22, padding: '0 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: 'var(--surface-3)', color: 'var(--text-2)', border: '1px solid var(--border)' }}>
-                    {data.sector}
+                    {data?.sector}
                   </span>
                   {/* Show if user owns this stock */}
                   {position && (
                     <span style={{ display: 'inline-flex', alignItems: 'center', height: 22, padding: '0 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, background: 'var(--green-soft)', color: 'var(--green)', border: 'none' }}>
-                      ✓ You own {position.qty}
+                      ✓ You own {position?.quantity ?? 0}
                     </span>
                   )}
                 </div>
               ) : <span style={{ fontWeight: 700, fontSize: 17, color: 'var(--text)' }}>{symbol}</span>}
-              {data && <span style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{data.name}</span>}
+              {data && <span style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{data?.name}</span>}
             </div>
           </div>
           <button
@@ -432,18 +583,18 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
               {loading
                 ? <><div style={{ width: 160, height: 32, borderRadius: 7, background: 'var(--surface-3)' }} /><div style={{ width: 80, height: 14, borderRadius: 5, background: 'var(--surface-3)', marginTop: 6 }} /></>
                 : data ? <>
-                  <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 30, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text)' }}>{inr(data.price)}</span>
-                  <span style={{ fontWeight: 600, fontSize: 14, color: data.change >= 0 ? 'var(--green)' : 'var(--red)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                    {data.change >= 0 ? '↑' : '↓'} {Math.abs(data.change).toFixed(2)}%
+                  <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 30, fontWeight: 700, letterSpacing: '-.02em', color: 'var(--text)' }}>{inr(data?.price ?? 0)}</span>
+                  <span style={{ fontWeight: 600, fontSize: 14, color: (data?.change ?? 0) >= 0 ? 'var(--green)' : 'var(--red)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    {(data?.change ?? 0) >= 0 ? '↑' : '↓'} {Math.abs(data?.change ?? 0).toFixed(2)}%
                   </span>
                 </> : null}
             </div>
             {data && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 23, padding: '0 9px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, color: sigCol, background: sigBg }}>
-                  {sigArrow} {data.signal}
+                  {sigArrow} {data?.signal}
                 </span>
-                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Updated {fmtAgo(data.updatedMin)}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Updated {fmtAgo(data?.updatedMin ?? 0)}</span>
               </div>
             )}
           </div>
@@ -478,16 +629,16 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
                   </div>
                 ))
                 : data ? [
-                  ['Mkt Cap',  `₹${data.mcap.toLocaleString('en-IN')} Cr`],
-                  ['P/E',      String(data.pe)],
-                  ['Volume',   `${data.volume}M`],
-                  ['52W High', inr(data.high52, 0)],
-                  ['52W Low',  inr(data.low52,  0)],
-                  ['Sentiment', signed(data.sentiment)],
+                  ['Mkt Cap',  `₹${(data?.mcap ?? 0).toLocaleString('en-IN')} Cr`],
+                  ['P/E',      String(data?.pe ?? 0)],
+                  ['Volume',   `${data?.volume ?? 0}M`],
+                  ['52W High', inr(data?.high52 ?? 0, 0)],
+                  ['52W Low',  inr(data?.low52  ?? 0, 0)],
+                  ['Sentiment', signed(data?.sentiment ?? 0)],
                 ].map(([label, value], i) => (
                   <div key={label} style={{ background: 'var(--surface)', padding: '12px 13px' }}>
                     <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 3 }}>{label}</div>
-                    <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 14, color: i === 5 ? (data.sentiment >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text)' }}>{value}</div>
+                    <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 14, color: i === 5 ? ((data?.sentiment ?? 0) >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text)' }}>{value}</div>
                   </div>
                 ))
                 : null}
@@ -512,16 +663,16 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
                   </div>
                 ))
                 : (data?.horizons ?? []).map(b => {
-                  const bc = b.sig === 'BUY' ? 'var(--green)' : b.sig === 'SELL' ? 'var(--red)' : 'var(--gold)';
+                  const bc = b?.sig === 'BUY' ? 'var(--green)' : b?.sig === 'SELL' ? 'var(--red)' : 'var(--gold)';
                   return (
-                    <div key={b.h} style={{ display: 'grid', gridTemplateColumns: '42px 1fr auto', alignItems: 'center', gap: 12 }}>
-                      <span style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 12.5, color: 'var(--text)' }}>{b.h}</span>
+                    <div key={b?.h} style={{ display: 'grid', gridTemplateColumns: '42px 1fr auto', alignItems: 'center', gap: 12 }}>
+                      <span style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 12.5, color: 'var(--text)' }}>{b?.h}</span>
                       <div style={{ height: 24, borderRadius: 7, background: 'var(--surface-3)', position: 'relative', overflow: 'hidden' }}>
-                        <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: b.conf + '%', borderRadius: 7, background: bc, display: 'flex', alignItems: 'center', paddingLeft: 9, fontSize: 11, fontWeight: 700, color: '#fff' }}>
-                          {b.sig}
+                        <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: (b?.conf ?? 0) + '%', borderRadius: 7, background: bc, display: 'flex', alignItems: 'center', paddingLeft: 9, fontSize: 11, fontWeight: 700, color: '#fff' }}>
+                          {b?.sig}
                         </div>
                       </div>
-                      <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 12, fontWeight: 600, minWidth: 34, textAlign: 'right', color: 'var(--text)' }}>{b.conf}%</span>
+                      <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 12, fontWeight: 600, minWidth: 34, textAlign: 'right', color: 'var(--text)' }}>{b?.conf ?? 0}%</span>
                     </div>
                   );
                 })}
@@ -547,15 +698,15 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
                 </div>
               ))
               : (data?.news ?? []).map((n, i) => {
-                const [sentLabel, sentCol, sentBg] = SENT_TAG[n.sent] ?? SENT_TAG.neu;
-                const dotCol = n.sent === 'pos' ? 'var(--green)' : n.sent === 'neg' ? 'var(--red)' : 'var(--text-3)';
+                const [sentLabel, sentCol, sentBg] = SENT_TAG[n?.sent ?? ''] ?? SENT_TAG.neu;
+                const dotCol = n?.sent === 'pos' ? 'var(--green)' : n?.sent === 'neg' ? 'var(--red)' : 'var(--text-3)';
                 return (
                   <div key={i} style={{ display: 'flex', gap: 12, padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotCol, marginTop: 6, flexShrink: 0 }} />
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      <span style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.4, color: 'var(--text)' }}>{n.title}</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.4, color: 'var(--text)' }}>{n?.title}</span>
                       <div style={{ fontSize: 11, color: 'var(--text-3)', display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <span>{n.src}</span><span>·</span><span>{n.time}</span>
+                        <span>{n?.src}</span><span>·</span><span>{n?.time}</span>
                         <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6, color: sentCol, background: sentBg }}>{sentLabel}</span>
                       </div>
                     </div>
@@ -575,6 +726,7 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
           </div>
         )}
       </aside>
-    </>
+    </>,
+    document.body
   );
 }

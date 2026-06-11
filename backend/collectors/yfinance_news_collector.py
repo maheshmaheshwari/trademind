@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database.db import get_connection, _execute, _executemany, insert_news
+from database.db import get_connection, release_connection, _execute, _executemany, insert_news
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -131,7 +131,7 @@ def collect_stock(symbol: str) -> int:
             return len(rows)
 
         finally:
-            conn.close()
+            release_connection(conn)
 
     except Exception as e:
         logger.error(f"{symbol}: {e}")

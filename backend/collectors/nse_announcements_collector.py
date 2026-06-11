@@ -31,7 +31,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database.db import init_database, insert_news, get_connection, _execute
+from database.db import init_database, insert_news, get_connection, release_connection, _execute
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -168,7 +168,7 @@ def already_has_news(symbol_ns: str) -> bool:
         )
         return (cur.fetchone()[0] or 0) > 0
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None,
@@ -183,7 +183,7 @@ def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None
             cur = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d' ORDER BY symbol")
             all_symbols = [r[0].replace(".NS", "") for r in cur.fetchall()]
         finally:
-            conn.close()
+            release_connection(conn)
     else:
         with open(_TOKENS_FILE) as f:
             all_symbols = list(json.load(f).keys())
@@ -278,7 +278,7 @@ def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None
                     conn.rollback()
                     logger.error(f"{symbol} batch insert failed: {e}")
                 finally:
-                    conn.close()
+                    release_connection(conn)
 
             total_rows += inserted
             logger.info(f"[{idx}/{total}] {symbol}: {len(announcements)} announcements → {inserted} stored")

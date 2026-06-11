@@ -139,22 +139,6 @@ CREATE TABLE IF NOT EXISTS trade_signals (
 );
 """
 
-SQL_AI_SIGNALS = """
-CREATE TABLE IF NOT EXISTS ai_signals (
-    id            BIGSERIAL PRIMARY KEY,
-    symbol        TEXT NOT NULL,
-    generated_at  TIMESTAMPTZ DEFAULT NOW(),
-    signal        TEXT NOT NULL,
-    confidence    DOUBLE PRECISION,
-    model_version TEXT,
-    target_price  DOUBLE PRECISION,
-    stop_loss     DOUBLE PRECISION,
-    reasoning     TEXT,
-    features_used TEXT,
-    UNIQUE(symbol, generated_at, model_version)
-);
-"""
-
 SQL_ORDERS = """
 CREATE TABLE IF NOT EXISTS orders (
     id            BIGSERIAL PRIMARY KEY,
@@ -267,6 +251,38 @@ CREATE TABLE IF NOT EXISTS autopilot_settings (
     enabled    BOOLEAN DEFAULT FALSE,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+"""
+
+SQL_FII_DII_DAILY = """
+CREATE TABLE IF NOT EXISTS fii_dii_daily (
+    date        DATE        PRIMARY KEY,
+    fii_net     DOUBLE PRECISION,   -- net buy/sell in crores (positive = net buy)
+    dii_net     DOUBLE PRECISION,
+    fii_buy     DOUBLE PRECISION,
+    fii_sell    DOUBLE PRECISION,
+    dii_buy     DOUBLE PRECISION,
+    dii_sell    DOUBLE PRECISION,
+    source      TEXT DEFAULT 'nse',
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fii_dii_daily_date ON fii_dii_daily (date DESC);
+"""
+
+SQL_SCHEDULER_LOG = """
+CREATE TABLE IF NOT EXISTS scheduler_log (
+    id              BIGSERIAL PRIMARY KEY,
+    job_id          TEXT NOT NULL,
+    job_name        TEXT NOT NULL,
+    scheduled_at    TIMESTAMPTZ NOT NULL,
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    attempt         INTEGER NOT NULL DEFAULT 0,
+    error_msg       TEXT,
+    UNIQUE (job_id, scheduled_at)
+);
+CREATE INDEX IF NOT EXISTS idx_sched_log_status ON scheduler_log (status, scheduled_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sched_log_job    ON scheduler_log (job_id, scheduled_at DESC);
 """
 
 SQL_MARKET_OVERVIEW = """
@@ -465,7 +481,7 @@ SQL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_ts_date_signal     ON trade_signals (generated_date DESC, signal);",
     "CREATE INDEX IF NOT EXISTS idx_ts_confidence      ON trade_signals (confidence DESC);",
     "CREATE INDEX IF NOT EXISTS idx_ts_symbol          ON trade_signals (symbol);",
-    "CREATE INDEX IF NOT EXISTS idx_ai_symbol          ON ai_signals (symbol);",
+    "CREATE INDEX IF NOT EXISTS idx_ts_is_active        ON trade_signals (is_active);",
     "CREATE INDEX IF NOT EXISTS idx_orders_user        ON orders (user_id);",
     "CREATE INDEX IF NOT EXISTS idx_orders_symbol      ON orders (symbol);",
     "CREATE INDEX IF NOT EXISTS idx_positions_user     ON positions (user_id);",
@@ -493,9 +509,10 @@ def init_timescale(conn) -> None:
     # Regular tables first (no time-series partitioning)
     for sql in [
         SQL_USERS, SQL_PORTFOLIOS, SQL_PORTFOLIO_SECTORS, SQL_PORTFOLIO_STOCKS,
-        SQL_RISK_SETTINGS, SQL_TRADE_SIGNALS, SQL_AI_SIGNALS,
+        SQL_RISK_SETTINGS, SQL_TRADE_SIGNALS,
         SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS,
         SQL_AUTHORIZED_TRADES, SQL_AUTOPILOT_SETTINGS, SQL_MARKET_OVERVIEW,
+        SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG,
     ]:
         cur.execute(sql)
 

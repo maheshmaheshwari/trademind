@@ -102,14 +102,14 @@ function ProfileTab({ user }: { user: any }) {
         <SectionBody>
           <div className="flex items-center gap-4 py-5 border-b border-[var(--border)]">
             <div className="w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500 to-[var(--accent)] grid place-items-center font-bold text-[22px] text-white flex-shrink-0">
-              {user?.display_name?.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase() ?? 'U'}
+              {user?.display_name?.split(' ')?.map((w: string) => w?.[0] ?? '').join('').slice(0, 2).toUpperCase() ?? 'U'}
             </div>
             <div>
               <p className="text-[14px] font-semibold text-[var(--text)] m-0">{user?.display_name ?? 'User'}</p>
               <p className="text-[12.5px] text-[var(--text-3)] m-0">@{user?.username}</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4 py-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-5">
             {[
               ['Full Name',    user?.display_name ?? ''],
               ['Username',     user?.username ?? ''],
@@ -458,7 +458,7 @@ export default function SettingsPage() {
       </div>
 
       {/* ── Layout: sidebar + content ── */}
-      <div className="grid grid-cols-[220px_1fr] gap-[calc(20px*var(--u))] items-start">
+      <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-[calc(20px*var(--u))] items-start">
 
         {/* Sidebar nav */}
         <nav className="sticky top-0 flex flex-col gap-[3px] bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] p-[10px]">

@@ -9,7 +9,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
-from database.db import get_trade_signals_formatted, get_connection, _execute
+from database.db import get_trade_signals_formatted, get_connection, release_connection, _execute
 
 router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])
 
@@ -268,7 +268,7 @@ async def create_portfolio(body: PortfolioCreate):
 
         conn.commit()
     finally:
-        conn.close()
+        release_connection(conn)
     
     return {
         "data": {
@@ -319,7 +319,7 @@ async def get_portfolio(portfolio_id: int):
         
         return {"data": portfolio}
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 @router.get("")
@@ -332,7 +332,7 @@ async def list_portfolios():
         portfolios = [dict(zip(cols, r)) for r in rows]
         return {"data": portfolios, "total": len(portfolios)}
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 @router.put("/{portfolio_id}/sectors")
@@ -363,7 +363,7 @@ async def update_sectors(portfolio_id: int, body: SectorUpdate):
         
         return {"data": {"message": "Sectors updated", "portfolio_id": portfolio_id}}
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 @router.post("/{portfolio_id}/rebalance")
@@ -419,7 +419,7 @@ async def rebalance_portfolio(portfolio_id: int):
             "rebalanced_at": datetime.now().isoformat(),
         }}
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 @router.delete("/{portfolio_id}")
@@ -433,4 +433,4 @@ async def delete_portfolio(portfolio_id: int):
         conn.commit()
         return {"data": {"message": "Portfolio deleted", "portfolio_id": portfolio_id}}
     finally:
-        conn.close()
+        release_connection(conn)

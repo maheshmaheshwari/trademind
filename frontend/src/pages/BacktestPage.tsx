@@ -90,17 +90,17 @@ export default function BacktestPage() {
     );
   }
 
-  const ms = data.model_stats;
-  const ss = data.signal_stats;
-  const history: any[] = data.history ?? [];
+  const ms = data?.model_stats ?? {};
+  const ss = data?.signal_stats ?? {};
+  const history: any[] = data?.history ?? [];
 
-  const buyCount  = (ss.distribution?.STRONG_BUY ?? 0) + (ss.distribution?.BUY ?? 0);
-  const sellCount = (ss.distribution?.SELL ?? 0)       + (ss.distribution?.STRONG_SELL ?? 0);
+  const buyCount  = (ss?.distribution?.STRONG_BUY ?? 0) + (ss?.distribution?.BUY ?? 0);
+  const sellCount = (ss?.distribution?.SELL ?? 0)       + (ss?.distribution?.STRONG_SELL ?? 0);
 
   // ── Horizon chart (grouped bar) ───────────────────────────────────────
-  const horizonLabels = ms.by_horizon.map((h: any) => h.horizon.replace(' ', '\n'));
-  const horizonAcc   = ms.by_horizon.map((h: any) => h.avg_accuracy);
-  const horizonPrec  = ms.by_horizon.map((h: any) => h.avg_precision);
+  const horizonLabels = (ms?.by_horizon ?? []).map((h: any) => h?.horizon?.replace?.(' ', '\n') ?? '');
+  const horizonAcc   = (ms?.by_horizon ?? []).map((h: any) => h?.avg_accuracy ?? 0);
+  const horizonPrec  = (ms?.by_horizon ?? []).map((h: any) => h?.avg_precision ?? 0);
 
   const horizonOptions: ApexOptions = {
     ...chartBase(isDark),
@@ -121,8 +121,8 @@ export default function BacktestPage() {
   ];
 
   // ── Model type donut ──────────────────────────────────────────────────
-  const modelLabels  = ms.by_model_type.map((m: any) => m.model);
-  const modelCounts  = ms.by_model_type.map((m: any) => m.count);
+  const modelLabels  = (ms?.by_model_type ?? []).map((m: any) => m?.model ?? '');
+  const modelCounts  = (ms?.by_model_type ?? []).map((m: any) => m?.count ?? 0);
   const donutColors  = ['#3B82F6','#10B981','#F59E0B','#8B5CF6','#EF4444','#06B6D4','#EC4899'];
 
   const donutOptions: ApexOptions = {
@@ -137,9 +137,9 @@ export default function BacktestPage() {
   };
 
   // ── Signal distribution bar ───────────────────────────────────────────
-  const sigLabels  = ss.by_signal_type.map((s: any) => s.signal);
-  const sigCounts  = ss.by_signal_type.map((s: any) => s.count);
-  const sigColors  = ss.by_signal_type.map((s: any) => SIGNAL_COLORS[s.signal] ?? '#3B82F6');
+  const sigLabels  = (ss?.by_signal_type ?? []).map((s: any) => s?.signal ?? '');
+  const sigCounts  = (ss?.by_signal_type ?? []).map((s: any) => s?.count ?? 0);
+  const sigColors  = (ss?.by_signal_type ?? []).map((s: any) => SIGNAL_COLORS[s?.signal] ?? '#3B82F6');
 
   const sigOptions: ApexOptions = {
     ...chartBase(isDark),
@@ -153,9 +153,9 @@ export default function BacktestPage() {
   const sigSeries = [{ name: 'Stocks', data: sigCounts }];
 
   // ── History timeline (area) ───────────────────────────────────────────
-  const histDates = history.map(h => h.date);
-  const histBuy   = history.map(h => h.buy_signals);
-  const histSell  = history.map(h => h.sell_signals);
+  const histDates = history.map((h: any) => h?.date ?? '');
+  const histBuy   = history.map((h: any) => h?.buy_signals ?? 0);
+  const histSell  = history.map((h: any) => h?.sell_signals ?? 0);
 
   const histOptions: ApexOptions = {
     ...chartBase(isDark),
@@ -181,49 +181,49 @@ export default function BacktestPage() {
         <div>
           <h1 className="text-[22px] font-bold text-ink tracking-tight">AI Performance Center</h1>
           <p className="text-[13px] text-ink-3 mt-1">
-            Model accuracy, signal quality, and portfolio simulation across {ms.total_models} trained models
+            Model accuracy, signal quality, and portfolio simulation across {ms?.total_models ?? 0} trained models
           </p>
         </div>
         <div className="flex items-center gap-2 h-8 px-3 rounded-full border border-line bg-surface-2 text-[12px] text-ink-3">
           <span className="w-2 h-2 rounded-full bg-gain" />
-          Last updated: {ss.generated_at ? new Date(ss.generated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+          Last updated: {ss?.generated_at ? new Date(ss.generated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
         </div>
       </div>
 
       {/* ── Stat cards ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           icon={Brain}
           label="Avg Model Accuracy"
-          value={fmt(ms.avg_accuracy) + '%'}
-          sub={`${ms.successful_models} of ${ms.total_models} models trained`}
+          value={fmt(ms?.avg_accuracy ?? 0) + '%'}
+          sub={`${ms?.successful_models ?? 0} of ${ms?.total_models ?? 0} models trained`}
           color="#3B82F6"
         />
         <StatCard
           icon={Target}
           label="Avg Precision"
-          value={fmt(ms.avg_precision) + '%'}
-          sub={`${ms.high_quality_models} models ≥ 70% on both`}
+          value={fmt(ms?.avg_precision ?? 0) + '%'}
+          sub={`${ms?.high_quality_models ?? 0} models ≥ 70% on both`}
           color="#10B981"
         />
         <StatCard
           icon={TrendingUp}
           label="Actionable Signals"
           value={buyCount.toString()}
-          sub={`${sellCount} sell signals · ${ss.total_signals} total`}
+          sub={`${sellCount} sell signals · ${ss?.total_signals ?? 0} total`}
           color="#8B5CF6"
         />
         <StatCard
           icon={Zap}
           label="Avg Confidence"
-          value={fmt(ss.avg_confidence) + '%'}
-          sub={`Avg expected return ${fmt(ss.avg_expected_return)}% per signal`}
+          value={fmt(ss?.avg_confidence ?? 0) + '%'}
+          sub={`Avg expected return ${fmt(ss?.avg_expected_return ?? 0)}% per signal`}
           color="#F59E0B"
         />
       </div>
 
       {/* ── Charts row 1 ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
         <SectionCard
           title="Accuracy & Precision by Horizon"
@@ -242,7 +242,7 @@ export default function BacktestPage() {
 
         <SectionCard
           title="Best Model Distribution"
-          sub={`${ms.by_model_type.length} model types compete per stock — winner is saved`}
+          sub={`${ms?.by_model_type?.length ?? 0} model types compete per stock — winner is saved`}
         >
           <ReactApexChart
             type="donut"
@@ -258,11 +258,11 @@ export default function BacktestPage() {
       </div>
 
       {/* ── Charts row 2 ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
         <SectionCard
           title="Current Signal Distribution"
-          sub="Breakdown of all 377 signals generated today"
+          sub={`Breakdown of all ${ss?.total_signals ?? 0} signals generated today`}
         >
           <ReactApexChart
             type="bar"
@@ -270,12 +270,12 @@ export default function BacktestPage() {
             options={sigOptions}
             height={220}
           />
-          <div className="grid grid-cols-3 gap-3 mt-1">
-            {ss.by_signal_type.filter((s: any) => ['STRONG BUY','BUY','STRONG SELL'].includes(s.signal)).map((s: any) => (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-1">
+            {(ss?.by_signal_type ?? []).filter((s: any) => ['STRONG BUY','BUY','STRONG SELL'].includes(s?.signal)).map((s: any) => (
               <div key={s.signal} className="rounded-[9px] p-2.5 border border-line bg-surface-2 text-center">
-                <div className="text-[11px] font-semibold" style={{ color: SIGNAL_COLORS[s.signal] }}>{s.signal}</div>
-                <div className="text-[18px] font-bold text-ink mt-0.5">{s.count}</div>
-                <div className="text-[11px] text-ink-3">{fmt(s.avg_confidence)}% conf</div>
+                <div className="text-[11px] font-semibold" style={{ color: SIGNAL_COLORS[s?.signal] }}>{s?.signal}</div>
+                <div className="text-[18px] font-bold text-ink mt-0.5">{s?.count ?? 0}</div>
+                <div className="text-[11px] text-ink-3">{fmt(s?.avg_confidence ?? 0)}% conf</div>
               </div>
             ))}
           </div>
@@ -302,26 +302,26 @@ export default function BacktestPage() {
             sub="Model-predicted returns, weighted by confidence"
           >
             <div className="flex flex-col gap-3 mt-1">
-              {ss.by_signal_type.filter((s: any) => s.count > 0).map((s: any) => (
-                <div key={s.signal} className="flex items-center gap-3">
-                  <span className="w-[90px] text-[12px] font-semibold flex-shrink-0" style={{ color: SIGNAL_COLORS[s.signal] }}>
-                    {s.signal}
+              {(ss?.by_signal_type ?? []).filter((s: any) => (s?.count ?? 0) > 0).map((s: any) => (
+                <div key={s?.signal} className="flex items-center gap-3">
+                  <span className="w-[90px] text-[12px] font-semibold flex-shrink-0" style={{ color: SIGNAL_COLORS[s?.signal] }}>
+                    {s?.signal}
                   </span>
                   <div className="flex-1 h-5 rounded-full bg-surface-2 overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all duration-500"
                       style={{
-                        width: `${Math.min(100, Math.abs(s.avg_expected_return) * 7)}%`,
-                        background: SIGNAL_COLORS[s.signal],
+                        width: `${Math.min(100, Math.abs(s?.avg_expected_return ?? 0) * 7)}%`,
+                        background: SIGNAL_COLORS[s?.signal] ?? '#3B82F6',
                         opacity: 0.8,
                       }}
                     />
                   </div>
                   <span className="text-[12px] font-mono text-ink-2 w-14 text-right flex-shrink-0">
-                    {s.avg_expected_return > 0 ? '+' : ''}{fmt(s.avg_expected_return)}%
+                    {(s?.avg_expected_return ?? 0) > 0 ? '+' : ''}{fmt(s?.avg_expected_return ?? 0)}%
                   </span>
                   <span className="text-[11px] text-ink-3 w-16 text-right flex-shrink-0">
-                    {s.count} stocks
+                    {s?.count ?? 0} stocks
                   </span>
                 </div>
               ))}
@@ -349,27 +349,27 @@ export default function BacktestPage() {
               </tr>
             </thead>
             <tbody>
-              {ss.top_signals.map((t: any, i: number) => {
-                const sigColor = SIGNAL_COLORS[t.signal] ?? '#3B82F6';
-                const expRet = t.trade?.expected_return_pct ?? 0;
+              {(ss?.top_signals ?? []).map((t: any, i: number) => {
+                const sigColor = SIGNAL_COLORS[t?.signal ?? ''] ?? '#3B82F6';
+                const expRet = t?.trade?.expected_return_pct ?? 0;
                 return (
-                  <tr key={t.symbol + i} className="border-b border-line/50 hover:bg-surface-hover/50 transition-colors">
+                  <tr key={(t?.symbol ?? '') + i} className="border-b border-line/50 hover:bg-surface-hover/50 transition-colors">
                     <td className="py-2.5 pr-4">
-                      <div className="font-semibold text-ink">{t.symbol?.replace('.NS', '')}</div>
-                      {t.name && <div className="text-[11px] text-ink-3 truncate max-w-[120px]">{t.name}</div>}
+                      <div className="font-semibold text-ink">{t?.symbol?.replace?.('.NS', '')}</div>
+                      {t?.name && <div className="text-[11px] text-ink-3 truncate max-w-[120px]">{t?.name}</div>}
                     </td>
                     <td className="py-2.5 pr-4">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background: sigColor + '1A', color: sigColor }}>
-                        {t.signal === 'STRONG BUY' ? <CheckCircle size={11} /> : t.signal === 'STRONG SELL' ? <AlertCircle size={11} /> : null}
-                        {t.signal}
+                        {t?.signal === 'STRONG BUY' ? <CheckCircle size={11} /> : t?.signal === 'STRONG SELL' ? <AlertCircle size={11} /> : null}
+                        {t?.signal}
                       </span>
                     </td>
                     <td className="py-2.5 pr-4">
                       <div className="flex items-center gap-2">
                         <div className="w-16 h-1.5 rounded-full bg-surface-2 overflow-hidden">
-                          <div className="h-full rounded-full bg-accent" style={{ width: `${t.confidence}%` }} />
+                          <div className="h-full rounded-full bg-accent" style={{ width: `${t?.confidence ?? 0}%` }} />
                         </div>
-                        <span className="font-mono text-[12px] text-ink-2">{fmt(t.confidence)}%</span>
+                        <span className="font-mono text-[12px] text-ink-2">{fmt(t?.confidence ?? 0)}%</span>
                       </div>
                     </td>
                     <td className="py-2.5 pr-4">
@@ -377,11 +377,11 @@ export default function BacktestPage() {
                         {expRet >= 0 ? '+' : ''}{fmt(expRet)}%
                       </span>
                     </td>
-                    <td className="py-2.5 pr-4 text-ink-2">{t.model?.name ?? '—'}</td>
+                    <td className="py-2.5 pr-4 text-ink-2">{t?.model?.name ?? '—'}</td>
                     <td className="py-2.5 pr-4">
-                      <span className="font-mono text-[12px] text-ink-2">{fmt(t.model?.accuracy ?? 0)}%</span>
+                      <span className="font-mono text-[12px] text-ink-2">{fmt(t?.model?.accuracy ?? 0)}%</span>
                     </td>
-                    <td className="py-2.5 text-ink-3">{t.model?.horizon ?? '—'}</td>
+                    <td className="py-2.5 text-ink-3">{t?.model?.horizon ?? '—'}</td>
                   </tr>
                 );
               })}
@@ -398,9 +398,9 @@ export default function BacktestPage() {
         <div>
           <h4 className="text-[14px] font-bold text-ink">Model Methodology</h4>
           <p className="text-[12.5px] text-ink-2 mt-1 leading-relaxed">
-            TradeMind trains <strong className="text-ink">{ms.successful_models} individual ML models</strong> (XGBoost, LightGBM, RandomForest, Ensemble) per stock across 6 prediction horizons.
+            TradeMind trains <strong className="text-ink">{ms?.successful_models ?? 0} individual ML models</strong> (XGBoost, LightGBM, RandomForest, Ensemble) per stock across 6 prediction horizons.
             Models are selected by harmonic mean of accuracy and precision on a held-out time-series test set with purged cross-validation to prevent data leakage.
-            Only models meeting <strong className="text-ink">≥ 70% accuracy and ≥ 70% precision</strong> are deployed — {ms.high_quality_models} models currently meet this bar.
+            Only models meeting <strong className="text-ink">≥ 70% accuracy and ≥ 70% precision</strong> are deployed — {ms?.high_quality_models ?? 0} models currently meet this bar.
             Signals are probability-calibrated using isotonic regression so a 85% confidence score reflects an 85% historical win rate.
           </p>
           <p className="text-[11.5px] text-ink-3 mt-2 italic">

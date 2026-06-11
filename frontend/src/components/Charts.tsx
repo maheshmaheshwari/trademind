@@ -98,12 +98,27 @@ interface AreaChartProps {
   color?: string;
   h?: number;
   labels?: string[];
+  currency?: boolean; // true → ₹ prefix + compact formatting; false (default) → plain number
 }
 
-export function AreaChart({ data, color = '#3B82F6', h = 230, labels }: AreaChartProps) {
+export function AreaChart({ data, color = '#3B82F6', h = 230, labels, currency = false }: AreaChartProps) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const base = baseOptions(isDark);
+
+  function fmtAxis(v: number) {
+    if (!currency) return Math.round(v).toLocaleString('en-IN');
+    if (Math.abs(v) >= 1e7) return '₹' + (v / 1e7).toFixed(1) + 'Cr';
+    if (Math.abs(v) >= 1e5) return '₹' + (v / 1e5).toFixed(1) + 'L';
+    return '₹' + Math.round(v).toLocaleString('en-IN');
+  }
+
+  function fmtTip(v: number) {
+    if (!currency) return v.toLocaleString('en-IN');
+    if (Math.abs(v) >= 1e7) return '₹' + (v / 1e7).toFixed(2) + ' Cr';
+    if (Math.abs(v) >= 1e5) return '₹' + (v / 1e5).toFixed(2) + ' L';
+    return '₹' + v.toLocaleString('en-IN');
+  }
 
   const options: ApexOptions = {
     ...base,
@@ -122,33 +137,28 @@ export function AreaChart({ data, color = '#3B82F6', h = 230, labels }: AreaChar
     xaxis: {
       ...base.xaxis,
       categories: labels ?? data.map((_, i) => i.toString()),
+      tickAmount: labels ? labels.length - 1 : undefined,
+      tickPlacement: 'on',
       labels: {
         ...base.xaxis?.labels,
         show: !!labels,
+        rotate: 0,
+        hideOverlappingLabels: false,
+        showDuplicates: false,
       },
     },
     yaxis: {
       ...(base.yaxis as object),
       labels: {
         ...(Array.isArray(base.yaxis) ? {} : base.yaxis?.labels),
-        formatter: (v: number) => {
-          if (Math.abs(v) >= 1e7) return '₹' + (v / 1e7).toFixed(1) + 'Cr';
-          if (Math.abs(v) >= 1e5) return '₹' + (v / 1e5).toFixed(1) + 'L';
-          return '₹' + Math.round(v).toLocaleString('en-IN');
-        },
+        formatter: fmtAxis,
       },
     },
     markers: { size: 0, hover: { size: 5, sizeOffset: 2 } },
     colors: [color],
     tooltip: {
       ...base.tooltip,
-      y: {
-        formatter: (v: number) => {
-          if (Math.abs(v) >= 1e7) return '₹' + (v / 1e7).toFixed(2) + ' Cr';
-          if (Math.abs(v) >= 1e5) return '₹' + (v / 1e5).toFixed(2) + ' L';
-          return '₹' + v.toLocaleString('en-IN');
-        },
-      },
+      y: { formatter: fmtTip },
     },
   };
 

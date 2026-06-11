@@ -33,16 +33,19 @@ export default function AISignalsPage() {
   const dSearch = useDeferredValue(search);
 
   const { data: res, isLoading: loading } = useGetStocksQuery({ size: 500 });
-  const allStocks: Stock[] = (res as any)?.data ?? [];
+  // Cast to any — API returns extra fields (expReturn, updatedMin, sentiment) alongside Stock fields
+  const allStocks: any[] = (res as any)?.data ?? [];
+  // Only show stocks that have a signal
+  const signalStocks = allStocks.filter(s => s.signal != null && s.confidence != null);
 
-  const filtered = useMemo(() => [...allStocks]
+  const filtered = useMemo(() => [...signalStocks]
     .filter(s =>
-      (sigType  === 'All' || s.signal  === sigType)  &&
-      (horizon  === 'All' || s.horizon === horizon)  &&
-      (sector   === 'All' || s.sector  === sector)   &&
-      s.confidence >= conf &&
-      (!dSearch || s.symbol.toLowerCase().includes(dSearch.toLowerCase()) ||
-                   s.name.toLowerCase().includes(dSearch.toLowerCase()))
+      (sigType  === 'All' || s.signal   === sigType)  &&
+      (horizon  === 'All' || s.horizon  === horizon)  &&
+      (sector   === 'All' || s.sector   === sector)   &&
+      (s.confidence ?? 0) >= conf &&
+      (!dSearch || s.symbol?.toLowerCase()?.includes(dSearch.toLowerCase()) ||
+                   s.name?.toLowerCase()?.includes(dSearch.toLowerCase()))
     )
     .sort((a, b) => {
       const va = a[sort.key as keyof Stock], vb = b[sort.key as keyof Stock];
@@ -56,7 +59,7 @@ export default function AISignalsPage() {
   const rows  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   const counts = { BUY: 0, SELL: 0, HOLD: 0 };
-  allStocks.forEach(s => { if (s.signal in counts) counts[s.signal as keyof typeof counts]++; });
+  signalStocks.forEach(s => { if (s.signal in counts) counts[s.signal as keyof typeof counts]++; });
 
   const segBtn = (active: boolean) =>
     `border-none font-sans text-[12.5px] font-semibold px-3 py-[6px] rounded-[7px] cursor-pointer transition-colors ${
@@ -176,16 +179,20 @@ export default function AISignalsPage() {
                     <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s.horizon}</span>
                   </Td>
                   <Td align="right">
-                    <span className="font-mono font-semibold tabular-nums" style={{ color: s.expReturn >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {(s.expReturn >= 0 ? '+' : '') + s.expReturn.toFixed(2) + '%'}
-                    </span>
+                    {s.expReturn != null ? (
+                      <span className="font-mono font-semibold tabular-nums" style={{ color: s.expReturn >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        {(s.expReturn >= 0 ? '+' : '') + Number(s.expReturn).toFixed(2) + '%'}
+                      </span>
+                    ) : <span className="text-ink-3">—</span>}
                   </Td>
                   <Td align="right">
-                    <span className="font-mono tabular-nums" style={{ color: s.sentiment >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {(s.sentiment >= 0 ? '+' : '') + s.sentiment.toFixed(2)}
-                    </span>
+                    {s.sentiment != null ? (
+                      <span className="font-mono tabular-nums" style={{ color: s.sentiment >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        {(s.sentiment >= 0 ? '+' : '') + Number(s.sentiment).toFixed(2)}
+                      </span>
+                    ) : <span className="text-ink-3">—</span>}
                   </Td>
-                  <Td align="right"><span className="text-[12px] text-ink-3 font-mono">{fmtAgo(s.updatedMin)}</span></Td>
+                  <Td align="right"><span className="text-[12px] text-ink-3 font-mono">{fmtAgo(s.updatedMin ?? 0)}</span></Td>
                 </tr>
               ))}
             </tbody>

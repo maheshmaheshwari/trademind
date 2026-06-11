@@ -151,13 +151,13 @@ def _worker(args):
 def retrain_all(symbol_filter: Optional[str] = None,
                 workers: int = 1,
                 resume: bool = True):
-    from database.db import get_connection, _execute
+    from database.db import get_connection, release_connection, _execute
 
     # Load all symbols from DB
     conn = get_connection()
     cur  = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d' ORDER BY symbol")
     all_symbols = [r[0] for r in cur.fetchall()]
-    conn.close()
+    release_connection(conn)
 
     if symbol_filter:
         all_symbols = [s for s in all_symbols if s == symbol_filter]

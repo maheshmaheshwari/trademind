@@ -17,7 +17,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
-from database.db import _execute, _rows_to_dicts, get_connection, insert_notification
+from database.db import _execute, _rows_to_dicts, get_connection, release_connection, insert_notification
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/autopilot", tags=["Autopilot"])
@@ -115,7 +115,7 @@ def _execute_mandate(trade: dict) -> dict:
                 (bracket_id, sl_gtt_id, target_gtt_id, trade["id"]))
             conn.commit()
         finally:
-            conn.close()
+            release_connection(conn)
 
         result.update(success=True, bracket_id=bracket_id,
                       sl_gtt_id=sl_gtt_id, target_gtt_id=target_gtt_id)
@@ -141,7 +141,7 @@ def _fire_pending_mandates(user_id: int):
             (user_id,))
         pending = _rows_to_dicts(cur)
     finally:
-        conn.close()
+        release_connection(conn)
 
     if not pending:
         logger.info(f"Autopilot ON: no pending mandates for user {user_id}")
@@ -203,7 +203,7 @@ async def get_status(user_id: int):
             "projected_profit": projected,
         }
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 @router.post("/toggle")
@@ -218,7 +218,7 @@ async def toggle_autopilot(body: ToggleBody, background_tasks: BackgroundTasks):
             (new_state, body.user_id))
         conn.commit()
     finally:
-        conn.close()
+        release_connection(conn)
 
     # Fire pending mandates in the background when turning ON
     if new_state:
@@ -243,7 +243,7 @@ async def list_trades(user_id: int, status: Optional[str] = None):
         rows = _rows_to_dicts(cur)
         return {"data": rows, "total": len(rows)}
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 @router.post("/trades")
@@ -278,7 +278,7 @@ async def authorize_trade(body: AuthorizeTradeBody, background_tasks: Background
         logger.error(f"authorize_trade insert error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        conn.close()
+        release_connection(conn)
 
     # If autopilot is on, fire immediately in the background
     if autopilot_on and trade:
@@ -305,7 +305,7 @@ async def revoke_trade(trade_id: int):
             raise HTTPException(status_code=404, detail="Trade not found")
         trade = rows[0]
     finally:
-        conn.close()
+        release_connection(conn)
 
     if trade["status"] not in ("PENDING", "EXECUTED"):
         raise HTTPException(status_code=400,
@@ -350,7 +350,7 @@ async def revoke_trade(trade_id: int):
                 (trade_id,))
         conn.commit()
     finally:
-        conn.close()
+        release_connection(conn)
 
     # Notify
     try:

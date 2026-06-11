@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query
 from typing import Optional
 
 from database.db import get_trade_signals_formatted, get_signal_history
+from api.schemas import PaginatedSignalsOut, SignalForStockOut, SignalHistoryOut
 
 router = APIRouter(prefix="/api/signals", tags=["Signals"])
 
@@ -72,7 +73,7 @@ def _nested_get(d: dict, keys: list):
     return d
 
 
-@router.get("/latest")
+@router.get("/latest", response_model=PaginatedSignalsOut)
 async def get_latest_signals(
     page: int = Query(default=0, ge=0),
     size: int = Query(default=25, ge=1, le=500),
@@ -95,7 +96,7 @@ async def get_latest_signals(
     return result
 
 
-@router.get("/stock/{symbol}")
+@router.get("/stock/{symbol}", response_model=SignalForStockOut)
 async def get_signal_for_stock(symbol: str):
     """Get the latest trade signal for a specific stock symbol."""
     raw = get_trade_signals_formatted()
@@ -113,14 +114,14 @@ async def get_signal_for_stock(symbol: str):
     return {"signal": match}
 
 
-@router.get("/history")
+@router.get("/history", response_model=SignalHistoryOut)
 async def get_signal_history_endpoint():
     """Get all historical signal runs grouped by date."""
     history = get_signal_history(limit=30)
     return {"data": history, "total": len(history)}
 
 
-@router.get("/actionable")
+@router.get("/actionable", response_model=PaginatedSignalsOut)
 async def get_actionable_signals(
     page: int = Query(default=0, ge=0),
     size: int = Query(default=25, ge=1, le=500),
@@ -135,7 +136,7 @@ async def get_actionable_signals(
     return _paginate_signals(all_trades, page, size, sort, order, globalFilter, filters)
 
 
-@router.get("/avoid")
+@router.get("/avoid", response_model=PaginatedSignalsOut)
 async def get_avoid_signals(
     page: int = Query(default=0, ge=0),
     size: int = Query(default=25, ge=1, le=500),

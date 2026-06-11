@@ -97,6 +97,7 @@ export default function AuthPage() {
       const data = mode === 'register'
         ? await registerMutation({ username: username.trim(), password: pw, display_name: name.trim() }).unwrap()
         : await loginMutation({ username: username.trim(), password: pw }).unwrap();
+      localStorage.setItem('trademind_token', (data as any).token);
       login((data as any).user);
       navigate('/dashboard');
     } catch (ex: unknown) {
@@ -107,7 +108,7 @@ export default function AuthPage() {
   const inputCls = 'h-11 pl-10 pr-3 rounded-[11px] border border-line bg-surface-2 text-ink font-sans text-sm outline-none w-full box-border transition-colors focus:border-accent';
 
   return (
-    <div className="min-h-screen grid grid-cols-[1.1fr_1fr] bg-bg">
+    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] bg-bg">
 
       {/* ── Left: Showcase ── */}
       <div

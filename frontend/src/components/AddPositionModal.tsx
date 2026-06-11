@@ -142,21 +142,21 @@ export function AddPositionModal({ onClose }: Props) {
             {open && opts.length > 0 && !sel && (
               <div style={{ position: 'absolute', top: 74, left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 11, boxShadow: 'var(--shadow-lg)', zIndex: 5, overflow: 'hidden' }}>
                 {opts.map(s => {
-                  const c = symColor(s.symbol);
+                  const c = symColor(s?.symbol ?? '');
                   return (
                     <button
-                      key={s.symbol}
+                      key={s?.symbol}
                       onMouseDown={() => choose(s)}
                       style={{ display: 'flex', alignItems: 'center', gap: 11, height: 46, padding: '0 12px', width: '100%', background: 'transparent', border: 'none', borderRadius: 0, cursor: 'pointer', fontFamily: 'inherit', transition: 'background .12s', textAlign: 'left' }}
                       onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-hover)'}
                       onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
                     >
-                      <span style={{ width: 28, height: 28, borderRadius: 9, display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 11, background: c + '22', color: c, flexShrink: 0 }}>{s.symbol.slice(0, 2)}</span>
+                      <span style={{ width: 28, height: 28, borderRadius: 9, display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 11, background: c + '22', color: c, flexShrink: 0 }}>{(s?.symbol ?? '').slice(0, 2)}</span>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1, minWidth: 0 }}>
-                        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>{s.symbol}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>{s?.symbol}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s?.name}</span>
                       </div>
-                      <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 12.5, color: 'var(--text-2)' }}>₹{s.price.toLocaleString('en-IN')}</span>
+                      <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 12.5, color: 'var(--text-2)' }}>₹{(s?.price ?? 0).toLocaleString('en-IN')}</span>
                     </button>
                   );
                 })}
@@ -167,13 +167,13 @@ export function AddPositionModal({ onClose }: Props) {
           {/* Selected stock preview */}
           {sel && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 11, marginBottom: 15 }}>
-              <span style={{ width: 32, height: 32, borderRadius: 9, display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12, background: symColor(sel.symbol) + '22', color: symColor(sel.symbol), flexShrink: 0 }}>{sel.symbol.slice(0, 2)}</span>
+              <span style={{ width: 32, height: 32, borderRadius: 9, display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 12, background: symColor(sel?.symbol ?? '') + '22', color: symColor(sel?.symbol ?? ''), flexShrink: 0 }}>{(sel?.symbol ?? '').slice(0, 2)}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0, flex: 1 }}>
-                <span style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--text)' }}>{sel.symbol}</span>
-                <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{sel.name}</span>
+                <span style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--text)' }}>{sel?.symbol}</span>
+                <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{sel?.name}</span>
               </div>
-              <span style={{ display: 'inline-flex', alignItems: 'center', height: 23, padding: '0 9px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, color: (SIG_COL[sel.signal] ?? SIG_COL.HOLD)[0], background: (SIG_COL[sel.signal] ?? SIG_COL.HOLD)[1] }}>
-                {sel.signal === 'BUY' ? '↑' : sel.signal === 'SELL' ? '↓' : '●'} {sel.signal}
+              <span style={{ display: 'inline-flex', alignItems: 'center', height: 23, padding: '0 9px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, color: (SIG_COL[sel?.signal ?? ''] ?? SIG_COL.HOLD)[0], background: (SIG_COL[sel?.signal ?? ''] ?? SIG_COL.HOLD)[1] }}>
+                {sel?.signal === 'BUY' ? '↑' : sel?.signal === 'SELL' ? '↓' : '●'} {sel?.signal}
               </span>
             </div>
           )}

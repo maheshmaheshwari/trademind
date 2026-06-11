@@ -6,7 +6,7 @@ import json, logging, os, sys, time
 import pyotp
 from dotenv import load_dotenv
 from SmartApi import SmartConnect
-from database.db import get_connection, init_database, insert_prices_batch, get_latest_date, _execute
+from database.db import get_connection, release_connection, init_database, insert_prices_batch, get_latest_date, _execute
 from update_stocks_angel import fetch_candles
 
 load_dotenv()
@@ -107,4 +107,4 @@ if failed_list:
 conn = get_connection()
 r = _execute(conn, "SELECT COUNT(DISTINCT symbol) as syms, COUNT(*) as rows, MAX(date) as newest FROM prices WHERE interval = '1d'").fetchone()
 print(f"\n📊 DB state: {r[0]} symbols, {r[1]:,} rows, latest date: {r[2]}")
-conn.close()
+release_connection(conn)

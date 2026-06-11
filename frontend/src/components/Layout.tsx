@@ -58,9 +58,9 @@ export default function Layout() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-3 flex flex-col gap-0.5 overflow-y-auto overflow-x-hidden">
+        <nav className="flex-1 min-h-0 px-3 py-3 flex flex-col gap-0.5 overflow-y-auto overflow-x-hidden">
           <span
-            className="text-[10.5px] font-semibold tracking-[.08em] uppercase text-ink-3 px-3 pt-3 pb-1.5 whitespace-nowrap transition-opacity duration-200"
+            className="flex-shrink-0 text-[10.5px] font-semibold tracking-[.08em] uppercase text-ink-3 px-3 pt-3 pb-1.5 whitespace-nowrap transition-opacity duration-200"
             style={{ opacity: collapsed ? 0 : 1 }}
           >
             Trading
@@ -73,7 +73,7 @@ export default function Layout() {
                 key={id}
                 onClick={() => navigate(path)}
                 title={collapsed ? label : undefined}
-                className={`relative flex items-center gap-3 h-[42px] px-3 rounded-[9px] font-medium text-[14px] whitespace-nowrap w-full text-left border-none transition-colors duration-150
+                className={`flex-shrink-0 relative flex items-center gap-3 h-[42px] px-3 rounded-[9px] font-medium text-[14px] whitespace-nowrap w-full text-left border-none transition-colors duration-150
                   ${active
                     ? 'bg-accent-soft text-accent-2 sb-item-active'
                     : 'bg-transparent text-ink-2 hover:bg-surface-hover hover:text-ink'
@@ -88,7 +88,7 @@ export default function Layout() {
           })}
 
           <span
-            className="text-[10.5px] font-semibold tracking-[.08em] uppercase text-ink-3 px-3 pt-4 pb-1.5 whitespace-nowrap transition-opacity duration-200"
+            className="flex-shrink-0 text-[10.5px] font-semibold tracking-[.08em] uppercase text-ink-3 px-3 pt-4 pb-1.5 whitespace-nowrap transition-opacity duration-200"
             style={{ opacity: collapsed ? 0 : 1 }}
           >
             Account
@@ -101,7 +101,7 @@ export default function Layout() {
                 key={id}
                 onClick={() => navigate(path)}
                 title={collapsed ? label : undefined}
-                className={`relative flex items-center gap-3 h-[42px] px-3 rounded-[9px] font-medium text-[14px] whitespace-nowrap w-full text-left border-none transition-colors duration-150
+                className={`flex-shrink-0 relative flex items-center gap-3 h-[42px] px-3 rounded-[9px] font-medium text-[14px] whitespace-nowrap w-full text-left border-none transition-colors duration-150
                   ${active
                     ? 'bg-accent-soft text-accent-2 sb-item-active'
                     : 'bg-transparent text-ink-2 hover:bg-surface-hover hover:text-ink'

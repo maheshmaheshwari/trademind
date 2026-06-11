@@ -13,6 +13,7 @@ Or via CLI:
 
 import asyncio
 import calendar
+import json
 import logging
 import os
 import time
@@ -21,6 +22,16 @@ from datetime import datetime
 from functools import partial
 from typing import Any, Dict
 from zoneinfo import ZoneInfo
+
+# Initialise date-rotating file logging as early as possible.
+# Called here (module level) so it runs whether uvicorn imports us directly
+# OR via main.py.  The startup event below calls it again as a fallback for
+# the case where uvicorn's dictConfig() fires AFTER this import and wipes
+# our handlers.
+from api.logging_setup import setup_logging as _setup_logging
+_LOG_DIR   = "logs"
+_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+_setup_logging(log_dir=_LOG_DIR, level=_LOG_LEVEL)
 
 # B4: Thread pool for offloading synchronous psycopg2 calls from the async event loop.
 # All blocking DB calls inside async handlers should use:
@@ -73,6 +84,78 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==========================================
+# Request / Response logging middleware
+# ==========================================
+
+_SKIP_LOG_PATHS = {"/api/health", "/docs", "/redoc", "/openapi.json"}
+_SENSITIVE_FIELDS = {"password", "token", "secret", "password_hash", "totp"}
+
+_req_logger = logging.getLogger("trademind.access")
+
+
+def _mask(body_bytes: bytes) -> str:
+    """Return a loggable JSON string with sensitive fields masked."""
+    try:
+        d = json.loads(body_bytes)
+        for k in list(d.keys()):
+            if any(s in k.lower() for s in _SENSITIVE_FIELDS):
+                d[k] = "***"
+        return json.dumps(d, ensure_ascii=False)[:500]
+    except Exception:
+        return body_bytes.decode(errors="replace")[:200]
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    if request.url.path in _SKIP_LOG_PATHS:
+        return await call_next(request)
+
+    start = time.perf_counter()
+    method = request.method
+    path = request.url.path
+    query = request.url.query
+
+    # Log request — include body for mutating methods
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        raw = await request.body()
+        body_str = _mask(raw) if raw else ""
+        _req_logger.info(
+            f"→ {method} {path}{'?' + query if query else ''} "
+            f"| body={body_str}"
+        )
+        # Rebuild the request so the route handler can still read the body
+        from starlette.datastructures import Headers
+        from starlette.requests import Request as StarletteRequest
+
+        async def receive():
+            return {"type": "http.request", "body": raw, "more_body": False}
+
+        request = StarletteRequest(request.scope, receive=receive)
+    else:
+        _req_logger.info(
+            f"→ {method} {path}{'?' + query if query else ''}"
+        )
+
+    # Call the actual route handler
+    try:
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        level = logging.WARNING if response.status_code >= 400 else logging.INFO
+        _req_logger.log(
+            level,
+            f"← {method} {path} | {response.status_code} | {elapsed_ms:.1f}ms",
+        )
+        return response
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        _req_logger.error(
+            f"✗ {method} {path} | EXCEPTION | {elapsed_ms:.1f}ms | {exc}",
+            exc_info=True,
+        )
+        raise
+
 
 # ==========================================
 # Include route modules
@@ -142,20 +225,74 @@ def set_cached(key: str, data: Any, category: str = "prices"):
 @app.on_event("startup")
 async def startup_event():
     """Initialize database and start background scheduler on startup."""
-    try:
-        init_database()
-        logger.info("Database initialized on startup")
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
+    _setup_logging(log_dir=_LOG_DIR, level=_LOG_LEVEL)
 
-    # Start the scheduler in background (runs in a daemon thread)
+    # With --workers N, each worker process runs this event independently.
+    # Use the worker's OS PID to elect exactly one scheduler owner so cron
+    # jobs don't fire N times per interval.
+    import os
+    worker_pid = os.getpid()
+
+    # Write own PID to a lock file; the lowest-PID worker wins the election.
+    _lock_path = os.path.join("logs", ".scheduler_owner.pid")
+    os.makedirs("logs", exist_ok=True)
+    is_scheduler_worker = False
     try:
-        from scheduler.jobs import start_background_scheduler
-        sched = start_background_scheduler()
-        if sched:
-            logger.info("✅ Background scheduler started with API server")
-    except Exception as e:
-        logger.error(f"Background scheduler failed to start: {e}")
+        # Atomic O_EXCL create — only ONE worker succeeds, rest get FileExistsError
+        try:
+            fd = os.open(_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(worker_pid).encode())
+            os.close(fd)
+            is_scheduler_worker = True   # we created the file — we own the scheduler
+        except FileExistsError:
+            # File already exists — check if the owner is still alive
+            try:
+                existing = int(open(_lock_path).read().strip())
+                os.kill(existing, 0)   # signal 0 = alive check
+                is_scheduler_worker = False   # owner alive
+            except (ProcessLookupError, PermissionError):
+                # Owner dead — take over atomically
+                os.remove(_lock_path)
+                fd = os.open(_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(worker_pid).encode())
+                os.close(fd)
+                is_scheduler_worker = True
+    except Exception:
+        is_scheduler_worker = False   # safe default — don't double-run
+
+    # Only the scheduler worker runs DB init to avoid concurrent-update races
+    # when all 4 workers start simultaneously.
+    if is_scheduler_worker:
+        try:
+            init_database()
+            logger.info("Database initialized (worker %d)", worker_pid)
+        except Exception as e:
+            logger.error("Database initialization failed: %s", e)
+
+    if is_scheduler_worker:
+        try:
+            from scheduler.jobs import start_background_scheduler
+            sched = start_background_scheduler()
+            if sched:
+                logger.info("✅ Background scheduler started (worker %d)", worker_pid)
+        except Exception as e:
+            logger.error("Background scheduler failed to start: %s", e)
+
+        # Run missed-job recovery queue 30s after startup (FIFO, single worker)
+        import asyncio
+
+        async def _recovery_task():
+            await asyncio.sleep(30)
+            try:
+                from scheduler.jobs import run_recovery_queue
+                logger.info("🔄 Running missed-job recovery queue...")
+                run_recovery_queue()
+            except Exception as exc:
+                logger.error("Recovery queue error: %s", exc)
+
+        asyncio.create_task(_recovery_task())
+    else:
+        logger.info("Scheduler already running in another worker — skipping (worker %d)", worker_pid)
 
 
 @app.on_event("shutdown")
@@ -215,31 +352,128 @@ async def market_overview():
 
     from database.db import get_market_overview, get_top_signals, _execute, _rows_to_dicts, get_connection
 
-    rows = get_market_overview(days=7)
-    today = rows[0] if rows else {}
+    rows = get_market_overview(days=14)
 
-    # ── Indices ──────────────────────────────────────────────────────────────
-    def _idx(name, val, prev_val):
+    # Coalesce: for each field, find the most recent row that has a non-null value
+    def _coalesce(field, rows):
+        for r in rows:
+            v = r.get(field)
+            if v is not None:
+                return v, r
+        return None, {}
+
+    nifty50_val,  nifty50_row  = _coalesce("nifty50_close",  rows)
+    nifty500_val, nifty500_row = _coalesce("nifty500_close", rows)
+    sensex_val,   sensex_row   = _coalesce("sensex_close",   rows)
+    vix_val,      vix_row      = _coalesce("india_vix",      rows)
+    advances_val, breadth_row  = _coalesce("advances",       rows)
+
+    # For "previous day" comparison use the next row that has a value for that field
+    def _prev_val(field, current_row, rows):
+        found_current = False
+        for r in rows:
+            if r is current_row:
+                found_current = True
+                continue
+            if found_current and r.get(field) is not None:
+                return r.get(field)
+        return None
+
+    # ── Fetch live index data + spark from yfinance ───────────────────────────
+    INDEX_MAP = [
+        ("NIFTY 50",  "^NSEI",     nifty50_val,  "nifty50_close"),
+        ("NIFTY 500", "^CRSLDX",   nifty500_val, "nifty500_close"),
+        ("SENSEX",    "^BSESN",    sensex_val,   "sensex_close"),
+        ("INDIA VIX", "^INDIAVIX", vix_val,      "india_vix"),
+    ]
+
+    def _fetch_index_spark(ticker: str):
+        """Return (latest_close, prev_close, intraday_spark[]) for one index."""
+        try:
+            import yfinance as yf
+
+            def _squeeze_close(df):
+                """Extract Close as a flat Series regardless of column level."""
+                if df.empty:
+                    return None
+                c = df["Close"]
+                # Multi-level columns → squeeze to Series
+                if hasattr(c, "squeeze"):
+                    c = c.squeeze()
+                return c.dropna()
+
+            # Intraday 5-min candles for the main chart spark
+            intra = yf.download(ticker, period="1d", interval="5m", progress=False, auto_adjust=True)
+            spark = []
+            if not intra.empty:
+                closes = _squeeze_close(intra)
+                if closes is not None and len(closes):
+                    spark = [round(float(v), 2) for v in closes.values]
+
+            # Daily for current + previous close
+            daily = yf.download(ticker, period="5d", interval="1d", progress=False, auto_adjust=True)
+            latest = prev = None
+            if not daily.empty:
+                closes = _squeeze_close(daily)
+                if closes is not None and len(closes) >= 2:
+                    latest = round(float(closes.iloc[-1]), 2)
+                    prev   = round(float(closes.iloc[-2]), 2)
+                elif closes is not None and len(closes) == 1:
+                    latest = round(float(closes.iloc[-1]), 2)
+            return latest, prev, spark
+        except Exception:
+            return None, None, []
+
+    indices = []
+    for name, ticker, db_val, db_field in INDEX_MAP:
+        live_val, live_prev, spark = _fetch_index_spark(ticker)
+        val  = live_val  if live_val  is not None else db_val
+        prev = live_prev if live_prev is not None else _prev_val(db_field, nifty50_row, rows)
         if val is None:
-            return None
-        change = round(val - (prev_val or val), 2)
-        pct    = round(change / (prev_val or val) * 100, 2) if prev_val else 0.0
-        return {"name": name, "value": round(val, 2), "change": change, "pct": pct, "spark": []}
+            continue
+        change = round(val - (prev or val), 2)
+        pct    = round(change / (prev or val) * 100, 2) if prev else 0.0
+        # For NIFTY 50 specifically update the live values for vix fix
+        if name == "NIFTY 50":
+            nifty50_val = val
+        elif name == "INDIA VIX":
+            vix_val = val
+        indices.append({"name": name, "value": val, "change": change, "pct": pct, "spark": spark})
 
-    prev = rows[1] if len(rows) > 1 else {}
-    indices = [x for x in [
-        _idx("NIFTY 50",   today.get("nifty50_close"),   prev.get("nifty50_close")),
-        _idx("NIFTY 500",  today.get("nifty500_close"),  prev.get("nifty500_close")),
-        _idx("SENSEX",     today.get("sensex_close"),     prev.get("sensex_close")),
-        _idx("INDIA VIX",  today.get("india_vix"),        prev.get("india_vix")),
-    ] if x is not None]
+    # ── Breadth — derive from prices table if market_overview lacks it ────────
+    db_advances  = breadth_row.get("advances")
+    db_declines  = breadth_row.get("declines")
+    if db_advances is not None and db_declines is not None:
+        breadth = {
+            "advances":  db_advances  or 0,
+            "declines":  db_declines  or 0,
+            "unchanged": breadth_row.get("unchanged") or 0,
+        }
+    else:
+        try:
+            conn = get_connection()
+            from database.db import release_connection
+            cur = _execute(conn, """
+                SELECT
+                    SUM(CASE WHEN close > open THEN 1 ELSE 0 END) AS advances,
+                    SUM(CASE WHEN close < open THEN 1 ELSE 0 END) AS declines,
+                    SUM(CASE WHEN close = open THEN 1 ELSE 0 END) AS unchanged
+                FROM prices
+                WHERE date = (SELECT MAX(date) FROM prices)
+            """, ())
+            r = _rows_to_dicts(cur)
+            release_connection(conn)
+            b = r[0] if r else {}
+            breadth = {
+                "advances":  b.get("advances")  or 0,
+                "declines":  b.get("declines")  or 0,
+                "unchanged": b.get("unchanged") or 0,
+            }
+        except Exception:
+            breadth = {"advances": 0, "declines": 0, "unchanged": 0}
 
-    # ── Breadth ───────────────────────────────────────────────────────────────
-    breadth = {
-        "advances":  today.get("advances") or 0,
-        "declines":  today.get("declines") or 0,
-        "unchanged": today.get("unchanged") or 0,
-    }
+    # Use the most recent row that has index/sentiment data
+    today = nifty50_row or vix_row or (rows[0] if rows else {})
 
     # ── FII/DII — last 5 trading days ─────────────────────────────────────────
     fii_dii = []
@@ -270,16 +504,19 @@ async def market_overview():
     # ── Sector heatmap (reuse cached result from /api/market/sectors) ─────────
     heatmap = get_cached("market_sectors", "overview") or []
 
+    sentiment_val, _ = _coalesce("overall_sentiment_score", rows)
+    fear_greed_val, _ = _coalesce("fear_greed_label", rows)
     result = {
         "indices":  indices,
         "breadth":  breadth,
         "fii_dii":  fii_dii,
-        "vix":      today.get("india_vix") or 0,
+        "vix":      vix_val or 0,
         "gainers":  gainers,
         "losers":   losers,
         "heatmap":  heatmap,
-        "sentiment_score": today.get("overall_sentiment_score"),
-        "fear_greed":      today.get("fear_greed_label"),
+        "sentiment_score": sentiment_val,
+        "sentiment":       sentiment_val or 50,
+        "fear_greed":      fear_greed_val,
     }
 
     set_cached("market_overview_v2", result, "overview")

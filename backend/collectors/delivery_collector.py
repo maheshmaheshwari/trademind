@@ -25,7 +25,7 @@ import requests
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from database.db import get_connection, _execute, _executemany
+from database.db import get_connection, release_connection, _execute, _executemany
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -57,7 +57,7 @@ def _ensure_table():
         _execute(conn, "CREATE INDEX IF NOT EXISTS idx_delivery_symbol ON delivery_data(symbol, date DESC)")
         conn.commit()
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def fetch_delivery_data(date: datetime) -> pd.DataFrame:
@@ -108,7 +108,7 @@ def store_delivery(df: pd.DataFrame) -> int:
         conn.commit()
         return len(rows)
     finally:
-        conn.close()
+        release_connection(conn)
 
 
 def collect_today() -> int:

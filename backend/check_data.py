@@ -1,6 +1,6 @@
 """Check the latest stock data dates in the database."""
 from collections import Counter
-from database.db import get_connection, _execute, _rows_to_dicts
+from database.db import get_connection, release_connection, _execute, _rows_to_dicts
 
 conn = get_connection()
 
@@ -50,4 +50,4 @@ try:
 except Exception:
     print("  No trade_signals table found")
 
-conn.close()
+release_connection(conn)

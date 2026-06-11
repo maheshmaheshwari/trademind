@@ -140,6 +140,59 @@ Key routes:
 - Never use `pd.read_sql_query` with a psycopg2 connection — use `_query_to_df()` in model_training.py instead
 - All collectors import `get_connection` from `database.db` — never open DB connections directly
 - Frontend API calls go through `src/api.ts` — never hardcode `localhost:8000` in components
+- **Always use `release_connection(conn)` — never `conn.close()`**. `conn.close()` destroys the pool slot permanently; `release_connection` returns it to the `ThreadedConnectionPool` (maxconn=30).
+- **Never use `conn.execute()` — always use `_execute(conn, sql, params)`**. psycopg2 connections have no `.execute()` method; that's SQLite syntax.
+- **`insert_prices_batch` uses `DO UPDATE` for daily rows** (`time IS NULL`) so EOD data always overwrites incomplete intraday candles. Intraday rows still use `DO NOTHING`.
+
+### Frontend optional chaining — two mandatory patterns
+
+Apply both in every React component. No exceptions.
+
+**Pattern 1 — safe array operations:** use `(arr ?? [])` before `.map/.filter/.sort/.reduce` — never `arr?.map()`
+```tsx
+// ✅  (signals ?? []).map(s => ...)
+// ❌  signals?.map(s => ...)
+```
+
+**Pattern 2 — optional chaining inside callbacks:** use `i?.property` on every callback parameter, and `value?.toLocaleString(...)` on method calls — never `(value ?? 0).toLocaleString(...)`
+```tsx
+// ✅  .map(i => <div key={i?.symbol}>{i?.name}</div>)
+// ✅  .sort((a, b) => (a?.[key] ?? 0) - (b?.[key] ?? 0))
+// ✅  {value?.toLocaleString('en-IN') || 0}
+// ❌  .map(i => <div key={i.symbol}>...)
+// ❌  {(value ?? 0).toLocaleString('en-IN')}
+```
+
+Already applied to: DashboardPage, MarketPage, WatchlistPage, TradesPage, AutopilotPage, PortfolioPage, BacktestPage.
+
+---
+
+## Starting the Backend
+
+Two modes — use **dev** during development, **prod** for stable runs.
+
+### Development (auto-restart on file change)
+```bash
+cd /Users/maheshmaheshwari/Documents/trademind/backend
+bash dev.sh
+```
+`dev.sh` uses `watchfiles` to watch `api/`, `analysis/`, `trading/`, `database/`, `collectors/`, `scheduler/`.  
+Any `.py` change in those dirs kills and restarts uvicorn automatically — **no manual restart needed**.
+
+### Production (stable, no reload)
+```bash
+cd /Users/maheshmaheshwari/Documents/trademind/backend
+source venv/bin/activate
+python -m uvicorn api.server:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+### Kill backend
+```bash
+lsof -ti :8000 | xargs kill -9
+```
+
+> `--workers 4` requires no `--reload` flag. The scheduler auto-starts in one worker only (atomic PID lock).
+> Logs write to `logs/YYYY-MM-DD.log` (date-rotating, one file per day).
 
 ---
 
@@ -148,7 +201,7 @@ Key routes:
 All commands are run from `backend/`. Credentials are read from `.env` automatically.
 
 ```bash
-cd /Users/mahesh/Desktop/personal/trademind/backend
+cd /Users/maheshmaheshwari/Documents/trademind/backend
 source venv/bin/activate
 
 # DB schema init (idempotent)

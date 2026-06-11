@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from api.auth import decode_token
 from database.db import delete_notification, get_notifications, mark_notifications_read
 from trading.trading_engine import get_user
+from api.schemas import NotificationsListOut, StatusOut
 
 router = APIRouter(prefix="/api/notifications", tags=["Notifications"])
 
@@ -28,18 +29,18 @@ async def _current_user_id(authorization: Optional[str] = Header(None)) -> int:
     return user["id"]
 
 
-@router.get("")
+@router.get("", response_model=NotificationsListOut)
 async def list_notifications(user_id: int = Depends(_current_user_id)):
     return get_notifications(user_id)
 
 
-@router.post("/mark-read")
+@router.post("/mark-read", response_model=StatusOut)
 async def mark_read(user_id: int = Depends(_current_user_id)):
     mark_notifications_read(user_id)
     return {"status": "ok"}
 
 
-@router.delete("/{notif_id}")
+@router.delete("/{notif_id}", response_model=StatusOut)
 async def remove_notification(notif_id: int, user_id: int = Depends(_current_user_id)):
     delete_notification(notif_id, user_id)
     return {"status": "ok"}

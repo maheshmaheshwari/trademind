@@ -28,8 +28,8 @@ export default function PortfolioPage() {
   const { data: portData, isLoading: loading } = useGetPortfolioSummaryQuery(user!.id, { skip: !user });
   const raw = portData as any;
 
-  const holdings: Holding[] = raw?.holdings ? [...raw.holdings].sort((a: Holding, b: Holding) => {
-    const va = a[sort.key as keyof Holding], vb = b[sort.key as keyof Holding];
+  const holdings: Holding[] = raw?.positions ? ([...raw.positions]).sort((a: Holding, b: Holding) => {
+    const va = a?.[sort.key as keyof Holding], vb = b?.[sort.key as keyof Holding];
     let cmp = 0;
     if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
     else if (typeof va === 'string' && typeof vb === 'string') cmp = va.localeCompare(vb);
@@ -38,8 +38,8 @@ export default function PortfolioPage() {
 
   const alloc:   AllocSlice[] = raw?.allocation ?? [];
   const series:  number[]     = raw?.pnl_history?.[range] ?? [];
-  const pnlPct:  number       = raw ? (raw.total_pnl / raw.total_invested) * 100 : 0;
-  const sectors: number       = new Set(holdings.map(h => h.sector)).size;
+  const pnlPct:  number       = raw ? ((raw.total_pnl ?? 0) / (raw.invested || 1)) * 100 : 0;
+  const sectors: number       = new Set((holdings ?? []).map(h => h?.sector)).size;
 
   const rangeLabels: Record<string, string[]> = {
     '30D': ['30d ago', '20d', '10d', 'Today'],
@@ -74,7 +74,7 @@ export default function PortfolioPage() {
       </div>
 
       {/* ── 3 stat cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 'calc(16px * var(--u))' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 dgap">
         {loading ? Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="bg-surface border border-line" style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(17px * var(--u))' }}>
             <Skeleton h={12} w="50%" className="mb-3" /><Skeleton h={28} w="70%" className="mb-2" /><Skeleton h={11} w="40%" />
@@ -87,7 +87,7 @@ export default function PortfolioPage() {
                 <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18"/><circle cx="16.5" cy="14" r="1.3" fill="currentColor" stroke="none"/></svg>
               </span>
             </div>
-            <div className="font-bold tracking-tight text-ink" style={{ fontSize: 'calc(27px * var(--u))', margin: '10px 0 5px' }}>{inrCompact(raw?.total_invested ?? 0)}</div>
+            <div className="font-bold tracking-tight text-ink" style={{ fontSize: 'calc(27px * var(--u))', margin: '10px 0 5px' }}>{inrCompact(raw?.invested ?? 0)}</div>
             <span className="text-[12px] text-ink-3">across {holdings.length} stocks</span>
           </div>
 
@@ -98,7 +98,7 @@ export default function PortfolioPage() {
                 <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M12 3a9 9 0 0 1 9 9h-9z" opacity=".4" fill="currentColor" stroke="none"/></svg>
               </span>
             </div>
-            <div className="font-bold tracking-tight text-ink" style={{ fontSize: 'calc(27px * var(--u))', margin: '10px 0 5px' }}>{inrCompact(raw?.current_value ?? 0)}</div>
+            <div className="font-bold tracking-tight text-ink" style={{ fontSize: 'calc(27px * var(--u))', margin: '10px 0 5px' }}>{inrCompact(raw?.total_value ?? 0)}</div>
             <span className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-gain">
               <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>
               +1.84% today
@@ -127,7 +127,7 @@ export default function PortfolioPage() {
       </div>
 
       {/* ── Chart + Donut ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: 'calc(16px * var(--u))' }}>
+      <div className="grid grid-cols-1 md:grid-cols-[1.7fr_1fr] dgap">
         <Card title="Portfolio Value" sub="Growth over time"
           icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 11V7h-4"/></svg>}
           right={
@@ -139,14 +139,14 @@ export default function PortfolioPage() {
           }
         >
           <div className="dp" style={{ paddingTop: 10 }}>
-            {loading ? <Skeleton h={230} /> : <AreaChart data={series} color="var(--accent)" h={230} labels={rangeLabels[range]} />}
+            {loading ? <Skeleton h={230} /> : <AreaChart data={series} color="var(--accent)" h={230} labels={rangeLabels[range]} currency />}
           </div>
         </Card>
 
         <Card title="Allocation" sub="By sector"
           icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M12 3a9 9 0 0 1 9 9h-9z" opacity=".4" fill="currentColor" stroke="none"/></svg>}>
           <div className="dp">
-            {loading ? <Skeleton h={180} /> : <Donut data={alloc} centerTop="Total" centerBottom={inrCompact(raw?.current_value ?? 0)} size={240} />}
+            {loading ? <Skeleton h={180} /> : <Donut data={alloc} centerTop="Total" centerBottom={inrCompact(raw?.total_value ?? 0)} size={240} />}
           </div>
         </Card>
       </div>
@@ -160,30 +160,30 @@ export default function PortfolioPage() {
             <thead>
               <tr>
                 <Th label="Symbol"   sortKey="symbol"   sort={sort} onToggle={toggle} />
-                <Th label="Qty"      sortKey="qty"      sort={sort} onToggle={toggle} align="right" />
-                <Th label="Avg Buy"  sortKey="avg"      sort={sort} onToggle={toggle} align="right" />
-                <Th label="CMP"      sortKey="cmp"      sort={sort} onToggle={toggle} align="right" />
-                <Th label="Invested" sortKey="invested" sort={sort} onToggle={toggle} align="right" />
-                <Th label="P&L"      sortKey="pnl"      sort={sort} onToggle={toggle} align="right" />
-                <Th label="P&L %"    sortKey="pnlPct"   sort={sort} onToggle={toggle} align="right" />
+                <Th label="Qty"      sortKey="quantity"           sort={sort} onToggle={toggle} align="right" />
+                <Th label="Avg Buy"  sortKey="avg_buy_price"      sort={sort} onToggle={toggle} align="right" />
+                <Th label="CMP"      sortKey="current_price"      sort={sort} onToggle={toggle} align="right" />
+                <Th label="Invested" sortKey="invested_amount"    sort={sort} onToggle={toggle} align="right" />
+                <Th label="P&L"      sortKey="unrealized_pnl"     sort={sort} onToggle={toggle} align="right" />
+                <Th label="P&L %"    sortKey="unrealized_pnl_pct" sort={sort} onToggle={toggle} align="right" />
                 <th style={thS}>AI Signal</th>
               </tr>
             </thead>
             <tbody>
-              {loading ? <SkeletonRows cols={8} rows={8} /> : holdings.map(h => (
-                <tr key={h.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => setDrawer(h.symbol)}>
-                  <Td><SymbolCell symbol={h.symbol} name={h.name} sector={h.sector} /></Td>
-                  <Td align="right" mono>{h.qty}</Td>
-                  <Td align="right" mono>{inr(h.avg)}</Td>
-                  <Td align="right" mono>{inr(h.cmp)}</Td>
-                  <Td align="right" mono><span className="text-ink-2">{inrCompact(h.invested)}</span></Td>
+              {loading ? <SkeletonRows cols={8} rows={8} /> : (holdings ?? []).map(h => (
+                <tr key={h?.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => setDrawer(h?.symbol ?? '')}>
+                  <Td><SymbolCell symbol={h?.symbol ?? ''} name={h?.name ?? ''} sector={h?.sector ?? ''} /></Td>
+                  <Td align="right" mono>{h?.quantity}</Td>
+                  <Td align="right" mono>{inr(h?.avg_buy_price ?? 0)}</Td>
+                  <Td align="right" mono>{inr(h?.current_price ?? 0)}</Td>
+                  <Td align="right" mono><span className="text-ink-2">{inrCompact(h?.invested_amount ?? 0)}</span></Td>
                   <Td align="right" mono>
-                    <span className="font-semibold" style={{ color: h.pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {(h.pnl >= 0 ? '+' : '') + Number(h.pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    <span className="font-semibold" style={{ color: (h?.unrealized_pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {((h?.unrealized_pnl ?? 0) >= 0 ? '+' : '') + Number(h?.unrealized_pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </span>
                   </Td>
-                  <Td align="right"><Delta value={h.pnlPct} size={12.5} showIcon={false} /></Td>
-                  <Td><SignalBadge signal={h.signal} /></Td>
+                  <Td align="right"><Delta value={h?.unrealized_pnl_pct ?? 0} size={12.5} showIcon={false} /></Td>
+                  <Td><SignalBadge signal={h?.signal} /></Td>
                 </tr>
               ))}
             </tbody>

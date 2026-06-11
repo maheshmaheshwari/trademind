@@ -26,23 +26,24 @@ export interface Stock {
 }
 
 export interface Holding extends Stock {
-  qty: number;
-  avg: number;       // avg buy price
-  cmp: number;       // current market price
-  invested: number;
-  current: number;
-  pnl: number;
-  pnlPct: number;
+  quantity: number;
+  avg_buy_price: number;   // avg entry price
+  current_price: number;   // current market price
+  invested_amount: number;
+  current_value: number;
+  unrealized_pnl: number;
+  unrealized_pnl_pct: number;
 }
 
 export interface OpenPosition extends Stock {
-  entry: number;
-  sl: number;
-  target: number;
-  qty: number;
-  pnl: number;
-  pnlPct: number;
-  days: number;
+  avg_buy_price: number;
+  stop_loss: number;
+  target_price: number;
+  quantity: number;
+  current_price: number;
+  unrealized_pnl: number;
+  unrealized_pnl_pct: number;
+  created_at?: string;
 }
 
 export interface Trade {
@@ -50,12 +51,13 @@ export interface Trade {
   symbol: string;
   name: string;
   sector: string;
-  side: 'BUY' | 'SELL';
-  qty: number;
+  order_type: 'BUY' | 'SELL' | 'LIMIT' | 'MARKET';
+  order_purpose?: string;
+  quantity: number;
   price: number;
-  value: number;
-  date: Date;
-  realized: number;
+  value: number | null;
+  created_at: string;
+  pnl: number | null;
   status: string;
 }
 

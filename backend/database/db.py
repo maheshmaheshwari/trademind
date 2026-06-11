@@ -47,33 +47,58 @@ def _get_pool():
         from psycopg2 import pool as pg_pool
         _pool = pg_pool.ThreadedConnectionPool(
             minconn=2,
-            maxconn=30,
+            maxconn=10,
             host=PGHOST,
             port=PGPORT,
             dbname=PGDATABASE,
             user=PGUSER,
             password=PGPASSWORD,
             sslmode=PGSSLMODE,
+            # Keep long-running connections alive through the OS/Docker network stack
+            keepalives=1,
+            keepalives_idle=60,
+            keepalives_interval=10,
+            keepalives_count=5,
+            connect_timeout=10,
         )
     return _pool
 
 
 def get_connection():
-    """Return a psycopg2 connection drawn from the pool."""
-    conn = _get_pool().getconn()
-    conn.autocommit = False
-    return conn
+    """Return a healthy psycopg2 connection drawn from the pool.
+
+    Validates each connection with a lightweight ping and discards dead ones
+    (stale SSL/TCP connections that Docker dropped silently) before returning.
+    """
+    pool = _get_pool()
+    for attempt in range(3):
+        conn = pool.getconn()
+        try:
+            conn.autocommit = False
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return conn
+        except Exception:
+            try:
+                pool.putconn(conn, close=True)
+            except Exception:
+                pass
+            if attempt == 2:
+                raise RuntimeError("Could not obtain a healthy database connection after 3 attempts")
+    # unreachable, but satisfies type checkers
+    raise RuntimeError("Could not obtain a healthy database connection")
 
 
 def release_connection(conn) -> None:
-    """Return a connection to the pool."""
+    """Return a connection to the pool, discarding it if it is broken."""
     try:
-        _get_pool().putconn(conn)
+        pool = _get_pool()
+        if getattr(conn, "closed", 0):
+            pool.putconn(conn, close=True)
+        else:
+            pool.putconn(conn)
     except Exception:
-        try:
-            release_connection(conn)
-        except Exception:
-            pass
+        pass
 
 
 def _rows_to_dicts(cursor) -> List[Dict]:
@@ -165,12 +190,22 @@ def insert_price(
 ) -> bool:
     conn = get_connection()
     try:
-        sql = _on_conflict_ignore(
-            """INSERT INTO prices
-               (symbol, exchange, date, time, open, high, low, close, volume, interval)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ["symbol", "date", "time", "interval"],
-        )
+        if time_val is None:
+            sql = (
+                "INSERT INTO prices"
+                " (symbol, exchange, date, time, open, high, low, close, volume, interval)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT (symbol, date, interval) WHERE time IS NULL"
+                " DO UPDATE SET open=EXCLUDED.open, high=EXCLUDED.high,"
+                " low=EXCLUDED.low, close=EXCLUDED.close, volume=EXCLUDED.volume"
+            )
+        else:
+            sql = _on_conflict_ignore(
+                "INSERT INTO prices"
+                " (symbol, exchange, date, time, open, high, low, close, volume, interval)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ["symbol", "date", "time", "interval"],
+            )
         _execute(conn, sql, (symbol, exchange, date, time_val, open_price, high, low, close, volume, interval))
         conn.commit()
         return True
@@ -187,16 +222,34 @@ def insert_prices_batch(rows: List[Tuple], sync: bool = True) -> int:
         return 0
     conn = get_connection()
     try:
-        sql = _on_conflict_ignore(
-            """INSERT INTO prices
+        # Split into daily (time=NULL) and intraday rows
+        daily_rows = [r for r in rows if r[3] is None]
+        intraday_rows = [r for r in rows if r[3] is not None]
+
+        inserted = 0
+        base_sql = """INSERT INTO prices
                (symbol, exchange, date, time, open, high, low, close, volume, interval)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ["symbol", "date", "time", "interval"],
-        )
-        _executemany(conn, sql, rows)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
+        if daily_rows:
+            # DO UPDATE so EOD data always overwrites incomplete intraday candles
+            sql_daily = (
+                base_sql
+                + " ON CONFLICT (symbol, date, interval) WHERE time IS NULL"
+                + " DO UPDATE SET open=EXCLUDED.open, high=EXCLUDED.high,"
+                + " low=EXCLUDED.low, close=EXCLUDED.close, volume=EXCLUDED.volume"
+            )
+            _executemany(conn, sql_daily, daily_rows)
+            inserted += len(daily_rows)
+
+        if intraday_rows:
+            sql_intra = _on_conflict_ignore(base_sql, ["symbol", "date", "time", "interval"])
+            _executemany(conn, sql_intra, intraday_rows)
+            inserted += len(intraday_rows)
+
         conn.commit()
-        logger.info(f"Batch inserted {len(rows)} price rows")
-        return len(rows)
+        logger.info(f"Batch inserted {inserted} price rows")
+        return inserted
     except Exception as e:
         conn.rollback()
         logger.error(f"insert_prices_batch: {e}")
@@ -321,39 +374,6 @@ def insert_market_overview(data: Dict[str, Any]) -> bool:
         release_connection(conn)
 
 
-def insert_ai_signal(
-    symbol: str,
-    signal: str,
-    confidence: float,
-    model_version: str = "v1.0.0",
-    target_price: Optional[float] = None,
-    stop_loss: Optional[float] = None,
-    reasoning: Optional[List[str]] = None,
-    features_used: Optional[Dict] = None,
-    conn: Optional[Any] = None,
-) -> bool:
-    db_conn = conn or get_connection()
-    try:
-        _execute(db_conn,
-            """INSERT INTO ai_signals
-               (symbol, signal, confidence, model_version,
-                target_price, stop_loss, reasoning, features_used)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (symbol, signal, confidence, model_version, target_price, stop_loss,
-             json.dumps(reasoning) if reasoning else None,
-             json.dumps(features_used) if features_used else None),
-        )
-        if not conn:
-            db_conn.commit()
-        return True
-    except Exception as e:
-        if not conn:
-            db_conn.rollback()
-        logger.error(f"insert_ai_signal {symbol}: {e}")
-        return False
-    finally:
-        if not conn:
-            release_connection(db_conn)
 
 
 def insert_trade_signals_batch(
@@ -394,8 +414,20 @@ def insert_trade_signals_batch(
 
         count = 0
         for t in trades:
+            symbol = t["symbol"]
+            # Carry forward consumed_volume from the current active signal so
+            # capacity tracking survives signal refreshes (EOD overwriting intraday).
+            try:
+                cv_row = _execute(conn,
+                    "SELECT consumed_volume FROM trade_signals WHERE symbol = ? AND is_active = TRUE ORDER BY generated_date DESC LIMIT 1",
+                    (symbol,)
+                ).fetchone()
+                carried_consumed = int(cv_row[0] or 0) if cv_row else 0
+            except Exception:
+                carried_consumed = 0
+
             _execute(conn, sql, (
-                t["symbol"], t.get("name", ""), t["signal"], t.get("confidence"),
+                symbol, t.get("name", ""), t["signal"], t.get("confidence"),
                 t.get("trade", {}).get("type"),
                 t.get("trade", {}).get("buy_price"), t.get("trade", {}).get("target_price"),
                 t.get("trade", {}).get("stop_loss"), t.get("trade", {}).get("risk_reward"),
@@ -409,7 +441,7 @@ def insert_trade_signals_batch(
                 t.get("position", {}).get("max_qty_per_user"),
                 t.get("position", {}).get("max_investment_per_user"),
                 t.get("position", {}).get("min_qty"),
-                t.get("position", {}).get("recommended_volume"), 0,
+                t.get("position", {}).get("recommended_volume"), carried_consumed,
                 t.get("model", {}).get("name"), t.get("model", {}).get("horizon"),
                 t.get("model", {}).get("accuracy"), t.get("model", {}).get("precision"),
                 json.dumps(t.get("top_drivers", [])),
@@ -833,14 +865,22 @@ def get_trade_signals(
 
 
 def get_db_stats() -> Dict[str, int]:
+    # Use pg_class.reltuples for O(1) approximate counts — COUNT(*) on hypertables
+    # scans all chunks and can take 7+ minutes, causing TCP keepalive timeouts.
     tables = ["prices", "technical_indicators", "news_sentiment",
-              "market_overview", "ai_signals", "trade_signals"]
+              "market_overview", "trade_signals"]
     conn = get_connection()
     try:
-        stats = {}
-        for table in tables:
-            cur = _execute(conn, f"SELECT COUNT(*) FROM {table}", ())
-            stats[table] = cur.fetchone()[0]
+        placeholders = ",".join(["%s"] * len(tables))
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT relname, reltuples::bigint FROM pg_class WHERE relname IN ({placeholders})",
+            tables,
+        )
+        stats = {row[0]: max(0, row[1]) for row in cur.fetchall()}
+        # Fill in zeros for any table not yet in pg_class
+        for t in tables:
+            stats.setdefault(t, 0)
         return stats
     finally:
         release_connection(conn)
@@ -926,8 +966,8 @@ def get_signal_history(limit: int = 30) -> List[Dict]:
         cur = _execute(conn,
             """SELECT generated_date, MAX(generated_at) as generated_at,
                COUNT(*) as total_signals,
-               SUM(CASE WHEN signal LIKE '%BUY%' THEN 1 ELSE 0 END) as buy_count,
-               SUM(CASE WHEN signal LIKE '%SELL%' THEN 1 ELSE 0 END) as sell_count
+               SUM(CASE WHEN signal LIKE '%%BUY%%' THEN 1 ELSE 0 END) as buy_count,
+               SUM(CASE WHEN signal LIKE '%%SELL%%' THEN 1 ELSE 0 END) as sell_count
                FROM trade_signals
                GROUP BY generated_date
                ORDER BY generated_date DESC LIMIT ?""",

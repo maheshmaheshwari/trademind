@@ -28,7 +28,8 @@ Usage:
 """
 
 import logging
-from datetime import datetime
+import pytz
+from datetime import datetime, timedelta
 from typing import Optional
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -36,6 +37,135 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
+
+IST = pytz.timezone("Asia/Kolkata")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Scheduler log helpers — write job run state to DB
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _scheduler_log_write(
+    job_id: str, job_name: str, scheduled_at,
+    status: str, attempt: int = 0,
+    error_msg: str = None,
+    started_at=None, completed_at=None,
+):
+    """Upsert a scheduler_log row. Silently swallows errors so it never breaks a job."""
+    try:
+        from database.db import get_connection, release_connection, _execute
+        conn = get_connection()
+        try:
+            _execute(conn, """
+                INSERT INTO scheduler_log
+                    (job_id, job_name, scheduled_at, status, attempt, error_msg, started_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (job_id, scheduled_at) DO UPDATE SET
+                    status       = EXCLUDED.status,
+                    attempt      = EXCLUDED.attempt,
+                    error_msg    = EXCLUDED.error_msg,
+                    started_at   = COALESCE(EXCLUDED.started_at,   scheduler_log.started_at),
+                    completed_at = COALESCE(EXCLUDED.completed_at, scheduler_log.completed_at)
+            """, (job_id, job_name, scheduled_at, status, attempt,
+                  error_msg, started_at, completed_at))
+            conn.commit()
+        finally:
+            release_connection(conn)
+    except Exception as exc:
+        logger.debug("scheduler_log write skipped: %s", exc)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Recovery queue — run missed / failed jobs on startup (FIFO, single worker)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Jobs eligible for recovery. High-frequency intraday jobs are excluded —
+# recovering stale 5-min SL checks or 30-min candles is pointless.
+# Populated after the job functions are defined (see bottom of file).
+RECOVERABLE_JOBS: dict = {}   # job_id → (job_name, cron_hour, cron_minute, fn)
+
+
+def run_recovery_queue():
+    """
+    Called 30s after server startup. Finds daily jobs that should have fired
+    in the last 24h but have no 'done' record, then runs them FIFO one at a time.
+
+    Retry logic:
+        attempt 1 fails → status='failed', picked up on next startup
+        attempt 2 fails → status='failed'
+        attempt 3 fails → status='permanently_failed', skipped forever
+    """
+    if not RECOVERABLE_JOBS:
+        return
+
+    from database.db import get_connection, release_connection, _execute
+
+    now_ist  = datetime.now(IST)
+    lookback = now_ist - timedelta(hours=24)
+
+    recovery_tasks = []
+
+    try:
+        conn = get_connection()
+        try:
+            for job_id, (job_name, cron_hour, cron_minute, fn) in RECOVERABLE_JOBS.items():
+                # Walk through today and yesterday to find expected fire times in lookback
+                for delta_days in (0, 1):
+                    candidate_date = (now_ist - timedelta(days=delta_days)).date()
+                    if datetime(candidate_date.year, candidate_date.month, candidate_date.day).weekday() >= 5:
+                        continue  # skip weekends
+                    scheduled = IST.localize(datetime(
+                        candidate_date.year, candidate_date.month, candidate_date.day,
+                        cron_hour, cron_minute,
+                    ))
+                    if scheduled > now_ist or scheduled < lookback:
+                        continue   # not yet due, or too old
+
+                    # Check scheduler_log for this fire time (±10 min window)
+                    row = _execute(conn, """
+                        SELECT status, attempt FROM scheduler_log
+                        WHERE job_id = ?
+                          AND scheduled_at BETWEEN ? AND ?
+                        ORDER BY scheduled_at DESC LIMIT 1
+                    """, (job_id,
+                          scheduled - timedelta(minutes=10),
+                          scheduled + timedelta(hours=3))).fetchone()
+
+                    if row and row[0] in ('done', 'running', 'permanently_failed'):
+                        continue   # already handled
+                    attempt = int(row[1]) if row else 0
+                    if attempt >= 3:
+                        continue   # exhausted retries
+                    recovery_tasks.append((job_id, job_name, scheduled, fn, attempt))
+        finally:
+            release_connection(conn)
+    except Exception as exc:
+        logger.error("Recovery queue DB read failed: %s", exc)
+        return
+
+    if not recovery_tasks:
+        logger.info("🔄 Recovery queue: no missed jobs (all caught up)")
+        return
+
+    recovery_tasks.sort(key=lambda x: x[2])   # FIFO by scheduled_at
+    logger.info("🔄 Recovery queue: %d missed job(s) to run", len(recovery_tasks))
+
+    for job_id, job_name, scheduled_at, fn, attempt in recovery_tasks:
+        new_attempt = attempt + 1
+        logger.info("  ▶ Recovering [%d/3]: %s (was due %s IST)",
+                    new_attempt, job_name, scheduled_at.strftime("%Y-%m-%d %H:%M"))
+        _scheduler_log_write(job_id, job_name, scheduled_at, "running",
+                             attempt=new_attempt, started_at=datetime.now(IST))
+        try:
+            fn()
+            _scheduler_log_write(job_id, job_name, scheduled_at, "done",
+                                 attempt=new_attempt, completed_at=datetime.now(IST))
+            logger.info("  ✅ Recovered: %s", job_name)
+        except Exception as exc:
+            status = "permanently_failed" if new_attempt >= 3 else "failed"
+            _scheduler_log_write(job_id, job_name, scheduled_at, status,
+                                 attempt=new_attempt, error_msg=str(exc))
+            logger.error("  ❌ Recovery failed [%d/3]: %s — %s", new_attempt, job_name, exc)
+            if status == "permanently_failed":
+                logger.error("  🚫 %s permanently failed — manual run required", job_name)
 
 
 def collect_eod_data_job():
@@ -137,22 +267,119 @@ def collect_news_job():
 
 
 def collect_fii_data_job():
-    """Daily job: scrape FII/DII flow data from NSE."""
-    logger.info("⏰ Running FII/DII collection...")
+    """
+    Step 1 — 17:00 IST: Fetch NSE live cash-market FII/DII (net Cr) and
+    store in both fii_dii_daily and market_overview.
+
+    NSE publishes cash-market FII/DII data via their live API shortly after
+    market close. This gives the net buy/sell in Crores.
+    """
+    logger.info("⏰ [Step 1] FII/DII live cash-market collection…")
     try:
         from collectors.fii_collector import collect_fii_dii_data
         from database.db import insert_market_overview
 
-        data = collect_fii_dii_data()
+        data = collect_fii_dii_data()   # writes to fii_dii_daily + returns dict
         if data:
             insert_market_overview({
-                "date": data["date"],
+                "date":    data["date"],
                 "fii_net": data["fii_net"],
                 "dii_net": data["dii_net"],
             })
-            logger.info(f"FII/DII data stored: FII={data['fii_net']}Cr, DII={data['dii_net']}Cr")
+            logger.info(
+                "FII/DII cash-market stored: date=%s  FII=%.2f Cr  DII=%.2f Cr",
+                data["date"], data["fii_net"], data["dii_net"],
+            )
+        else:
+            logger.warning("FII/DII live API returned no data")
     except Exception as e:
-        logger.error(f"FII/DII collection failed: {e}")
+        logger.error("FII/DII live collection failed: %s", e, exc_info=True)
+
+
+def collect_fii_fo_job():
+    """
+    Step 2 — 17:30 IST: Fetch NSE F&O participant volume data for today and
+    upsert into fii_dii_daily (adds buy/sell breakdown + F&O net contracts).
+
+    NSE archives publish fao_participant_vol_DDMMYYYY.csv ~17:15–17:30 IST.
+    If today's file isn't ready yet this job retries at 18:00 via the misfire
+    window and is safe to call multiple times (upsert).
+    """
+    logger.info("⏰ [Step 2] FII/DII F&O participant volume collection…")
+    try:
+        import requests
+        from datetime import date
+        from database.db import get_connection, release_connection, _execute
+
+        today = date.today()
+        ds = today.strftime("%d%m%Y")
+        url = f"https://archives.nseindia.com/content/nsccl/fao_participant_vol_{ds}.csv"
+
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer":    "https://www.nseindia.com/",
+        })
+        session.get("https://www.nseindia.com/", timeout=10)
+
+        r = session.get(url, timeout=15)
+        if r.status_code != 200:
+            logger.warning("F&O participant file not ready yet: %s → %s", ds, r.status_code)
+            return
+
+        import csv, io
+        lines = r.text.strip().split("\n")
+        reader = csv.reader(lines[1:])
+        headers = [h.strip().lower() for h in next(reader)]
+        long_idx  = next(i for i, h in enumerate(headers) if "total long"  in h)
+        short_idx = next(i for i, h in enumerate(headers) if "total short" in h)
+
+        fii_buy = fii_sell = dii_buy = dii_sell = 0.0
+        for row in reader:
+            if not row: continue
+            client = row[0].strip().upper()
+            if "FII" in client or "FPI" in client:
+                fii_buy  = float(row[long_idx].strip().replace(",", ""))
+                fii_sell = float(row[short_idx].strip().replace(",", ""))
+            elif "DII" in client:
+                dii_buy  = float(row[long_idx].strip().replace(",", ""))
+                dii_sell = float(row[short_idx].strip().replace(",", ""))
+
+        fii_net = round(fii_buy  - fii_sell, 2)
+        dii_net = round(dii_buy  - dii_sell, 2)
+
+        conn = get_connection()
+        try:
+            _execute(conn, """
+                INSERT INTO fii_dii_daily
+                    (date, fii_net, dii_net, fii_buy, fii_sell, dii_buy, dii_sell, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (date) DO UPDATE SET
+                    fii_buy  = EXCLUDED.fii_buy,
+                    fii_sell = EXCLUDED.fii_sell,
+                    dii_buy  = EXCLUDED.dii_buy,
+                    dii_sell = EXCLUDED.dii_sell,
+                    source   = CASE
+                        WHEN fii_dii_daily.source = 'nse_live' THEN 'nse_live+fo'
+                        ELSE EXCLUDED.source
+                    END
+            """, (
+                str(today),
+                fii_net, dii_net,
+                fii_buy, fii_sell,
+                dii_buy, dii_sell,
+                "nse_fo_vol",
+            ))
+            conn.commit()
+        finally:
+            release_connection(conn)
+
+        logger.info(
+            "FII/DII F&O stored: date=%s  FII_net=%+.0f  DII_net=%+.0f (contracts)",
+            today, fii_net, dii_net,
+        )
+    except Exception as e:
+        logger.error("FII/DII F&O collection failed: %s", e, exc_info=True)
 
 
 def collect_index_data_job():
@@ -180,7 +407,7 @@ def cleanup_old_data_job():
             conn.commit()
             logger.info(f"Cleanup: deleted {deleted} old intraday rows")
         finally:
-            conn.close()
+            release_connection(conn)
     except Exception as e:
         logger.error(f"Data cleanup failed: {e}")
 
@@ -202,8 +429,25 @@ def verify_data_integrity_job():
         logger.error(f"Data integrity check failed: {e}")
 
 
-def generate_trade_signals_job():
-    """Daily job: generate AI trade signals from trained models."""
+def generate_trade_signals_job(force: bool = False):
+    """
+    Daily job: generate AI trade signals from trained models.
+
+    Only runs after market close (15:35 IST) to ensure signals are based on
+    final EOD prices, not incomplete intraday candles. Pass force=True to
+    override this guard (e.g. for manual backfill runs).
+    """
+    now_ist = datetime.now(IST)
+    market_close_ist = now_ist.replace(hour=15, minute=35, second=0, microsecond=0)
+    if not force and now_ist < market_close_ist:
+        logger.warning(
+            "⚠️  Signal generation skipped — market still open (%s IST). "
+            "Signals are only generated after 15:35 IST using final EOD prices. "
+            "Use force=True to override.",
+            now_ist.strftime("%H:%M"),
+        )
+        return
+
     logger.info("⏰ Running trade signal generation...")
     try:
         from generate_trades import generate_signals
@@ -399,6 +643,17 @@ def sync_gtt_status_job():
         logger.error(f"GTT sync failed: {e}")
 
 
+def weekly_retrain_job():
+    """Sunday 21:00 IST: retrain all 499 models with latest data, then regenerate signals."""
+    logger.info("⏰ Starting weekly model retrain pipeline...")
+    try:
+        from weekly_retrain_pipeline import run_pipeline
+        run_pipeline(workers=4, resume=True, skip_wait=True)
+        logger.info("✅ Weekly retrain pipeline complete")
+    except Exception as e:
+        logger.error(f"❌ Weekly retrain pipeline failed: {e}", exc_info=True)
+
+
 def sync_autopilot_job():
     """Every 5 min: check GTT statuses for EXECUTED autopilot mandates and settle them."""
     logger.info("⏰ Syncing autopilot mandate statuses...")
@@ -480,18 +735,29 @@ def start_scheduler() -> None:
         job_id = event.job_id
         job = scheduler.get_job(job_id)
         job_name = job.name if job else job_id
+        scheduled_at = getattr(event, "scheduled_run_time", datetime.now(IST))
 
         if event.code == EVENT_JOB_EXECUTED:
             elapsed = _time.time() - _job_start_times.pop(job_id, _time.time())
             logger.info(f"✅ {job_name} completed in {elapsed:.1f}s")
+            _scheduler_log_write(job_id, job_name, scheduled_at, "done",
+                                 completed_at=datetime.now(IST))
         elif event.code == EVENT_JOB_ERROR:
             logger.error(f"❌ {job_name} FAILED: {event.exception}")
             logger.error(f"   Traceback: {event.traceback}")
+            _scheduler_log_write(job_id, job_name, scheduled_at, "failed",
+                                 error_msg=str(event.exception))
         elif event.code == EVENT_JOB_MISSED:
             logger.warning(f"⏭️  {job_name} MISSED (scheduled time passed)")
+            _scheduler_log_write(job_id, job_name, scheduled_at, "pending")
 
     def before_job(event):
         _job_start_times[event.job_id] = _time.time()
+        job = scheduler.get_job(event.job_id)
+        job_name = job.name if job else event.job_id
+        scheduled_at = getattr(event, "scheduled_run_time", datetime.now(IST))
+        _scheduler_log_write(event.job_id, job_name, scheduled_at, "running",
+                             started_at=datetime.now(IST))
 
     from apscheduler.events import EVENT_JOB_SUBMITTED
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
@@ -551,8 +817,20 @@ def _add_all_jobs(scheduler):
     scheduler.add_job(collect_news_job, CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="daily_news", name="Daily News Collection", misfire_grace_time=3600, replace_existing=True)
     # 16:45 — Alpha Vantage news (25 stocks/day free tier)
     scheduler.add_job(collect_av_news_job, CronTrigger(hour=16, minute=45, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="av_news", name="Alpha Vantage News", misfire_grace_time=3600, replace_existing=True)
-    # 17:00 — FII/DII data
-    scheduler.add_job(collect_fii_data_job, CronTrigger(hour=17, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="fii_dii", name="FII/DII Data", misfire_grace_time=3600, replace_existing=True)
+    # 17:00 — FII/DII Step 1: live cash-market API (net Cr, available right after close)
+    scheduler.add_job(
+        collect_fii_data_job,
+        CronTrigger(hour=17, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="fii_dii_live", name="FII/DII Data (live cash-market)",
+        misfire_grace_time=3600, replace_existing=True,
+    )
+    # 17:30 — FII/DII Step 2: F&O participant volume (buy/sell breakdown, NSE archives ~17:15)
+    scheduler.add_job(
+        collect_fii_fo_job,
+        CronTrigger(hour=17, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="fii_dii_fo", name="FII/DII F&O Participant Volume",
+        misfire_grace_time=3600, replace_existing=True,
+    )
     # NOTE: trade signal generation is now chained inside collect_eod_data_job (step 3)
     # 17:30 — Notify users of signal changes on watchlisted stocks
     scheduler.add_job(notify_signal_changes_job, CronTrigger(hour=17, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="signal_notifications", name="Signal Change Notifications", misfire_grace_time=3600, replace_existing=True)
@@ -579,6 +857,9 @@ def _add_all_jobs(scheduler):
     # WEEKLY JOBS — Sunday 8 PM IST
     scheduler.add_job(cleanup_old_data_job, CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="Asia/Kolkata"), id="cleanup", name="Weekly Data Cleanup", misfire_grace_time=7200, replace_existing=True)
     scheduler.add_job(verify_data_integrity_job, CronTrigger(day_of_week="sun", hour=20, minute=30, timezone="Asia/Kolkata"), id="integrity", name="Weekly Data Integrity Check", misfire_grace_time=7200, replace_existing=True)
+    # Sunday 21:00 — Weekly retrain all 499 models → regenerate signals (~6h with 4 workers)
+    scheduler.add_job(weekly_retrain_job, CronTrigger(day_of_week="sun", hour=21, minute=0, timezone="Asia/Kolkata"), id="weekly_retrain", name="Weekly Model Retrain + Signals", misfire_grace_time=7200, replace_existing=True)
+
 
 
 def start_background_scheduler() -> Optional[BackgroundScheduler]:
@@ -635,17 +916,28 @@ def start_background_scheduler() -> Optional[BackgroundScheduler]:
         job_id = event.job_id
         job = _bg_scheduler.get_job(job_id) if _bg_scheduler else None
         job_name = job.name if job else job_id
+        scheduled_at = getattr(event, "scheduled_run_time", datetime.now(IST))
 
         if event.code == EVENT_JOB_EXECUTED:
             elapsed = _time.time() - _job_start_times.pop(job_id, _time.time())
             logger.info(f"✅ {job_name} completed in {elapsed:.1f}s")
+            _scheduler_log_write(job_id, job_name, scheduled_at, "done",
+                                 completed_at=datetime.now(IST))
         elif event.code == EVENT_JOB_ERROR:
             logger.error(f"❌ {job_name} FAILED: {event.exception}")
+            _scheduler_log_write(job_id, job_name, scheduled_at, "failed",
+                                 error_msg=str(event.exception))
         elif event.code == EVENT_JOB_MISSED:
             logger.warning(f"⏭️  {job_name} MISSED (scheduled time passed)")
+            _scheduler_log_write(job_id, job_name, scheduled_at, "pending")
 
     def before_job(event):
         _job_start_times[event.job_id] = _time.time()
+        job = _bg_scheduler.get_job(event.job_id) if _bg_scheduler else None
+        job_name = job.name if job else event.job_id
+        scheduled_at = getattr(event, "scheduled_run_time", datetime.now(IST))
+        _scheduler_log_write(event.job_id, job_name, scheduled_at, "running",
+                             started_at=datetime.now(IST))
 
     _bg_scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
     _bg_scheduler.add_listener(before_job, EVENT_JOB_SUBMITTED)
@@ -681,3 +973,20 @@ def stop_background_scheduler():
         _bg_scheduler.shutdown(wait=False)
         logger.info("⏹  Background scheduler stopped.")
         _bg_scheduler = None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Populate RECOVERABLE_JOBS at module level so run_recovery_queue() works even
+# when called without starting the scheduler first (e.g. from server.py startup).
+# ──────────────────────────────────────────────────────────────────────────────
+RECOVERABLE_JOBS.update({
+    "eod_data":             ("EOD Price Collection",           15, 35, collect_eod_data_job),
+    "index_data_eod":       ("Index & Market Overview",        16,  0, collect_index_data_eod_job),
+    "index_data":           ("Index Data Collection (legacy)", 16,  5, collect_index_data_job),
+    "fii_dii_live":         ("FII/DII Data (live)",            17,  0, collect_fii_data_job),
+    "fii_dii_fo":           ("FII/DII F&O Volume",             17, 30, collect_fii_fo_job),
+    "daily_news":           ("Daily News Collection",          16, 30, collect_news_job),
+    "rss_news":             ("RSS Market News",                16, 30, collect_rss_news_job),
+    "delivery_data":        ("NSE Delivery % Collection",      18,  0, collect_delivery_job),
+    "signal_notifications": ("Signal Change Notifications",   17, 30, notify_signal_changes_job),
+})

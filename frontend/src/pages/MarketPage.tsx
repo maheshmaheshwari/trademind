@@ -15,22 +15,22 @@ function heatColor(c: number) {
 }
 
 function IndexCard({ ix }: { ix: IndexData }) {
-  const pos = ix.pct >= 0;
+  const pos = (ix?.pct ?? 0) >= 0;
   return (
     <div className="bg-surface border border-line relative overflow-hidden" style={{ borderRadius: 'var(--radius,14px)', padding: 'calc(18px * var(--u))' }}>
       <div className="flex items-center justify-between">
-        <span className="font-bold text-[13.5px] tracking-[.01em] whitespace-nowrap text-ink">{ix.name}</span>
+        <span className="font-bold text-[13.5px] tracking-[.01em] whitespace-nowrap text-ink">{ix?.name}</span>
         <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold"
           style={{ color: pos ? 'var(--green)' : 'var(--red)', background: pos ? 'var(--green-soft)' : 'var(--red-soft)' }}>
-          {pct(ix.pct)}
+          {pct(ix?.pct ?? 0)}
         </span>
       </div>
-      <div className="font-mono text-[23px] font-bold text-ink" style={{ margin: '9px 0 2px' }}>{ix.value.toLocaleString('en-IN')}</div>
+      <div className="font-mono text-[23px] font-bold text-ink" style={{ margin: '9px 0 2px' }}>{ix?.value?.toLocaleString('en-IN')}</div>
       <div className="text-[12.5px] font-semibold tabular-nums" style={{ color: pos ? 'var(--green)' : 'var(--red)' }}>
-        {(pos ? '+' : '') + ix.change}
+        {(pos ? '+' : '') + (ix?.change ?? 0)}
       </div>
       <div style={{ marginTop: 10, marginLeft: -2, marginRight: -2 }}>
-        <Sparkline data={ix.spark} color={pos ? '#10B981' : '#EF4444'} w={260} h={40} />
+        <Sparkline data={ix?.spark ?? []} color={pos ? '#10B981' : '#EF4444'} w={260} h={40} />
       </div>
     </div>
   );
@@ -43,20 +43,20 @@ export default function MarketPage() {
 
   const indices: IndexData[]    = (mktData as any)?.indices  ?? [];
   const fiiDii:  FIIDIIBar[]   = (mktData as any)?.fii_dii  ?? [];
-  const heatmap: HeatmapSector[] = [...(sectorsData ?? (mktData as any)?.heatmap ?? [])].sort((a: HeatmapSector, b: HeatmapSector) => b.change - a.change);
+  const heatmap: HeatmapSector[] = [...(sectorsData ?? (mktData as any)?.heatmap ?? [])].sort((a: HeatmapSector, b: HeatmapSector) => (b.change ?? 0) - (a.change ?? 0));
   const gainers: Stock[]        = (mktData as any)?.gainers  ?? [];
   const losers:  Stock[]        = (mktData as any)?.losers   ?? [];
   const breadth: Breadth | null = (mktData as any)?.breadth  ?? null;
 
-  const vix = indices.find(ix => ix.name === 'INDIA VIX');
-  const adRatio = breadth ? (breadth.advances / breadth.declines).toFixed(2) : '—';
+  const vix = (indices ?? []).find(ix => ix?.name === 'INDIA VIX');
+  const adRatio = breadth ? ((breadth.advances ?? 0) / (breadth.declines || 1)).toFixed(2) : '—';
 
   const stockRow = (s: Stock) => (
-    <tr key={s.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => setDrawer(s.symbol)}>
-      <td style={tdS}><SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} /></td>
-      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(s.price)}</td>
-      <td style={{ ...tdS, textAlign: 'right' }}><Delta value={s.change} size={13} showIcon={false} /></td>
-      <td style={tdS}><SignalBadge signal={s.signal} /></td>
+    <tr key={s?.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => setDrawer(s?.symbol ?? '')}>
+      <td style={tdS}><SymbolCell symbol={s?.symbol ?? ''} name={s?.name ?? ''} sector={s?.sector ?? ''} /></td>
+      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(s?.price ?? 0)}</td>
+      <td style={{ ...tdS, textAlign: 'right' }}><Delta value={s?.change ?? 0} size={13} showIcon={false} /></td>
+      <td style={tdS}><SignalBadge signal={s?.signal} /></td>
     </tr>
   );
 
@@ -77,15 +77,15 @@ export default function MarketPage() {
       </div>
 
       {/* ── 4 index cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 'calc(16px * var(--u))' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 dgap">
         {loading
           ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} h={150} rounded="14px" />)
-          : indices.map(ix => <IndexCard key={ix.name} ix={ix} />)
+          : (indices ?? []).map(ix => <IndexCard key={ix?.name} ix={ix} />)
         }
       </div>
 
       {/* ── FII/DII + Breadth ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: 'calc(16px * var(--u))' }}>
+      <div className="grid grid-cols-1 md:grid-cols-[1.7fr_1fr] dgap">
         <Card title="FII / DII Activity" sub="Net buy / sell · last 10 sessions (₹ Cr)"
           icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20v-3"/></svg>}>
           <div className="dp" style={{ paddingTop: 8 }}>
@@ -139,15 +139,15 @@ export default function MarketPage() {
         pad={false}>
         <div className="dp">
           {loading ? <Skeleton h={170} /> : (
-            <div className="grid grid-cols-4 gap-2">
-              {heatmap.map(h => (
-                <div key={h.sector}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {(heatmap ?? []).map(h => (
+                <div key={h?.sector}
                   className="flex flex-col gap-[3px] min-h-[78px] justify-between cursor-default transition-transform hover:-translate-y-0.5 border"
-                  style={{ borderRadius: 'var(--radius-sm,9px)', padding: 13, borderColor: 'rgba(255,255,255,.06)', background: heatColor(h.change) }}>
-                  <span className="text-[12px] font-semibold opacity-95 text-ink">{h.sector}</span>
+                  style={{ borderRadius: 'var(--radius-sm,9px)', padding: 13, borderColor: 'rgba(255,255,255,.06)', background: heatColor(h?.change ?? 0) }}>
+                  <span className="text-[12px] font-semibold opacity-95 text-ink">{h?.sector}</span>
                   <div className="flex justify-between items-end">
-                    <span className="font-mono text-[17px] font-bold" style={{ color: h.change >= 0 ? 'var(--green)' : 'var(--red)' }}>{pct(h.change)}</span>
-                    <span className="text-[10.5px] text-ink-3">{h.stock_count ?? '—'} stocks</span>
+                    <span className="font-mono text-[17px] font-bold" style={{ color: (h?.change ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>{pct(h?.change ?? 0)}</span>
+                    <span className="text-[10.5px] text-ink-3">{h?.stock_count ?? '—'} stocks</span>
                   </div>
                 </div>
               ))}
@@ -157,7 +157,7 @@ export default function MarketPage() {
       </Card>
 
       {/* ── Gainers / Losers ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'calc(16px * var(--u))' }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 dgap">
         {([
           ['Top Gainers', gainers, true],
           ['Top Losers',  losers,  false],
@@ -177,7 +177,7 @@ export default function MarketPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {loading ? <SkeletonRows cols={4} rows={5} /> : (list as Stock[]).map(s => stockRow(s))}
+                  {loading ? <SkeletonRows cols={4} rows={5} /> : ((list as Stock[]) ?? []).map(s => stockRow(s))}
                 </tbody>
               </table>
             </div>

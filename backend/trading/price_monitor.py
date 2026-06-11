@@ -10,7 +10,7 @@ Run every 5 minutes during market hours (9:15 AM – 3:30 PM IST).
 import logging
 from datetime import datetime
 from typing import List, Dict
-from database.db import get_connection, _execute
+from database.db import get_connection, release_connection, _execute
 from trading.trading_engine import square_off
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
         positions = _execute(conn, "SELECT * FROM positions").fetchall()
 
     if not positions:
-        conn.close()
+        release_connection(conn)
         return []
 
     pos_cols = _col_names(conn, "positions")
@@ -139,7 +139,7 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
 
         if sl and current_price <= sl:
             conn.commit()
-            conn.close()
+            release_connection(conn)
             logger.warning(
                 f"🛑 STOP LOSS triggered: {symbol} @ ₹{current_price:.2f} "
                 f"(SL: ₹{sl:.2f}) [{price_source}]"
@@ -155,7 +155,7 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
         # Check Target trigger
         if target and current_price >= target:
             conn.commit()
-            conn.close()
+            release_connection(conn)
             logger.warning(
                 f"🎯 TARGET triggered: {symbol} @ ₹{current_price:.2f} "
                 f"(Target: ₹{target:.2f}) [{price_source}]"
@@ -169,7 +169,7 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
             continue
 
     conn.commit()
-    conn.close()
+    release_connection(conn)
     return triggered
 
 
@@ -197,7 +197,7 @@ def run_monitor():
         positions = _execute(conn,
             "SELECT symbol, current_price, stop_loss, target_price, unrealized_pnl_pct FROM positions"
         ).fetchall()
-        conn.close()
+        release_connection(conn)
         if positions:
             print(f"   {len(positions)} open positions monitored:")
             for p in positions[:10]:

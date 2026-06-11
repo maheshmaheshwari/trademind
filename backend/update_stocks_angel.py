@@ -27,6 +27,7 @@ from SmartApi import SmartConnect
 
 from database.db import (
     get_connection,
+    release_connection,
     get_latest_date,
     init_database,
     insert_prices_batch,
@@ -126,6 +127,7 @@ def fetch_candles(
 def main(days: int = None):
     parser = argparse.ArgumentParser(description="Update stock data via Angel One")
     parser.add_argument("--days", type=int, default=5, help="Days of history to fetch for new stocks (default: 5)")
+    parser.add_argument("--symbols", nargs="+", default=None, help="Only fetch these symbols (without .NS)")
     args = parser.parse_args()
     # Allow programmatic override of --days without mutating sys.argv
     if days is not None:
@@ -135,6 +137,8 @@ def main(days: int = None):
 
     # Load tokens
     token_map = load_token_map()
+    if args.symbols:
+        token_map = {k: v for k, v in token_map.items() if k in args.symbols}
     total = len(token_map)
     print(f"\n📊 Nifty 500 stocks in token map: {total}")
     print(f"📅 Fetching candles (smart gap detection, fallback: {args.days} days)...\n")
@@ -231,7 +235,7 @@ def main(days: int = None):
     cur = _execute(conn, "SELECT MAX(date) as latest, COUNT(DISTINCT symbol) as symbols FROM prices WHERE interval = '1d'")
     final = cur.fetchone()
     print(f"\n📊 DB state: {final[1]} symbols, latest date: {final[0]}")
-    conn.close()
+    release_connection(conn)
 
 
 if __name__ == "__main__":

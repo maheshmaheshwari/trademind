@@ -414,6 +414,14 @@ input[type="range"].rng::-webkit-slider-thumb { background: var(--accent); borde
 @keyframes pageIn { from { transform: translateY(8px); } to { transform: none; } }
 
 /* =========================================================
+   RESPONSIVE HELPERS
+   ========================================================= */
+
+/* AuthPage left-panel: hidden on < lg, shown on lg+ */
+.hide-sm { display: none; }
+@media (min-width: 1024px) { .hide-sm { display: flex; } }
+
+/* =========================================================
    PULSE DOT — market-open indicator
    ========================================================= */
 @keyframes pulse-dot {

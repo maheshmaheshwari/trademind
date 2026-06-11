@@ -255,7 +255,7 @@ def sync_gtt_statuses() -> List[Dict]:
 
     Returns list of triggered GTT rules that were synced.
     """
-    from database.db import get_connection, _execute
+    from database.db import get_connection, release_connection, _execute
     from trading.trading_engine import square_off
 
     conn = get_connection()
@@ -271,7 +271,7 @@ def sync_gtt_statuses() -> List[Dict]:
     """).fetchall()
 
     if not pending_gtts:
-        conn.close()
+        release_connection(conn)
         logger.debug("No pending GTT rules to sync")
         return []
 
@@ -280,7 +280,7 @@ def sync_gtt_statuses() -> List[Dict]:
 
     smart_api = _get_angel_session()
     if not smart_api:
-        conn.close()
+        release_connection(conn)
         return []
 
     triggered = []
@@ -354,7 +354,7 @@ def sync_gtt_statuses() -> List[Dict]:
         except Exception as e:
             logger.error(f"Error checking GTT rule {rule_id}: {e}")
 
-    conn.close()
+    release_connection(conn)
     return triggered
 
 
@@ -409,7 +409,7 @@ def sync_autopilot_statuses() -> List[Dict]:
 
     Returns list of settled mandates (for logging/notification).
     """
-    from database.db import get_connection, _execute, _rows_to_dicts, insert_notification
+    from database.db import get_connection, release_connection, _execute, _rows_to_dicts, insert_notification
 
     conn = get_connection()
     try:
@@ -419,7 +419,7 @@ def sync_autopilot_statuses() -> List[Dict]:
                  AND (sl_gtt_id IS NOT NULL OR target_gtt_id IS NOT NULL)""")
         active_mandates = _rows_to_dicts(cur)
     finally:
-        conn.close()
+        release_connection(conn)
 
     if not active_mandates:
         return []
@@ -489,7 +489,7 @@ def sync_autopilot_statuses() -> List[Dict]:
                 (new_status, actual_pnl, mandate["id"]))
             conn.commit()
         finally:
-            conn.close()
+            release_connection(conn)
 
         logger.info(
             f"Autopilot mandate settled: {mandate['symbol']} → {new_status} "

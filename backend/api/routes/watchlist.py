@@ -18,6 +18,7 @@ from database.db import (
     update_watchlist_alerts,
 )
 from api.routes.trading import get_current_user
+from api.schemas import WatchlistOut, WatchlistAddOut, StatusOut
 
 router = APIRouter(prefix="/api/users", tags=["Watchlist"])
 
@@ -27,7 +28,7 @@ class AlertRequest(BaseModel):
     alert_below: Optional[float] = None
 
 
-@router.get("/{user_id}/watchlist")
+@router.get("/{user_id}/watchlist", response_model=WatchlistOut)
 async def list_watchlist(user_id: int, user=Depends(get_current_user)):
     if user["id"] != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -35,7 +36,7 @@ async def list_watchlist(user_id: int, user=Depends(get_current_user)):
     return {"data": items, "total": len(items)}
 
 
-@router.post("/{user_id}/watchlist/{symbol}", status_code=201)
+@router.post("/{user_id}/watchlist/{symbol}", status_code=201, response_model=WatchlistAddOut)
 async def add_to_watchlist_route(user_id: int, symbol: str, user=Depends(get_current_user)):
     if user["id"] != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -43,7 +44,7 @@ async def add_to_watchlist_route(user_id: int, symbol: str, user=Depends(get_cur
     return {"status": "ok", "data": {"user_id": user_id, "symbol": symbol.upper()}}
 
 
-@router.delete("/{user_id}/watchlist/{symbol}")
+@router.delete("/{user_id}/watchlist/{symbol}", response_model=StatusOut)
 async def remove_from_watchlist_route(user_id: int, symbol: str, user=Depends(get_current_user)):
     if user["id"] != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -51,7 +52,7 @@ async def remove_from_watchlist_route(user_id: int, symbol: str, user=Depends(ge
     return {"status": "ok"}
 
 
-@router.put("/{user_id}/watchlist/{symbol}/alerts")
+@router.put("/{user_id}/watchlist/{symbol}/alerts", response_model=StatusOut)
 async def update_alerts(user_id: int, symbol: str, req: AlertRequest, user=Depends(get_current_user)):
     if user["id"] != user_id:
         raise HTTPException(status_code=403, detail="Access denied")

@@ -26,7 +26,7 @@ _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from database.db import get_connection, insert_news, _execute
+from database.db import get_connection, release_connection, insert_news, _execute
 
 load_dotenv()
 
@@ -163,7 +163,7 @@ def _get_covered_symbols() -> set:
         rows = _execute(conn,
             "SELECT DISTINCT symbol FROM news_sentiment WHERE source='alphavantage'"
         ).fetchall()
-        conn.close()
+        release_connection(conn)
         return {row[0] for row in rows}
     except Exception as e:
         logger.warning(f"Could not query covered symbols: {e}")

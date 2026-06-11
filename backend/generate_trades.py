@@ -186,9 +186,8 @@ def calculate_position_sizing(df, signal, buy_price, symbol: str = ""):
         delivery_factor = 0.5    # speculative — reduce significantly
 
     # ── Base safe qty: 2% of ADV × delivery factor ────────────────────────
-    SAFE_VOLUME_PCT       = 0.02
-    ESTIMATED_USERS       = 100
-    max_safe_qty_raw      = int(avg_daily_volume * SAFE_VOLUME_PCT * delivery_factor)
+    SAFE_VOLUME_PCT = 0.02
+    max_safe_qty_raw = int(avg_daily_volume * SAFE_VOLUME_PCT * delivery_factor)
 
     # ── Market impact check: ensure per-platform order < 0.5% price impact ─
     # Solve: σ × sqrt(Q/ADV) = 0.005  →  Q = ADV × (0.005/σ)²
@@ -200,17 +199,31 @@ def calculate_position_sizing(df, signal, buy_price, symbol: str = ""):
         impact_limit_qty = max_safe_qty_raw
 
     max_safe_qty = min(max_safe_qty_raw, impact_limit_qty)
-    max_qty_per_user = max(1, int(max_safe_qty / ESTIMATED_USERS))
+
+    # ── Dynamic user count for per-user suggestion ─────────────────────────
+    # Suggested qty = remaining platform capacity / active users.
+    # This is a UI HINT only — it is never enforced as a hard block.
+    # The only hard block is: consumed_volume >= recommended_volume (platform total).
+    try:
+        from database.db import get_connection, release_connection, _execute as _ex
+        _c = get_connection()
+        _r = _ex(_c, "SELECT COUNT(*) FROM users WHERE is_active = TRUE")
+        active_users = max(1, _r.fetchone()[0])
+        release_connection(_c)
+    except Exception:
+        active_users = 50  # safe fallback
 
     # ── Remaining capacity (subtract already-consumed volume) ──────────────
     consumed_volume, recommended_volume = _get_consumed_volume(symbol) if symbol else (0, max_safe_qty)
     remaining_platform = max(0, (recommended_volume or max_safe_qty) - consumed_volume)
-    remaining_per_user = max(1, int(remaining_platform / ESTIMATED_USERS))
-    # Use minimum of calculated safe qty and remaining capacity
-    effective_qty_per_user = min(max_qty_per_user, remaining_per_user)
 
-    # Actual price impact for the per-user order
-    price_impact = calculate_market_impact(effective_qty_per_user, avg_daily_volume, price, volatility_pct)
+    # Suggested qty per user = fair share of remaining capacity across active users
+    # User can exceed this (the platform total is the only hard limit), but this
+    # tells the frontend what a "fair share" looks like to avoid one user hogging capacity.
+    suggested_qty_per_user = max(1, int(remaining_platform / active_users))
+
+    # Actual price impact for the suggested per-user order
+    price_impact = calculate_market_impact(suggested_qty_per_user, avg_daily_volume, price, volatility_pct)
 
     # ── Turnover and liquidity ─────────────────────────────────────────────
     daily_turnover = avg_daily_volume * price
@@ -232,14 +245,14 @@ def calculate_position_sizing(df, signal, buy_price, symbol: str = ""):
         "avg_daily_volume_20d":     vol_20d,
         "avg_daily_volume_50d":     vol_50d,
         "daily_turnover_cr":        round(daily_turnover / 1_00_00_000, 2),
-        "max_safe_qty_total":       max_safe_qty,
-        "max_qty_per_user":         effective_qty_per_user,
-        "max_safe_investment":      round(max_safe_qty * price, 2),
-        "max_investment_per_user":  round(effective_qty_per_user * price, 2),
-        "min_qty":                  min_qty,
-        "liquidity":                liquidity,
-        "safe_volume_pct":          SAFE_VOLUME_PCT * 100,
-        "estimated_concurrent_users": ESTIMATED_USERS,
+        "max_safe_qty_total":           max_safe_qty,
+        "suggested_qty_per_user":       suggested_qty_per_user,
+        "max_safe_investment":          round(max_safe_qty * price, 2),
+        "suggested_investment_per_user": round(suggested_qty_per_user * price, 2),
+        "min_qty":                      min_qty,
+        "liquidity":                    liquidity,
+        "safe_volume_pct":              SAFE_VOLUME_PCT * 100,
+        "active_users":                 active_users,
         # Market impact analytics
         "volatility_pct":           round(volatility_pct, 2),
         "delivery_pct":             round(delivery_pct, 1),
@@ -384,21 +397,22 @@ def generate_signals():
                     "expected_return_pct": levels["expected_return_pct"],
                 },
                 "position": {
-                    "avg_daily_volume":          position["avg_daily_volume"],
-                    "daily_turnover_cr":         position["daily_turnover_cr"],
-                    "liquidity":                 position["liquidity"],
-                    "max_safe_qty":              position["max_safe_qty_total"],
-                    "max_qty_per_user":          position["max_qty_per_user"],
-                    "max_investment_per_user":   position["max_investment_per_user"],
-                    "min_qty":                   position["min_qty"],
-                    "recommended_volume":        position["max_safe_qty_total"],
+                    "avg_daily_volume":              position["avg_daily_volume"],
+                    "daily_turnover_cr":             position["daily_turnover_cr"],
+                    "liquidity":                     position["liquidity"],
+                    "max_safe_qty":                  position["max_safe_qty_total"],
+                    "suggested_qty_per_user":        position["suggested_qty_per_user"],
+                    "suggested_investment_per_user": position["suggested_investment_per_user"],
+                    "min_qty":                       position["min_qty"],
+                    "recommended_volume":            position["max_safe_qty_total"],
+                    "active_users":                  position["active_users"],
                     # Market impact analytics
-                    "volatility_pct":            position["volatility_pct"],
-                    "delivery_pct":              position["delivery_pct"],
-                    "price_impact_pct":          position["price_impact_pct"],
-                    "consumed_volume":           position["consumed_volume"],
-                    "remaining_volume":          position["remaining_volume"],
-                    "volume_utilisation_pct":    position["volume_utilisation_pct"],
+                    "volatility_pct":                position["volatility_pct"],
+                    "delivery_pct":                  position["delivery_pct"],
+                    "price_impact_pct":              position["price_impact_pct"],
+                    "consumed_volume":               position["consumed_volume"],
+                    "remaining_volume":              position["remaining_volume"],
+                    "volume_utilisation_pct":        position["volume_utilisation_pct"],
                 },
                 "price": {
                     "current": levels["current_price"],
@@ -517,7 +531,7 @@ def generate_signals():
             print(f"{t['symbol']:<18} {t['signal']:<12} {t['confidence']:>4.0f}% "
                   f"₹{t['trade']['buy_price']:>8.2f} ₹{t['trade']['target_price']:>8.2f} "
                   f"₹{t['trade']['stop_loss']:>8.2f} {t['trade']['risk_reward'] or 0:>4.1f}x {t['model']['horizon']:<10} "
-                  f"{t['position']['liquidity']:<10} {t['position']['max_qty_per_user']:>7}")
+                  f"{t['position']['liquidity']:<10} {t['position']['suggested_qty_per_user']:>7}")
     
     return latest_file
 

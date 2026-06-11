@@ -359,7 +359,7 @@ def main():
     parser.add_argument("--workers", type=int, default=4, help="Parallel worker threads (default: 4)")
     args = parser.parse_args()
     
-    from database.db import init_database, get_connection, _execute
+    from database.db import init_database, get_connection, release_connection, _execute
     init_database()
     conn = get_connection()
     
@@ -385,7 +385,7 @@ def main():
     print(f"   Market-wide daily records: {mkt}")
     print(f"   Stock-specific records: {stk} ({unique_syms} stocks)")
     print(f"   Total: {mkt + stk}")
-    conn.close()
+    release_connection(conn)
 
 
 if __name__ == "__main__":

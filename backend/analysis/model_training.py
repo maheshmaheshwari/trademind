@@ -80,12 +80,19 @@ def prefetch_all_data(symbols: list = None) -> None:
                 i.bb_upper, i.bb_lower, i.bb_middle,
                 i.sma_20, i.sma_50, i.sma_200, i.ema_9, i.ema_21,
                 i.atr_14, i.adx_14, i.stoch_k, i.stoch_d, i.obv,
-                m.india_vix, m.fii_net, m.dii_net,
+                m.india_vix,
                 m.nifty500_close, m.nifty500_change_pct,
+                COALESCE(f.fii_net,  m.fii_net,  0) AS fii_net,
+                COALESCE(f.dii_net,  m.dii_net,  0) AS dii_net,
+                COALESCE(f.fii_buy,  0)              AS fii_buy,
+                COALESCE(f.fii_sell, 0)              AS fii_sell,
+                COALESCE(f.dii_buy,  0)              AS dii_buy,
+                COALESCE(f.dii_sell, 0)              AS dii_sell,
                 COALESCE(d.delivery_pct, 50.0) AS delivery_pct
             FROM prices p
             LEFT JOIN technical_indicators i ON p.symbol = i.symbol AND p.date = i.date
             LEFT JOIN market_overview m      ON p.date = m.date
+            LEFT JOIN fii_dii_daily f        ON p.date = f.date
             LEFT JOIN delivery_data d        ON p.symbol = d.symbol AND p.date = d.date
             WHERE p.interval = '1d'
             ORDER BY p.symbol, p.date ASC
@@ -143,7 +150,8 @@ def prefetch_all_data(symbols: list = None) -> None:
         df_all['date'] = df_all['date'].dt.tz_convert(None)
 
     numeric_cols = ['close','open','high','low','volume',
-                    'india_vix','fii_net','dii_net','nifty500_close','nifty500_change_pct']
+                    'india_vix','fii_net','dii_net','fii_buy','fii_sell',
+                    'dii_buy','dii_sell','nifty500_close','nifty500_change_pct']
 
     sent_fill_cols = ['sent_stock','news_count_stock','news_pos','news_neg',
                       'sent_max_pos','sent_max_neg']
@@ -308,13 +316,20 @@ def load_data_for_symbol(symbol: str) -> pd.DataFrame:
             i.bb_upper, i.bb_lower, i.bb_middle,
             i.sma_20, i.sma_50, i.sma_200, i.ema_9, i.ema_21,
             i.atr_14, i.adx_14, i.stoch_k, i.stoch_d, i.obv,
-            m.india_vix, m.fii_net, m.dii_net,
+            m.india_vix,
             m.nifty500_close, m.nifty500_change_pct,
+            COALESCE(f.fii_net,  m.fii_net,  0) AS fii_net,
+            COALESCE(f.dii_net,  m.dii_net,  0) AS dii_net,
+            COALESCE(f.fii_buy,  0)              AS fii_buy,
+            COALESCE(f.fii_sell, 0)              AS fii_sell,
+            COALESCE(f.dii_buy,  0)              AS dii_buy,
+            COALESCE(f.dii_sell, 0)              AS dii_sell,
             COALESCE(d.delivery_pct, 50.0) as delivery_pct
         FROM prices p
         LEFT JOIN technical_indicators i ON p.symbol = i.symbol AND p.date = i.date
         LEFT JOIN market_overview m ON p.date = m.date
-        LEFT JOIN delivery_data d  ON p.symbol = d.symbol AND p.date = d.date
+        LEFT JOIN fii_dii_daily f   ON p.date = f.date
+        LEFT JOIN delivery_data d   ON p.symbol = d.symbol AND p.date = d.date
         WHERE p.symbol = {ph} AND p.interval = '1d'
         ORDER BY p.date ASC
         """
@@ -332,8 +347,9 @@ def load_data_for_symbol(symbol: str) -> pd.DataFrame:
     finally:
         release_connection(conn)
 
-    for col in ['india_vix', 'fii_net', 'dii_net', 'nifty500_close', 'nifty500_change_pct']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+    for col in ['india_vix', 'fii_net', 'dii_net', 'fii_buy', 'fii_sell',
+                'dii_buy', 'dii_sell', 'nifty500_close', 'nifty500_change_pct']:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     for col in ['close', 'open', 'high', 'low', 'volume']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     df['date'] = pd.to_datetime(df['date'])
@@ -563,6 +579,50 @@ def engineer_features_and_target(df: pd.DataFrame, forward_days: int = 20,
         df['typical_price'] / df['sma_20'] - 1,
         0.0
     )
+
+    # ── FII / DII institutional flow features ────────────────────────────────
+    fii = df['fii_net'].fillna(0)
+    dii = df['dii_net'].fillna(0)
+
+    # Rolling cumulative flows
+    df['fii_5d']  = fii.rolling(5,  min_periods=1).sum()
+    df['fii_10d'] = fii.rolling(10, min_periods=1).sum()
+    df['fii_20d'] = fii.rolling(20, min_periods=1).sum()
+    df['dii_5d']  = dii.rolling(5,  min_periods=1).sum()
+    df['dii_10d'] = dii.rolling(10, min_periods=1).sum()
+    df['dii_20d'] = dii.rolling(20, min_periods=1).sum()
+
+    # Net combined institutional flow
+    df['inst_flow_5d']  = df['fii_5d']  + df['dii_5d']
+    df['inst_flow_20d'] = df['fii_20d'] + df['dii_20d']
+
+    # FII vs DII divergence: FII buying while DII selling (or vice versa)
+    total_abs = (fii.abs() + dii.abs()).replace(0, 1)
+    df['fii_dii_divergence'] = (fii - dii) / total_abs      # -1 (DII dominates) … +1 (FII dominates)
+    df['fii_dii_div_5d']     = df['fii_dii_divergence'].rolling(5, min_periods=1).mean()
+
+    # Buy/sell pressure ratios from detailed data
+    if 'fii_buy' in df.columns and df['fii_buy'].abs().sum() > 0:
+        fii_gross = (df['fii_buy'].fillna(0) + df['fii_sell'].fillna(0)).replace(0, 1)
+        dii_gross = (df['dii_buy'].fillna(0) + df['dii_sell'].fillna(0)).replace(0, 1)
+        df['fii_buy_ratio'] = df['fii_buy'].fillna(0) / fii_gross    # 0.5 = balanced
+        df['dii_buy_ratio'] = df['dii_buy'].fillna(0) / dii_gross
+        df['fii_buy_pressure'] = (df['fii_buy_ratio'] > 0.55).astype(int)
+        df['dii_buy_pressure'] = (df['dii_buy_ratio'] > 0.55).astype(int)
+        # Both institutions buying together = strong signal
+        df['dual_buy_pressure'] = (df['fii_buy_pressure'] & df['dii_buy_pressure']).astype(int)
+
+    # Trend direction (positive = sustained inflow over 10d)
+    df['fii_trend']  = np.sign(df['fii_10d'])
+    df['dii_trend']  = np.sign(df['dii_10d'])
+
+    # Normalised flow (z-score vs 60d rolling mean/std for stationarity)
+    fii_60_mean = fii.rolling(60, min_periods=10).mean().fillna(0)
+    fii_60_std  = fii.rolling(60, min_periods=10).std().fillna(1).replace(0, 1)
+    df['fii_zscore'] = (fii - fii_60_mean) / fii_60_std
+    dii_60_mean = dii.rolling(60, min_periods=10).mean().fillna(0)
+    dii_60_std  = dii.rolling(60, min_periods=10).std().fillna(1).replace(0, 1)
+    df['dii_zscore'] = (dii - dii_60_mean) / dii_60_std
 
     # ── Priority 7: Sector-relative alpha features ────────────────────────────
     if 'sector_return_1d' in df.columns:

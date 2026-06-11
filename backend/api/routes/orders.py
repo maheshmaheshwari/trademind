@@ -10,14 +10,15 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
-from database.db import _execute, _rows_to_dicts, get_connection
+from database.db import _execute, _rows_to_dicts, get_connection, release_connection
 from api.routes.trading import get_current_user
+from api.schemas import GTTOrdersOut, StatusMessageOut
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/orders", tags=["Orders"])
 
 
-@router.get("/gtt")
+@router.get("/gtt", response_model=GTTOrdersOut)
 async def get_gtt_orders(user_id: Optional[int] = Query(default=None), user=Depends(get_current_user)):
     """
     Return GTT orders.
@@ -26,7 +27,6 @@ async def get_gtt_orders(user_id: Optional[int] = Query(default=None), user=Depe
     """
     conn = get_connection()
     try:
-        # Always restrict to the authenticated user unless they match explicitly
         effective_user_id = user["id"]
         if user_id and user_id != effective_user_id:
             raise HTTPException(status_code=403, detail="Access denied")
@@ -36,10 +36,10 @@ async def get_gtt_orders(user_id: Optional[int] = Query(default=None), user=Depe
         rows = _rows_to_dicts(cur)
         return {"data": rows, "total": len(rows)}
     finally:
-        conn.close()
+        release_connection(conn)
 
 
-@router.get("/gtt/{user_id}")
+@router.get("/gtt/{user_id}", response_model=GTTOrdersOut)
 async def get_user_gtt_orders(user_id: int, user=Depends(get_current_user)):
     """Return GTT orders for a specific user."""
     if user["id"] != user_id:
@@ -52,10 +52,10 @@ async def get_user_gtt_orders(user_id: int, user=Depends(get_current_user)):
         rows = _rows_to_dicts(cur)
         return {"data": rows, "total": len(rows), "user_id": user_id}
     finally:
-        conn.close()
+        release_connection(conn)
 
 
-@router.post("/gtt/sync")
+@router.post("/gtt/sync", response_model=StatusMessageOut)
 async def sync_gtt(background_tasks: BackgroundTasks, user=Depends(get_current_user)):
     """Manually trigger an Angel One GTT status sync in the background."""
     def _run():

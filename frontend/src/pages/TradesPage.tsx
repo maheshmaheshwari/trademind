@@ -36,7 +36,7 @@ function Pill({ color, bg, children }: { color: string; bg: string; children: Re
 export default function TradesPage() {
   const { user } = useAuth();
   const toast    = useToast();
-  const { sort: histSort, toggle: histToggle } = useSort('date', 'desc');
+  const { sort: histSort, toggle: histToggle } = useSort('created_at', 'desc');
 
   const [tab,       setTab]       = useState<Tab>('open');
   const [closed,    setClosed]    = useState<Set<string>>(new Set());
@@ -57,12 +57,13 @@ export default function TradesPage() {
   const trades:    Trade[]        = (ordRes as any)?.data  ?? [];
   const gttOrders: GTTOrder[]     = (gttRes as any)?.data  ?? [];
 
+
   async function closePos(p: OpenPosition) {
     if (!user) return;
     try {
       const res = await squareOff({ userId: user.id, symbol: p.symbol }).unwrap();
       setClosed(s => new Set([...s, p.symbol]));
-      toast({ type: p.pnl >= 0 ? 'success' : 'info', title: `Closed ${p.symbol}`, msg: `Realized ${(p.pnl >= 0 ? '+' : '') + Number((res as any)?.realized_pnl ?? p.pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (${(p.pnlPct >= 0 ? '+' : '') + p.pnlPct.toFixed(2)}%)` });
+      toast({ type: (p.unrealized_pnl ?? 0) >= 0 ? 'success' : 'info', title: `Closed ${p.symbol}`, msg: `Realized ${((p.unrealized_pnl ?? 0) >= 0 ? '+' : '') + Number((res as any)?.pnl ?? p.unrealized_pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (${((p.unrealized_pnl_pct ?? 0) >= 0 ? '+' : '') + (p.unrealized_pnl_pct ?? 0).toFixed(2)}%)` });
     } catch (e: unknown) { toast({ type: 'error', title: 'Close failed', msg: e instanceof Error ? e.message : 'Try again' }); }
   }
 
@@ -72,11 +73,11 @@ export default function TradesPage() {
   }
 
   const today = new Date();
-  const histFiltered = [...trades]
+  const histFiltered = ([...(trades ?? [])])
     .filter(t => {
-      const days = (today.getTime() - new Date(t.date).getTime()) / 86400000;
+      const days = (today.getTime() - new Date(t?.created_at ?? '').getTime()) / 86400000;
       const rangeOk = dateRange === 'All' || (dateRange === '7D' && days <= 7) || (dateRange === '30D' && days <= 30) || (dateRange === '90D' && days <= 90);
-      return rangeOk && (sideFlt === 'All' || t.side === sideFlt);
+      return rangeOk && (sideFlt === 'All' || t?.order_type === sideFlt);
     })
     .sort((a, b) => {
       const va = a[histSort.key as keyof Trade], vb = b[histSort.key as keyof Trade];
@@ -89,15 +90,15 @@ export default function TradesPage() {
     });
 
   const histPages = Math.max(1, Math.ceil(histFiltered.length / PER_PAGE));
-  const histRows  = histFiltered.slice((histPage - 1) * PER_PAGE, histPage * PER_PAGE);
+  const histRows  = (histFiltered ?? []).slice((histPage - 1) * PER_PAGE, histPage * PER_PAGE);
 
-  const openPos    = positions.filter(p => !closed.has(p.symbol));
+  const openPos    = (positions ?? []).filter(p => !closed.has(p?.symbol ?? ''));
   const signalHist = (sigHist as any)?.data ?? [];
   const counts     = { open: openPos.length, history: trades.length, gtt: gttOrders.length, ai_signals: signalHist.length };
 
   function exportCSV() {
     const head = 'Date,Symbol,Side,Qty,Price,Value,Realized P&L\n';
-    const body = histFiltered.map(t => `${new Date(t.date).toISOString().slice(0, 10)},${t.symbol},${t.side},${t.qty},${t.price},${t.value},${t.realized}`).join('\n');
+    const body = histFiltered.map(t => `${t?.created_at ? new Date(t.created_at).toISOString().slice(0, 10) : ''},${t?.symbol ?? ''},${t?.order_type ?? ''},${t?.quantity ?? 0},${t?.price ?? 0},${t?.value ?? 0},${t?.pnl ?? 0}`).join('\n');
     const blob = new Blob([head + body], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a'); a.href = url; a.download = 'trademind-trades.csv'; a.click();
@@ -152,24 +153,24 @@ export default function TradesPage() {
               <tbody>
                 {loading ? <SkeletonRows cols={8} rows={6} /> : openPos.length === 0 ? (
                   <tr><td colSpan={8} className="text-center py-[50px] px-5 text-ink-3">No open positions. All trades closed 🎉</td></tr>
-                ) : openPos.map(p => (
-                  <tr key={p.symbol} className="transition-colors hover:bg-surface-2">
-                    <td style={tdS} onClick={() => setDrawer(p.symbol)} className="cursor-pointer"><SymbolCell symbol={p.symbol} name={p.name} sector={p.sector} /></td>
-                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(p.entry)}</td>
-                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-loss tabular-nums">{inr(p.sl)}</td>
-                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-gain tabular-nums">{inr(p.target)}</td>
-                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(p.price)}</td>
+                ) : (openPos ?? []).map(p => (
+                  <tr key={p?.symbol} className="transition-colors hover:bg-surface-2">
+                    <td style={tdS} onClick={() => setDrawer(p?.symbol ?? '')} className="cursor-pointer"><SymbolCell symbol={p?.symbol ?? ''} name={p?.name ?? ''} sector={p?.sector ?? ''} /></td>
+                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(p?.avg_buy_price ?? 0)}</td>
+                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-loss tabular-nums">{inr(p?.stop_loss ?? 0)}</td>
+                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-gain tabular-nums">{inr(p?.target_price ?? 0)}</td>
+                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(p?.current_price ?? 0)}</td>
                     <td style={{ ...tdS, textAlign: 'right' }}>
                       <div className="flex flex-col items-end">
-                        <span className="font-mono font-semibold tabular-nums" style={{ color: p.pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                          {(p.pnl >= 0 ? '+' : '') + Number(p.pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        <span className="font-mono font-semibold tabular-nums" style={{ color: (p?.unrealized_pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          {((p?.unrealized_pnl ?? 0) >= 0 ? '+' : '') + Number(p?.unrealized_pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </span>
-                        <span className="text-[11.5px] tabular-nums" style={{ color: p.pnlPct >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                          {(p.pnlPct >= 0 ? '+' : '') + p.pnlPct.toFixed(2)}%
+                        <span className="text-[11.5px] tabular-nums" style={{ color: (p?.unrealized_pnl_pct ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          {((p?.unrealized_pnl_pct ?? 0) >= 0 ? '+' : '') + (p?.unrealized_pnl_pct ?? 0).toFixed(2)}%
                         </span>
                       </div>
                     </td>
-                    <td style={{ ...tdS, textAlign: 'right' }} className="text-ink-3 font-mono">{p.days}d</td>
+                    <td style={{ ...tdS, textAlign: 'right' }} className="text-ink-3 font-mono">{p?.created_at ? Math.floor((Date.now() - new Date(p.created_at).getTime()) / 86400000) : '—'}d</td>
                     <td style={{ ...tdS, textAlign: 'right' }}>
                       <button onClick={() => closePos(p)}
                         className="h-8 px-[11px] rounded-[9px] text-[12.5px] font-semibold cursor-pointer border-0 bg-loss-soft text-loss transition-colors font-sans hover:bg-loss hover:text-white">
@@ -212,31 +213,31 @@ export default function TradesPage() {
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr>
-                  <Th label="Date"         sortKey="date"     sort={histSort} onToggle={histToggle} />
+                  <Th label="Date"         sortKey="created_at" sort={histSort} onToggle={histToggle} />
                   <PlainTh>Symbol</PlainTh>
-                  <PlainTh>Side</PlainTh>
-                  <Th label="Qty"          sortKey="qty"      sort={histSort} onToggle={histToggle} align="right" />
-                  <Th label="Price"        sortKey="price"    sort={histSort} onToggle={histToggle} align="right" />
-                  <Th label="Value"        sortKey="value"    sort={histSort} onToggle={histToggle} align="right" />
-                  <Th label="Realized P&L" sortKey="realized" sort={histSort} onToggle={histToggle} align="right" />
+                  <PlainTh>Type</PlainTh>
+                  <Th label="Qty"          sortKey="quantity"   sort={histSort} onToggle={histToggle} align="right" />
+                  <Th label="Price"        sortKey="price"      sort={histSort} onToggle={histToggle} align="right" />
+                  <Th label="Value"        sortKey="value"      sort={histSort} onToggle={histToggle} align="right" />
+                  <Th label="P&L"          sortKey="pnl"        sort={histSort} onToggle={histToggle} align="right" />
                   <PlainTh align="right">Status</PlainTh>
                 </tr>
               </thead>
               <tbody>
-                {loading ? <SkeletonRows cols={8} rows={9} /> : histRows.map(t => (
-                  <tr key={t.id} className="transition-colors hover:bg-surface-2">
-                    <Td><span className="text-[12.5px] text-ink-3 font-mono">{new Date(t.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span></Td>
-                    <Td><SymbolCell symbol={t.symbol} name={t.name} sector={t.sector} showSector={false} /></Td>
-                    <Td><Pill color={t.side === 'BUY' ? 'var(--green)' : 'var(--red)'} bg={t.side === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)'}>{t.side}</Pill></Td>
-                    <Td align="right" mono>{t.qty}</Td>
-                    <Td align="right" mono>{inr(t.price)}</Td>
-                    <Td align="right" mono><span className="text-ink-2">{inrCompact(t.value)}</span></Td>
+                {loading ? <SkeletonRows cols={8} rows={9} /> : (histRows ?? []).map(t => (
+                  <tr key={t?.id} className="transition-colors hover:bg-surface-2">
+                    <Td><span className="text-[12.5px] text-ink-3 font-mono">{new Date(t?.created_at ?? '').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span></Td>
+                    <Td><SymbolCell symbol={t?.symbol ?? ''} name={t?.name ?? ''} sector={t?.sector ?? ''} showSector={false} /></Td>
+                    <Td><Pill color={t?.order_type === 'BUY' ? 'var(--green)' : 'var(--red)'} bg={t?.order_type === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)'}>{t?.order_type}</Pill></Td>
+                    <Td align="right" mono>{t?.quantity}</Td>
+                    <Td align="right" mono>{inr(t?.price ?? 0)}</Td>
+                    <Td align="right" mono><span className="text-ink-2">{inrCompact(t?.value ?? 0)}</span></Td>
                     <Td align="right" mono>
-                      <span className="font-semibold" style={{ color: t.realized >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                        {(t.realized >= 0 ? '+' : '') + Number(t.realized).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      <span className="font-semibold" style={{ color: (t?.pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        {((t?.pnl ?? 0) >= 0 ? '+' : '') + Number(t?.pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                       </span>
                     </Td>
-                    <Td align="right"><Pill color="var(--green)" bg="var(--green-soft)">Executed</Pill></Td>
+                    <Td align="right"><Pill color="var(--green)" bg="var(--green-soft)">{t?.status}</Pill></Td>
                   </tr>
                 ))}
               </tbody>
@@ -274,19 +275,19 @@ export default function TradesPage() {
                 </tr>
               </thead>
               <tbody>
-                {loading ? <SkeletonRows cols={8} rows={5} /> : gttOrders.map(g => {
-                  const sc  = g.status === 'ACTIVE' ? 'var(--accent-2)' : g.status === 'TRIGGERED' ? 'var(--green)' : 'var(--text-3)';
-                  const sbg = g.status === 'ACTIVE' ? 'var(--accent-soft)' : g.status === 'TRIGGERED' ? 'var(--green-soft)' : 'var(--surface-3)';
+                {loading ? <SkeletonRows cols={8} rows={5} /> : (gttOrders ?? []).map(g => {
+                  const sc  = g?.status === 'ACTIVE' ? 'var(--accent-2)' : g?.status === 'TRIGGERED' ? 'var(--green)' : 'var(--text-3)';
+                  const sbg = g?.status === 'ACTIVE' ? 'var(--accent-soft)' : g?.status === 'TRIGGERED' ? 'var(--green-soft)' : 'var(--surface-3)';
                   return (
-                    <tr key={g.id} className="transition-colors hover:bg-surface-2">
-                      <td style={tdS}><SymbolCell symbol={g.symbol} name={g.name} sector="" showSector={false} /></td>
-                      <td style={tdS}><Pill color="var(--text-2)" bg="var(--surface-3)">{g.type}</Pill></td>
-                      <td style={tdS}><Pill color={g.side === 'BUY' ? 'var(--green)' : 'var(--red)'} bg={g.side === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)'}>{g.side}</Pill></td>
-                      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono font-semibold tabular-nums">{inr(g.trigger)}</td>
-                      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-ink-2 tabular-nums">{inr(g.ltp)}</td>
-                      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono">{g.qty}</td>
-                      <td style={tdS} className="text-[12.5px] text-ink-3">{g.created}</td>
-                      <td style={{ ...tdS, textAlign: 'right' }}><Pill color={sc} bg={sbg}>{g.status}</Pill></td>
+                    <tr key={g?.id} className="transition-colors hover:bg-surface-2">
+                      <td style={tdS}><SymbolCell symbol={g?.symbol ?? ''} name={g?.name ?? ''} sector="" showSector={false} /></td>
+                      <td style={tdS}><Pill color="var(--text-2)" bg="var(--surface-3)">{g?.type}</Pill></td>
+                      <td style={tdS}><Pill color={g?.side === 'BUY' ? 'var(--green)' : 'var(--red)'} bg={g?.side === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)'}>{g?.side}</Pill></td>
+                      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono font-semibold tabular-nums">{inr(g?.trigger ?? 0)}</td>
+                      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-ink-2 tabular-nums">{inr(g?.ltp ?? 0)}</td>
+                      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono">{g?.qty}</td>
+                      <td style={tdS} className="text-[12.5px] text-ink-3">{g?.created}</td>
+                      <td style={{ ...tdS, textAlign: 'right' }}><Pill color={sc} bg={sbg}>{g?.status}</Pill></td>
                     </tr>
                   );
                 })}
@@ -320,45 +321,45 @@ export default function TradesPage() {
                   <tr><td colSpan={9} className="text-center py-[50px] px-5 text-ink-3">
                     No AI signals acted on yet. Execute a signal from the AI Signals page.
                   </td></tr>
-                ) : signalHist.map((s: any, i: number) => (
+                ) : (signalHist ?? []).map((s: any, i: number) => (
                   <tr key={i} className="transition-colors hover:bg-surface-2">
-                    <td style={tdS} onClick={() => setDrawer(s.symbol)} className="cursor-pointer">
-                      <SymbolCell symbol={s.symbol} name={s.symbol.replace('.NS','')} sector="" showSector={false} />
+                    <td style={tdS} onClick={() => setDrawer(s?.symbol ?? '')} className="cursor-pointer">
+                      <SymbolCell symbol={s?.symbol ?? ''} name={(s?.symbol ?? '').replace('.NS','')} sector="" showSector={false} />
                     </td>
-                    <td style={tdS}><SignalBadge signal={s.signal} /></td>
+                    <td style={tdS}><SignalBadge signal={s?.signal} /></td>
                     <td style={tdS}>
                       <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">
-                        {s.model_horizon ?? '—'}
+                        {s?.model_horizon ?? '—'}
                       </span>
                     </td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">
-                      {s.buy_price ? inr(s.buy_price) : '—'}
+                      {s?.buy_price ? inr(s.buy_price) : '—'}
                     </td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-gain tabular-nums">
-                      {s.target_price ? inr(s.target_price) : '—'}
+                      {s?.target_price ? inr(s.target_price) : '—'}
                     </td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-loss tabular-nums">
-                      {s.stop_loss ? inr(s.stop_loss) : '—'}
+                      {s?.stop_loss ? inr(s.stop_loss) : '—'}
                     </td>
                     <td style={tdS} className="text-[12px] text-ink-3">
-                      {s.traded_at ? new Date(s.traded_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                      {s?.traded_at ? new Date(s.traded_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                     </td>
                     <td style={tdS}>
                       <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold border border-transparent"
                         style={{
-                          background: s.order_status === 'EXECUTED' ? 'var(--green-soft)' : s.order_status === 'PENDING' ? 'var(--gold-soft)' : 'var(--surface-3)',
-                          color:      s.order_status === 'EXECUTED' ? 'var(--green)'      : s.order_status === 'PENDING' ? 'var(--gold)'      : 'var(--text-3)',
+                          background: s?.order_status === 'EXECUTED' ? 'var(--green-soft)' : s?.order_status === 'PENDING' ? 'var(--gold-soft)' : 'var(--surface-3)',
+                          color:      s?.order_status === 'EXECUTED' ? 'var(--green)'      : s?.order_status === 'PENDING' ? 'var(--gold)'      : 'var(--text-3)',
                         }}>
-                        {s.order_status ?? '—'}
+                        {s?.order_status ?? '—'}
                       </span>
                     </td>
                     <td style={tdS}>
                       <span className="inline-flex items-center gap-1 h-[22px] px-2 rounded-full text-[11px] font-semibold border border-transparent"
                         style={{
-                          background: s.is_active ? 'var(--accent-soft)' : 'var(--surface-3)',
-                          color:      s.is_active ? 'var(--accent-2)'    : 'var(--text-3)',
+                          background: s?.is_active ? 'var(--accent-soft)' : 'var(--surface-3)',
+                          color:      s?.is_active ? 'var(--accent-2)'    : 'var(--text-3)',
                         }}>
-                        {s.is_active ? '● Active' : '○ Superseded'}
+                        {s?.is_active ? '● Active' : '○ Superseded'}
                       </span>
                     </td>
                   </tr>

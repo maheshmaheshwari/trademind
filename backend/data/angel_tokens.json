@@ -1175,12 +1175,6 @@
     "name": "Gujarat Mineral Development Corporation Ltd.",
     "sector": "Metals & Mining"
   },
-  "GSPL": {
-    "token": "13197",
-    "trading_symbol": "GSPL-EQ",
-    "name": "Gujarat State Petronet Ltd.",
-    "sector": "Oil Gas & Consumable Fuels"
-  },
   "HEG": {
     "token": "1336",
     "trading_symbol": "HEG-EQ",

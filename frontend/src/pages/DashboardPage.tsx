@@ -203,7 +203,12 @@ export default function DashboardPage() {
 
   const nifty    = indices?.[0];
   const winRate  = user ? ((user.win_count ?? 0) + (user.loss_count ?? 0) > 0 ? (((user.win_count ?? 0) / ((user.win_count ?? 0) + (user.loss_count ?? 0))) * 100).toFixed(1) : '0') : '0';
-  const niftyLabels = ['9:15', '11:00', '12:45', '14:30', '15:30'];
+  const niftyLabels = (nifty?.spark ?? []).map((_, i) => {
+    const totalMins = 9 * 60 + 15 + i * 5;
+    const h = Math.floor(totalMins / 60);
+    const m = totalMins % 60;
+    return `${h}:${String(m).padStart(2, '0')}`;
+  });
 
   // Dynamic greeting based on current hour
   const hour = new Date().getHours();
@@ -349,13 +354,13 @@ export default function DashboardPage() {
           ) : signalStyle === 'compact' ? (
             <div className="flex flex-col gap-2">
               {(signals ?? []).map(s => (
-                <SignalCard key={s?.symbol} s={s} variant="compact" onClick={() => navigate('/signals')} />
+                <SignalCard key={s?.symbol} s={s} variant="compact" onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)} />
               ))}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {(signals ?? []).map(s => (
-                <SignalCard key={s?.symbol} s={s} variant={signalStyle} onClick={() => navigate('/signals')} />
+                <SignalCard key={s?.symbol} s={s} variant={signalStyle} onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)} />
               ))}
             </div>
           )}

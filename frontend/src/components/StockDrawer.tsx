@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Bookmark, AlertTriangle } from 'lucide-react';
-import { useLazyGetStockDetailQuery, useGetPositionsQuery, useExecuteSignalMutation, useAddToWatchlistMutation } from '../services/tradeMindApiService';
+import { useLazyGetStockDetailQuery, useGetPositionsQuery, useExecuteSignalMutation, useAddToWatchlistMutation, useGetStockHistoryQuery } from '../services/tradeMindApiService';
 import { useAuth } from '../AuthContext';
 import { useToast, symColor } from './ui';
 import { AreaChart } from './Charts';
@@ -496,6 +496,12 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
     { skip: !user || !symbol }
   );
 
+  // Fetch price history for the selected range — re-fetches automatically on range change
+  const { data: histRes, isFetching: loadHist } = useGetStockHistoryQuery(
+    { symbol: symbol ?? '', range: chartRange },
+    { skip: !symbol }
+  );
+
   useEffect(() => {
     if (symbol) { setChartRange('1M'); fetchDetail(symbol); }
   }, [symbol, fetchDetail]);
@@ -503,6 +509,14 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
   const loading  = loadDetail || loadPos;
   const data: StockDetail | null = (detailRes as any)?.data ?? null;
   const position: OpenPosition | null = ((posRes as any)?.data ?? []).find((p: OpenPosition) => p?.symbol === symbol) ?? null;
+
+  // Chart data from history endpoint; fall back to spark while loading
+  const histPrices = histRes?.prices ?? [];
+  const histLabels = histRes?.labels ?? [];
+  const histChangePct = histRes?.change_pct ?? 0;
+  const chartPrices = histPrices.length > 0 ? histPrices : (data?.spark ?? []);
+  const chartLabels = histPrices.length > 0 ? histLabels : undefined;
+  const chartColor  = histChangePct >= 0 ? '#10B981' : '#EF4444';
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -614,16 +628,36 @@ export function StockDrawer({ symbol, onClose }: StockDrawerProps) {
           {(loading || data) && (
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>Price · {chartRange}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>Price</span>
+                  {/* Period change badge — Groww-style */}
+                  {!loadHist && histPrices.length > 0 && (
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                      height: 20, padding: '0 7px', borderRadius: 6,
+                      fontSize: 11.5, fontWeight: 700,
+                      color: histChangePct >= 0 ? 'var(--green)' : 'var(--red)',
+                      background: histChangePct >= 0 ? 'var(--green-soft)' : 'var(--red-soft)',
+                    }}>
+                      {histChangePct >= 0 ? '▲' : '▼'} {Math.abs(histChangePct).toFixed(2)}%
+                    </span>
+                  )}
+                </div>
                 <div style={{ display: 'inline-flex', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 9, padding: 3, gap: 1 }}>
                   {(['1D', '1W', '1M', '3M', '1Y'] as const).map(r => (
                     <button key={r} style={rangeBtn(r)} onClick={() => setChartRange(r)}>{r}</button>
                   ))}
                 </div>
               </div>
-              {loading
+              {(loading || loadHist)
                 ? <div style={{ height: 170, borderRadius: 9, background: 'var(--surface-3)' }} />
-                : <AreaChart data={data!.spark} color={lineCol} h={170} />
+                : <AreaChart
+                    data={chartPrices}
+                    labels={chartLabels}
+                    color={chartColor}
+                    h={170}
+                    currency
+                  />
               }
             </div>
           )}

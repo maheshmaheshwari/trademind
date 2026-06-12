@@ -32,11 +32,24 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def create_token(user_id: int, username: str) -> str:
-    """Create a JWT access token."""
+    """Create a full JWT access token (7-day lifetime)."""
     payload = {
         "user_id": user_id,
         "username": username,
+        "scope": "full",
         "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat": datetime.utcnow(),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def create_mfa_token(user_id: int, username: str) -> str:
+    """Create a short-lived MFA-step token (5-minute lifetime, scope=mfa only)."""
+    payload = {
+        "user_id": user_id,
+        "username": username,
+        "scope": "mfa",
+        "exp": datetime.utcnow() + timedelta(minutes=5),
         "iat": datetime.utcnow(),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)

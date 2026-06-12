@@ -26,7 +26,7 @@ import pyotp
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from api.auth import decode_token, hash_password, verify_password
+from api.auth import decode_token, create_token, hash_password, verify_password
 from database.db import _execute, _row_to_dict, _rows_to_dicts, get_connection, release_connection
 from trading.trading_engine import get_user
 
@@ -375,16 +375,30 @@ async def totp_setup(authorization: Optional[str] = Header(None)):
         name=user["username"], issuer_name="TradeMind"
     )
 
+    # Generate a base64-encoded PNG QR code so the frontend can use it as <img src=...>
+    try:
+        import qrcode
+        import io
+        import base64
+        qr = qrcode.QRCode(box_size=6, border=4)
+        qr.add_data(qr_uri)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        qr_image = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        qr_image = None
+
     conn = get_connection()
     try:
-        # Store secret but don't enable yet (requires confirmation)
         _execute(conn, "UPDATE users SET totp_secret = ?, totp_enabled = FALSE WHERE id = ?",
                  (secret, user["id"]))
         conn.commit()
     finally:
         release_connection(conn)
 
-    return {"qr_uri": qr_uri, "secret": secret}
+    return {"qr_uri": qr_uri, "qr_image": qr_image, "secret": secret}
 
 
 # ---------------------------------------------------------------------------
@@ -564,3 +578,54 @@ async def delete_all_sessions(authorization: Optional[str] = Header(None)):
         release_connection(conn)
 
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/login/mfa — complete login after TOTP verification
+# ---------------------------------------------------------------------------
+
+class MfaLoginRequest(BaseModel):
+    mfa_token: str
+    totp_code: str
+
+
+@router.post("/auth/login/mfa")
+async def login_mfa(req: MfaLoginRequest):
+    """
+    Complete a login that requires TOTP.
+
+    Accepts the short-lived mfa_token issued by POST /login when totp_enabled=TRUE,
+    verifies the 6-digit TOTP code, and returns the full JWT on success.
+    """
+    payload = decode_token(req.mfa_token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="MFA token expired or invalid. Please log in again.")
+    if payload.get("scope") != "mfa":
+        raise HTTPException(status_code=401, detail="Invalid token scope.")
+
+    user = get_user(payload["user_id"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found.")
+
+    conn = get_connection()
+    try:
+        row = _execute(conn,
+            "SELECT totp_secret, totp_enabled FROM users WHERE id = ?",
+            (user["id"],)
+        ).fetchone()
+    finally:
+        release_connection(conn)
+
+    if not row or not row[1] or not row[0]:
+        raise HTTPException(status_code=400, detail="2FA is not enabled on this account.")
+
+    totp_secret = row[0]
+    totp = pyotp.TOTP(totp_secret)
+
+    # Allow 1 window of drift (30s before/after) to handle clock skew
+    if not totp.verify(req.totp_code.strip(), valid_window=1):
+        raise HTTPException(status_code=401, detail="Invalid authenticator code. Please try again.")
+
+    from trading.trading_engine import _safe_user
+    token = create_token(user["id"], user["username"])
+    return {"status": "success", "user": _safe_user(user), "token": token}

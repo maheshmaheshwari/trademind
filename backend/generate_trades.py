@@ -207,9 +207,11 @@ def calculate_position_sizing(df, signal, buy_price, symbol: str = ""):
     try:
         from database.db import get_connection, release_connection, _execute as _ex
         _c = get_connection()
-        _r = _ex(_c, "SELECT COUNT(*) FROM users WHERE is_active = TRUE")
-        active_users = max(1, _r.fetchone()[0])
-        release_connection(_c)
+        try:
+            _r = _ex(_c, "SELECT COUNT(*) FROM users")
+            active_users = max(1, _r.fetchone()[0])
+        finally:
+            release_connection(_c)
     except Exception:
         active_users = 50  # safe fallback
 

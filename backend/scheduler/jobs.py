@@ -180,9 +180,9 @@ def collect_eod_data_job():
         from update_stocks_angel import main as run_eod
         run_eod(days=2)
         logger.info("✅ [1/3] EOD prices done")
-    except Exception as e:
+    except BaseException as e:
         logger.error(f"❌ [1/3] EOD collection failed: {e} — aborting chain")
-        return
+        raise RuntimeError(f"EOD price collection failed: {e}") from e
 
     # ── Step 2: Technical indicators ─────────────────────────────────────────
     logger.info("⏰ [2/3] Technical indicators starting...")
@@ -190,9 +190,9 @@ def collect_eod_data_job():
         from analysis.signals import process_all_stocks
         result = process_all_stocks()
         logger.info(f"✅ [2/3] Indicators done ({result['processed']} stocks)")
-    except Exception as e:
+    except BaseException as e:
         logger.error(f"❌ [2/3] Indicators failed: {e} — aborting chain")
-        return
+        raise RuntimeError(f"Indicators failed: {e}") from e
 
     # ── Step 3: Trade signal generation ──────────────────────────────────────
     logger.info("⏰ [3/3] Trade signal generation starting...")
@@ -200,8 +200,9 @@ def collect_eod_data_job():
         from generate_trades import generate_signals
         generate_signals()
         logger.info("✅ [3/3] Trade signals done — EOD pipeline complete")
-    except Exception as e:
+    except BaseException as e:
         logger.error(f"❌ [3/3] Trade signal generation failed: {e}")
+        raise RuntimeError(f"Signal generation failed: {e}") from e
 
 
 def collect_yfinance_news_job():

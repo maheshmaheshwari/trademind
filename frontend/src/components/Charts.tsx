@@ -136,16 +136,8 @@ export function AreaChart({ data, color = '#3B82F6', h = 230, labels, currency =
     },
     xaxis: {
       ...base.xaxis,
-      categories: labels ?? data.map((_, i) => i.toString()),
-      tickAmount: labels ? labels.length - 1 : undefined,
-      tickPlacement: 'on',
-      labels: {
-        ...base.xaxis?.labels,
-        show: !!labels,
-        rotate: 0,
-        hideOverlappingLabels: false,
-        showDuplicates: false,
-      },
+      categories: labels ?? data.map((_, i) => String(i)),
+      labels: { show: false },  // never show on axis — date appears in tooltip only
     },
     yaxis: {
       ...(base.yaxis as object),
@@ -158,6 +150,13 @@ export function AreaChart({ data, color = '#3B82F6', h = 230, labels, currency =
     colors: [color],
     tooltip: {
       ...base.tooltip,
+      x: {
+        show: !!(labels?.length),
+        formatter: (_val: number, opts: any) => {
+          if (!labels?.length) return '';
+          return labels[opts?.dataPointIndex ?? 0] ?? '';
+        },
+      },
       y: { formatter: fmtTip },
     },
   };

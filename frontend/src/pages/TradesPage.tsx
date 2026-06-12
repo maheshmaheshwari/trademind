@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Download, RefreshCw } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/ui';
@@ -7,7 +8,7 @@ import {
   useGetGTTOrdersQuery, useSyncGTTMutation, useGetUserSignalHistoryQuery,
 } from '../services/tradeMindApiService';
 import { Card, SkeletonRows, SymbolCell, Pager, useSort, Th, PlainTh, Td, SignalBadge } from '../components/ui';
-import { StockDrawer } from '../components/StockDrawer';
+
 import type { OpenPosition, Trade, GTTOrder } from '../types';
 
 function inr(n: number, dec = 2) {
@@ -43,7 +44,7 @@ export default function TradesPage() {
   const [dateRange, setDateRange] = useState<DateRange>('All');
   const [sideFlt,   setSideFlt]   = useState<SideFlt>('All');
   const [histPage,  setHistPage]  = useState(1);
-  const [drawer,    setDrawer]    = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const { data: posRes,    isLoading: loadPos  } = useGetPositionsQuery({ userId: user!.id, size: 100 }, { skip: !user });
   const { data: ordRes,    isLoading: loadOrd  } = useGetOrdersQuery({ userId: user!.id, size: 200 }, { skip: !user });
@@ -155,7 +156,7 @@ export default function TradesPage() {
                   <tr><td colSpan={8} className="text-center py-[50px] px-5 text-ink-3">No open positions. All trades closed 🎉</td></tr>
                 ) : (openPos ?? []).map(p => (
                   <tr key={p?.symbol} className="transition-colors hover:bg-surface-2">
-                    <td style={tdS} onClick={() => setDrawer(p?.symbol ?? '')} className="cursor-pointer"><SymbolCell symbol={p?.symbol ?? ''} name={p?.name ?? ''} sector={p?.sector ?? ''} /></td>
+                    <td style={tdS} onClick={() => navigate(`/stocks/${encodeURIComponent(p?.symbol ?? '')}`)} className="cursor-pointer"><SymbolCell symbol={p?.symbol ?? ''} name={p?.name ?? ''} sector={p?.sector ?? ''} /></td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(p?.avg_buy_price ?? 0)}</td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-loss tabular-nums">{inr(p?.stop_loss ?? 0)}</td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-gain tabular-nums">{inr(p?.target_price ?? 0)}</td>
@@ -323,7 +324,7 @@ export default function TradesPage() {
                   </td></tr>
                 ) : (signalHist ?? []).map((s: any, i: number) => (
                   <tr key={i} className="transition-colors hover:bg-surface-2">
-                    <td style={tdS} onClick={() => setDrawer(s?.symbol ?? '')} className="cursor-pointer">
+                    <td style={tdS} onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)} className="cursor-pointer">
                       <SymbolCell symbol={s?.symbol ?? ''} name={(s?.symbol ?? '').replace('.NS','')} sector="" showSector={false} />
                     </td>
                     <td style={tdS}><SignalBadge signal={s?.signal} /></td>
@@ -370,7 +371,6 @@ export default function TradesPage() {
         </Card>
       )}
 
-      <StockDrawer symbol={drawer} onClose={() => setDrawer(null)} />
       <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
     </div>
   );

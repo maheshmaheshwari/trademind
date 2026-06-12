@@ -46,3 +46,6 @@ final_models/
 
 # Logs
 *.log
+
+# Fundraising docs (private — not for repo)
+docs/fundraising/

@@ -282,6 +282,35 @@ def aggregate_sentiment(news_list: List[Dict]) -> Dict:
     }
 
 
+def analyze_sentiment(text: str) -> tuple:
+    """
+    Score a headline and return (sentiment_score_str, confidence_float).
+
+    sentiment_score_str is a signed numeric string in [-1.0, +1.0] matching
+    the format already stored in news_sentiment.sentiment (the API reads it
+    back with float()). Positive = bullish, negative = bearish, ~0 = neutral.
+
+    Falls back to keyword scoring when FinBERT (transformers/torch) is not
+    installed, so this function never raises.
+    """
+    try:
+        result = score_sentiment(text)
+    except Exception:
+        result = score_sentiment_simple(text)
+
+    label      = result["sentiment"]       # "positive" | "negative" | "neutral"
+    confidence = float(result["confidence"])
+
+    if label == "positive":
+        score = confidence
+    elif label == "negative":
+        score = -confidence
+    else:
+        score = 0.0
+
+    return str(round(score, 4)), confidence
+
+
 def score_and_update_news(news_list: List[Dict]) -> List[Dict]:
     """
     Score sentiment for a list of news articles and update the database.

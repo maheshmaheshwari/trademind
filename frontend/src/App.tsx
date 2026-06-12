@@ -13,6 +13,7 @@ import TradesPage     from './pages/TradesPage';
 import WatchlistPage  from './pages/WatchlistPage';
 import SettingsPage   from './pages/SettingsPage';
 import BacktestPage   from './pages/BacktestPage';
+import StockPage      from './pages/StockPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/backtest"  element={<BacktestPage />} />
         <Route path="/settings"  element={<SettingsPage />} />
+        <Route path="/stocks/:symbol" element={<StockPage />} />
         {/* Legacy redirect */}
         <Route path="/settings/risk" element={<Navigate to="/settings" replace />} />
       </Route>

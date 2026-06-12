@@ -1,11 +1,12 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useGetPortfolioSummaryQuery } from '../services/tradeMindApiService';
 import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell, useSort, Th, Td } from '../components/ui';
 import { AreaChart, Donut } from '../components/Charts';
 import { AddPositionModal } from '../components/AddPositionModal';
-import { StockDrawer } from '../components/StockDrawer';
+
 import type { Holding, AllocSlice } from '../types';
 
 function inrCompact(n: number) {
@@ -23,7 +24,7 @@ export default function PortfolioPage() {
   const { sort, toggle } = useSort('current', 'desc');
   const [range,  setRange]  = useState<'30D' | '90D' | '1Y'>('90D');
   const [modal,  setModal]  = useState(false);
-  const [drawer, setDrawer] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const { data: portData, isLoading: loading } = useGetPortfolioSummaryQuery(user!.id, { skip: !user });
   const raw = portData as any;
@@ -171,7 +172,7 @@ export default function PortfolioPage() {
             </thead>
             <tbody>
               {loading ? <SkeletonRows cols={8} rows={8} /> : (holdings ?? []).map(h => (
-                <tr key={h?.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => setDrawer(h?.symbol ?? '')}>
+                <tr key={h?.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => navigate(`/stocks/${encodeURIComponent(h?.symbol ?? '')}`)}>
                   <Td><SymbolCell symbol={h?.symbol ?? ''} name={h?.name ?? ''} sector={h?.sector ?? ''} /></Td>
                   <Td align="right" mono>{h?.quantity}</Td>
                   <Td align="right" mono>{inr(h?.avg_buy_price ?? 0)}</Td>
@@ -192,7 +193,6 @@ export default function PortfolioPage() {
       </Card>
 
       {modal && <AddPositionModal onClose={() => setModal(false)} />}
-      <StockDrawer symbol={drawer} onClose={() => setDrawer(null)} />
     </div>
   );
 }

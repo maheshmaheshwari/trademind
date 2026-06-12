@@ -128,8 +128,9 @@ def main(days: int = None):
     parser = argparse.ArgumentParser(description="Update stock data via Angel One")
     parser.add_argument("--days", type=int, default=5, help="Days of history to fetch for new stocks (default: 5)")
     parser.add_argument("--symbols", nargs="+", default=None, help="Only fetch these symbols (without .NS)")
-    args = parser.parse_args()
-    # Allow programmatic override of --days without mutating sys.argv
+    # parse_args([]) ignores sys.argv so uvicorn's --host/--port/--workers
+    # don't cause SystemExit(2) when called from the scheduler
+    args = parser.parse_args([])
     if days is not None:
         args.days = days
 

@@ -185,8 +185,14 @@ export const tradeMindApiService = createApi({
   endpoints: (builder) => ({
 
     // ── Auth ──────────────────────────────────────────────────────────────
-    login: builder.mutation<{ token: string; user: User }, { username: string; password: string }>({
+    login: builder.mutation<
+      { token?: string; user?: User; mfa_required?: boolean; mfa_token?: string; status: string },
+      { username: string; password: string }
+    >({
       query: (data) => ({ url: '/api/trading/login', method: 'POST', data }),
+    }),
+    loginMfa: builder.mutation<{ token: string; user: User }, { mfa_token: string; totp_code: string }>({
+      query: (data) => ({ url: '/auth/login/mfa', method: 'POST', data }),
     }),
     register: builder.mutation<{ token: string; user: User }, { username: string; password: string; display_name?: string }>({
       query: (data) => ({ url: '/api/trading/register', method: 'POST', data }),
@@ -328,6 +334,10 @@ export const tradeMindApiService = createApi({
     }),
     getStockDetail: builder.query<{ data: Stock }, string>({
       query: (symbol) => ({ url: `/api/stocks/${encodeURIComponent(symbol)}` }),
+      keepUnusedDataFor: 60,
+    }),
+    getStockHistory: builder.query<{ prices: number[]; labels: string[]; change_pct: number }, { symbol: string; range: string }>({
+      query: ({ symbol, range }) => ({ url: `/api/stocks/${encodeURIComponent(symbol)}/history`, params: { range } }),
       keepUnusedDataFor: 60,
     }),
     getStockPrices: builder.query<{ data: number[] }, { symbol: string; days?: number }>({
@@ -478,7 +488,7 @@ export const tradeMindApiService = createApi({
 
 export const {
   // Auth
-  useLoginMutation, useRegisterMutation, useGetMeQuery,
+  useLoginMutation, useLoginMfaMutation, useRegisterMutation, useGetMeQuery,
   useUpdateMeMutation, useChangePasswordMutation,
   useRequestPasswordResetMutation, useConfirmPasswordResetMutation,
   useGetPreferencesQuery, useUpdatePreferencesMutation,
@@ -500,6 +510,7 @@ export const {
   // Stocks
   useGetStocksQuery, useLazyGetStocksQuery,
   useGetStockDetailQuery, useLazyGetStockDetailQuery,
+  useGetStockHistoryQuery,
   useGetStockPricesQuery, useGetStockIndicatorsQuery,
   // Market
   useGetMarketOverviewQuery, useGetMarketSectorsQuery,

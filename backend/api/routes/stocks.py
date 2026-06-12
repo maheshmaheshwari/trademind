@@ -302,6 +302,89 @@ def _get_fundamentals(sym: str) -> dict:
     return result
 
 
+@router.get("/stocks/{symbol}/history")
+async def get_stock_history(symbol: str, range: str = "1M"):
+    """
+    OHLCV history for the chart range selector (1D/1W/1M/3M/1Y).
+    Returns closes + date/time labels + period change %.
+    """
+    from datetime import date, timedelta
+    # Use time_range to avoid shadowing Python's built-in range()
+    time_range = range
+    sym = symbol.upper()
+    if not sym.endswith(".NS"):
+        sym += ".NS"
+
+    range_map = {"1D": 2, "1W": 7, "1M": 30, "3M": 90, "1Y": 365}
+    days = range_map.get(time_range.upper(), 30)
+    interval = "30m" if time_range.upper() == "1D" else "1d"
+
+    conn = get_connection()
+    try:
+        # Try requested interval first; fall back to daily if no intraday data
+        rows = _execute(conn, """
+            SELECT date, time, close FROM prices
+            WHERE symbol = ? AND interval = ?
+              AND date >= CURRENT_DATE - INTERVAL '{days} days'
+            ORDER BY date ASC, time ASC NULLS LAST
+        """.replace("{days}", str(days + 5)), (sym, interval)).fetchall()
+
+        if not rows and interval == "30m":
+            rows = _execute(conn, """
+                SELECT date, time, close FROM prices
+                WHERE symbol = ? AND interval = '1d'
+                  AND date >= CURRENT_DATE - INTERVAL '{days} days'
+                ORDER BY date ASC
+            """.replace("{days}", str(days + 5)), (sym,)).fetchall()
+
+        if not rows:
+            return {"prices": [], "labels": [], "change_pct": 0}
+
+        prices = [float(r[2]) for r in rows if r[2] is not None]
+        if not prices:
+            return {"prices": [], "labels": [], "change_pct": 0}
+
+        # Build labels
+        def _label(row):
+            d, t = str(row[0]), row[1]
+            if t:
+                try:
+                    return str(t)[:5]   # "09:30"
+                except Exception:
+                    pass
+            try:
+                from datetime import datetime as _dt
+                dt = _dt.strptime(d, "%Y-%m-%d")
+                if days <= 7:
+                    return dt.strftime("%a")        # Mon
+                if days <= 30:
+                    return dt.strftime("%d %b")     # 01 Jun
+                if days <= 90:
+                    return dt.strftime("%d %b")
+                return dt.strftime("%b '%y")        # Jun '26
+            except Exception:
+                return d
+
+        raw_labels = [_label(r) for r in rows if r[2] is not None]
+
+        # Downsample to max 60 points so the chart stays responsive
+        if len(prices) > 60:
+            step = len(prices) // 60
+            prices     = prices[::step]
+            raw_labels = raw_labels[::step]
+
+        change_pct = round((prices[-1] - prices[0]) / prices[0] * 100, 2) if prices[0] else 0
+
+        # Return full per-point labels — x-axis is hidden, labels show on tooltip hover only
+        return {"prices": prices, "labels": raw_labels, "change_pct": change_pct, "range": time_range}
+
+    except Exception as e:
+        logger.error(f"get_stock_history {sym} {time_range}: {e}", exc_info=True)
+        return {"prices": [], "labels": [], "change_pct": 0}
+    finally:
+        release_connection(conn)
+
+
 @router.get("/stocks/{symbol}")
 async def get_stock_detail(symbol: str):
     """

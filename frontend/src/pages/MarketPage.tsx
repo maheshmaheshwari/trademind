@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useGetMarketOverviewQuery, useGetMarketSectorsQuery } from '../services/tradeMindApiService';
 import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell } from '../components/ui';
 import { FlowBars, Sparkline } from '../components/Charts';
-import { StockDrawer } from '../components/StockDrawer';
+
 import type { IndexData, FIIDIIBar, HeatmapSector, Breadth, Stock } from '../types';
 
 function pct(n: number) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
@@ -56,7 +57,7 @@ function useIsMarketOpen(): boolean {
 export default function MarketPage() {
   const { data: mktData, isLoading: loading } = useGetMarketOverviewQuery();
   const { data: sectorsData } = useGetMarketSectorsQuery();
-  const [drawer, setDrawer] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [clockTime, setClockTime] = useState('');
   const marketOpen = useIsMarketOpen();
 
@@ -81,7 +82,7 @@ export default function MarketPage() {
   const adRatio = breadth ? ((breadth.advances ?? 0) / (breadth.declines || 1)).toFixed(2) : '—';
 
   const stockRow = (s: Stock) => (
-    <tr key={s?.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => setDrawer(s?.symbol ?? '')}>
+    <tr key={s?.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)}>
       <td style={tdS}><SymbolCell symbol={s?.symbol ?? ''} name={s?.name ?? ''} sector={s?.sector ?? ''} /></td>
       <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(s?.price ?? 0)}</td>
       <td style={{ ...tdS, textAlign: 'right' }}><Delta value={s?.change ?? 0} size={13} showIcon={false} /></td>
@@ -214,7 +215,6 @@ export default function MarketPage() {
         ))}
       </div>
 
-      <StockDrawer symbol={drawer} onClose={() => setDrawer(null)} />
     </div>
   );
 }

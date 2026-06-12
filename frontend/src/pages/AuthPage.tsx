@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLoginMutation, useRegisterMutation, useRequestPasswordResetMutation, useConfirmPasswordResetMutation } from '../services/tradeMindApiService';
+import { useLoginMutation, useLoginMfaMutation, useRegisterMutation, useRequestPasswordResetMutation, useConfirmPasswordResetMutation } from '../services/tradeMindApiService';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../ThemeContext';
 import { useToast } from '../components/ui';
@@ -95,10 +95,18 @@ export default function AuthPage() {
   const [forgotSuccess,   setForgotSuccess]   = useState(false);
 
   const [loginMutation,    { isLoading: loggingIn }]    = useLoginMutation();
+  const [loginMfaMut,      { isLoading: verifyingMfa }] = useLoginMfaMutation();
   const [registerMutation, { isLoading: registering }]  = useRegisterMutation();
   const [requestReset,     { isLoading: sendingOtp }]   = useRequestPasswordResetMutation();
   const [confirmReset,     { isLoading: confirmingReset }] = useConfirmPasswordResetMutation();
-  const busy = loggingIn || registering;
+
+  // MFA step state
+  const [mfaToken,  setMfaToken]  = useState('');
+  const [mfaCode,   setMfaCode]   = useState('');
+  const [mfaErr,    setMfaErr]    = useState('');
+  const [showMfa,   setShowMfa]   = useState(false);
+
+  const busy = loggingIn || registering || verifyingMfa;
 
   const handleGoogleLogin = () => {
     toast({ type: 'info', title: 'Google OAuth coming soon' });
@@ -141,14 +149,41 @@ export default function AuthPage() {
     if (mode === 'register' && !name.trim()) { setErr('Please enter your full name'); return; }
     setErr('');
     try {
-      const data = mode === 'register'
-        ? await registerMutation({ username: username.trim(), password: pw, display_name: name.trim() }).unwrap()
-        : await loginMutation({ username: username.trim(), password: pw }).unwrap();
+      if (mode === 'register') {
+        const data = await registerMutation({ username: username.trim(), password: pw, display_name: name.trim() }).unwrap();
+        localStorage.setItem('trademind_token', (data as any).token);
+        login((data as any).user);
+        navigate('/dashboard');
+        return;
+      }
+      const data = await loginMutation({ username: username.trim(), password: pw }).unwrap();
+      if ((data as any).mfa_required) {
+        // Account has 2FA enabled — show TOTP input step
+        setMfaToken((data as any).mfa_token ?? '');
+        setMfaCode('');
+        setMfaErr('');
+        setShowMfa(true);
+        return;
+      }
       localStorage.setItem('trademind_token', (data as any).token);
       login((data as any).user);
       navigate('/dashboard');
     } catch (ex: unknown) {
       setErr(ex instanceof Error ? ex.message : 'Something went wrong');
+    }
+  };
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mfaCode.trim().length !== 6) { setMfaErr('Enter the 6-digit code from your authenticator app'); return; }
+    setMfaErr('');
+    try {
+      const data = await loginMfaMut({ mfa_token: mfaToken, totp_code: mfaCode.trim() }).unwrap();
+      localStorage.setItem('trademind_token', data.token);
+      login(data.user);
+      navigate('/dashboard');
+    } catch {
+      setMfaErr('Invalid code. Please try again.');
     }
   };
 
@@ -445,6 +480,56 @@ export default function AuthPage() {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── MFA / TOTP step modal ── */}
+      {showMfa && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-sm mx-4 bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-7 flex flex-col gap-5 shadow-2xl">
+            {/* Icon + title */}
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="w-12 h-12 rounded-xl bg-[var(--accent-soft)] grid place-items-center mb-1">
+                <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                </svg>
+              </div>
+              <h2 className="text-[17px] font-bold text-[var(--text)]">Two-factor authentication</h2>
+              <p className="text-[13px] text-[var(--text-2)] leading-relaxed">
+                Enter the 6-digit code from your authenticator app to continue.
+              </p>
+            </div>
+
+            <form onSubmit={handleMfaSubmit} className="flex flex-col gap-4">
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="123456"
+                value={mfaCode}
+                onChange={e => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                className="h-12 text-center text-xl tracking-[0.4em] font-mono rounded-[11px] border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] outline-none focus:border-[var(--accent)] transition-colors"
+                autoFocus
+              />
+              {mfaErr && <p className="text-[12px] text-[var(--red)]">{mfaErr}</p>}
+              <button
+                type="submit"
+                disabled={verifyingMfa || mfaCode.length !== 6}
+                className="h-11 rounded-[11px] font-semibold text-[14px] text-white border-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: 'var(--accent)', boxShadow: '0 4px 14px rgba(59,130,246,.32)' }}
+              >
+                {verifyingMfa ? 'Verifying…' : 'Verify & Sign in'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowMfa(false); setMfaCode(''); setMfaErr(''); }}
+                className="text-[13px] text-[var(--text-3)] hover:text-[var(--text-2)] cursor-pointer border-none bg-transparent underline"
+              >
+                Back to login
+              </button>
+            </form>
           </div>
         </div>
       )}

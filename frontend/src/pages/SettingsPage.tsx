@@ -569,7 +569,7 @@ function SecurityTab() {
   async function handleTotpSetup() {
     try {
       const result = await totpSetup().unwrap();
-      setTotpQr(result?.qr_uri ?? null);
+      setTotpQr(result?.qr_image ?? result?.qr_uri ?? null);
       setTotpMode('setup');
     } catch {
       toast({ type: 'error', title: '2FA setup failed' });

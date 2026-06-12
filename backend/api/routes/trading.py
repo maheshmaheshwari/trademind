@@ -26,7 +26,7 @@ from trading.risk_manager import (
     check_order, get_risk_settings, update_risk_settings,
 )
 from trading.price_monitor import update_position_prices
-from api.auth import hash_password, verify_password, create_token, decode_token
+from api.auth import hash_password, verify_password, create_token, create_mfa_token, decode_token
 
 router = APIRouter(prefix="/api/trading", tags=["Trading"])
 
@@ -116,17 +116,28 @@ async def api_register(req: RegisterRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/login", response_model=AuthOut)
+@router.post("/login")
 async def api_login(req: LoginRequest):
-    """Login with username + password. Returns JWT token."""
+    """
+    Login with username + password.
+
+    If the account has TOTP enabled, returns { mfa_required: true, mfa_token }
+    instead of the full JWT. The client must then call POST /auth/login/mfa
+    with the mfa_token + 6-digit TOTP code to receive the full token.
+    """
     user = get_user_by_username(req.username)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     if not verify_password(req.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    safe = _safe_user(user)
+
+    if user.get("totp_enabled"):
+        # Credentials are valid but MFA step required — return a limited token
+        mfa_token = create_mfa_token(user["id"], user["username"])
+        return {"status": "mfa_required", "mfa_required": True, "mfa_token": mfa_token}
+
     token = create_token(user["id"], user["username"])
-    return {"status": "success", "user": safe, "token": token}
+    return {"status": "success", "user": _safe_user(user), "token": token}
 
 
 @router.get("/me", response_model=UserOut)

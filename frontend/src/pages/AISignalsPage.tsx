@@ -1,11 +1,12 @@
 import { useDeferredValue, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { useGetStocksQuery } from '../services/tradeMindApiService';
 import {
   Card, SignalBadge, SkeletonRows,
   SymbolCell, Conf, Pager, useSort, Th, PlainTh, Td,
 } from '../components/ui';
-import { StockDrawer } from '../components/StockDrawer';
+
 import type { Stock } from '../types';
 
 const HORIZONS = ['All', '1W', '2W', '1M', '2M', '3M', '6M'] as const;
@@ -27,7 +28,7 @@ export default function AISignalsPage() {
   const [sector,       setSector]  = useState('All');
   const [conf,         setConf]    = useState(50);
   const [page,         setPage]    = useState(1);
-  const [drawerSymbol, setDrawer]  = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const { sort, toggle } = useSort('confidence');
   const dSearch = useDeferredValue(search);
@@ -167,7 +168,7 @@ export default function AISignalsPage() {
                   No signals match your filters. Try lowering the confidence threshold.
                 </td></tr>
               ) : rows.map(s => (
-                <tr key={s.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => setDrawer(s.symbol)}>
+                <tr key={s.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)}>
                   <Td><SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector={false} /></Td>
                   <Td>
                     <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 border border-line"
@@ -201,7 +202,6 @@ export default function AISignalsPage() {
         <Pager page={page} pages={pages} total={filtered.length} perPage={PER_PAGE} onPage={setPage} label="signals" />
       </Card>
 
-      <StockDrawer symbol={drawerSymbol} onClose={() => setDrawer(null)} />
     </div>
   );
 }

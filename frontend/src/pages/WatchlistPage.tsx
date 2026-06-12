@@ -1,4 +1,5 @@
 import { useState, useDeferredValue } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, List, Plus, X, Bell } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/ui';
@@ -10,7 +11,7 @@ import {
 } from '../services/tradeMindApiService';
 import { SignalBadge, SymbolCell, Conf, Skeleton, useSort, Th, Td } from '../components/ui';
 import { Sparkline } from '../components/Charts';
-import { StockDrawer } from '../components/StockDrawer';
+
 import type { WatchlistItem } from '../types';
 
 function inr(n: number) {
@@ -105,7 +106,7 @@ export default function WatchlistPage() {
   const { user }  = useAuth();
   const toast     = useToast();
   const [view,    setView]    = useState<'grid' | 'table'>('grid');
-  const [drawer,  setDrawer]  = useState<string | null>(null);
+  const navigate = useNavigate();
   const [addOpen, setAddOpen] = useState(false);
   const [addQ,    setAddQ]    = useState('');
   const { sort, toggle } = useSort('confidence', 'desc');
@@ -207,7 +208,7 @@ export default function WatchlistPage() {
       {!isLoading && items.length > 0 && view === 'grid' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           {(sorted ?? []).map(item => (
-            <WatchCard key={item.symbol} item={item} onRemove={() => handleRemove(item.symbol)} onClick={() => setDrawer(item.symbol)} />
+            <WatchCard key={item.symbol} item={item} onRemove={() => handleRemove(item.symbol)} onClick={() => navigate(`/stocks/${encodeURIComponent(item?.symbol ?? '')}`)} />
           ))}
         </div>
       )}
@@ -232,7 +233,7 @@ export default function WatchlistPage() {
               </thead>
               <tbody>
                 {(sorted ?? []).map(item => (
-                  <tr key={item?.symbol} className="cursor-pointer transition-colors hover:bg-[var(--surface-2)]" onClick={() => setDrawer(item?.symbol ?? '')}>
+                  <tr key={item?.symbol} className="cursor-pointer transition-colors hover:bg-[var(--surface-2)]" onClick={() => navigate(`/stocks/${encodeURIComponent(item?.symbol ?? '')}`)}>
                     <Td><SymbolCell symbol={item?.symbol ?? ''} name={item?.name ?? ''} sector={item?.sector ?? ''} showSector={false} /></Td>
                     <Td align="right" mono>{inr(item?.price ?? 0)}</Td>
                     <Td align="right">
@@ -328,7 +329,6 @@ export default function WatchlistPage() {
         </div>
       )}
 
-      <StockDrawer symbol={drawer} onClose={() => setDrawer(null)} />
     </div>
   );
 }

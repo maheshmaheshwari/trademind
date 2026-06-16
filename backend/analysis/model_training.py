@@ -290,6 +290,9 @@ class PurgedTimeSeriesSplit:
 
 def _query_to_df(conn, sql: str, params: tuple = (), timeout: str = "30s") -> pd.DataFrame:
     """Execute a query and return a DataFrame. Times out after `timeout` to prevent hangs."""
+    import re as _re
+    if not _re.fullmatch(r'\d+m?s', timeout):
+        raise ValueError(f"Invalid timeout format: {timeout!r}")
     cur = conn.cursor()
     cur.execute(f"SET statement_timeout = '{timeout}'")
     cur.execute(sql, params)

@@ -149,9 +149,13 @@ export default function AuthPage() {
     if (mode === 'register' && !name.trim()) { setErr('Please enter your full name'); return; }
     setErr('');
     try {
+      const storeToken = (t: string) => {
+        if (remember) localStorage.setItem('trademind_token', t);
+        else sessionStorage.setItem('trademind_token', t);
+      };
       if (mode === 'register') {
         const data = await registerMutation({ username: username.trim(), password: pw, display_name: name.trim() }).unwrap();
-        localStorage.setItem('trademind_token', (data as any).token);
+        storeToken((data as any).token);
         login((data as any).user);
         navigate('/dashboard');
         return;
@@ -165,7 +169,7 @@ export default function AuthPage() {
         setShowMfa(true);
         return;
       }
-      localStorage.setItem('trademind_token', (data as any).token);
+      storeToken((data as any).token);
       login((data as any).user);
       navigate('/dashboard');
     } catch (ex: unknown) {
@@ -179,7 +183,8 @@ export default function AuthPage() {
     setMfaErr('');
     try {
       const data = await loginMfaMut({ mfa_token: mfaToken, totp_code: mfaCode.trim() }).unwrap();
-      localStorage.setItem('trademind_token', data.token);
+      if (remember) localStorage.setItem('trademind_token', data.token);
+      else sessionStorage.setItem('trademind_token', data.token);
       login(data.user);
       navigate('/dashboard');
     } catch {
@@ -524,7 +529,7 @@ export default function AuthPage() {
               </button>
               <button
                 type="button"
-                onClick={() => { setShowMfa(false); setMfaCode(''); setMfaErr(''); }}
+                onClick={() => { setShowMfa(false); setMfaCode(''); setMfaErr(''); setMfaToken(''); }}
                 className="text-[13px] text-[var(--text-3)] hover:text-[var(--text-2)] cursor-pointer border-none bg-transparent underline"
               >
                 Back to login

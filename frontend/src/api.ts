@@ -28,7 +28,7 @@ function buildQuery(params?: TableParams): string {
 // ==========================================
 
 function getToken(): string | null {
-  return localStorage.getItem('trademind_token');
+  return localStorage.getItem('trademind_token') ?? sessionStorage.getItem('trademind_token');
 }
 
 function authHeaders(): Record<string, string> {
@@ -278,6 +278,7 @@ export async function getStockIndicators(symbol: string) {
 
 export function clearToken() {
   localStorage.removeItem('trademind_token');
+  sessionStorage.removeItem('trademind_token');
 }
 
 // ==========================================

@@ -35,18 +35,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        // Check if we have a JWT token and validate it
-        const token = localStorage.getItem('trademind_token');
+        const token = localStorage.getItem('trademind_token') ?? sessionStorage.getItem('trademind_token');
         if (token) {
             getMe()
-                .then((u) => {
-                    setUser(u);
-                    localStorage.setItem('trademind_user', JSON.stringify(u));
-                })
+                .then((u) => setUser(u))
                 .catch(() => {
-                    // Token expired or invalid — clear both token and cached user
-                    // Do NOT load stale user from localStorage after a failed token validation
-                    localStorage.removeItem('trademind_user');
                     clearToken();
                     setUser(null);
                 })
@@ -58,7 +51,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const logout = useCallback(() => {
         setUser(null);
-        localStorage.removeItem('trademind_user');
         clearToken();
     }, []);
 
@@ -70,14 +62,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const login = (u: User) => {
         setUser(u);
-        localStorage.setItem('trademind_user', JSON.stringify(u));
     };
 
     const refreshUser = async () => {
         try {
             const u = await getMe();
             setUser(u);
-            localStorage.setItem('trademind_user', JSON.stringify(u));
         } catch {
             // noop
         }

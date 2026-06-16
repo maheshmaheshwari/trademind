@@ -303,8 +303,11 @@ class AngelCollector:
                 # Angel One candle format: [timestamp, open, high, low, close, volume]
                 ts, o, h, l, c, v = candle
 
-                # Parse timestamp
+                # Parse timestamp with bounds check
                 dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z")
+                if not (2000 <= dt.year <= 2035):
+                    logger.warning("Implausible timestamp %r for %s — skipping", ts, stock_name)
+                    continue
                 date_str = dt.strftime("%Y-%m-%d")
                 time_str = dt.strftime("%H:%M:%S") if interval != "ONE_DAY" else None
 

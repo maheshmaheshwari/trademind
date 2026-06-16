@@ -152,7 +152,8 @@ def fetch_gdelt_month(
                 "%Y-%m-%d %H:%M:%S"
             )
         except ValueError:
-            published_at = raw_date  # keep as-is if unparseable
+            logger.debug("[%s] Skipping article with unparseable date: %r", symbol, raw_date)
+            continue  # discard rather than persist raw API string
 
         headline = (art.get("title") or "").strip()
         if not headline:

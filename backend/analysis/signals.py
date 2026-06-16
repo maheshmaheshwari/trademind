@@ -26,6 +26,7 @@ Usage:
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -112,12 +113,22 @@ def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str
         return "HOLD", 0.0, ["Insufficient data for analysis"]
 
     # ── 1. Try final production model (final_models/{symbol}_final.pkl) ────────
+    if not re.fullmatch(r'[A-Z0-9&\-]+(?:\.NS)?', symbol.upper()):
+        logger.warning("Rejected unsafe symbol for model load: %s", symbol)
+        return "HOLD", 0.0, ["Invalid symbol format"]
+
     _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    final_path = os.path.join(_backend_dir, "final_models", f"{symbol}_final.pkl")
+    _models_dir = os.path.realpath(os.path.join(_backend_dir, "final_models"))
+
+    final_path = os.path.join(_models_dir, f"{symbol}_final.pkl")
     if not os.path.exists(final_path):
-        # Also try without the .NS suffix stored in the filename
         bare = symbol.replace(".NS", "")
-        final_path = os.path.join(_backend_dir, "final_models", f"{bare}_final.pkl")
+        final_path = os.path.join(_models_dir, f"{bare}_final.pkl")
+
+    # Prevent path traversal: resolved path must be inside final_models/
+    if os.path.exists(final_path) and not os.path.realpath(final_path).startswith(_models_dir):
+        logger.error("Path traversal attempt rejected for symbol: %s", symbol)
+        return "HOLD", 0.0, ["Invalid symbol path"]
 
     if os.path.exists(final_path):
         try:

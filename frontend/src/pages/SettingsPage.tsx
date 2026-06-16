@@ -449,10 +449,11 @@ function AppearanceTab({ theme, toggleTheme, density, setDensity, signalStyle, s
 
   useEffect(() => {
     const saved = localStorage.getItem('trademind-accent');
-    if (saved) setAccent(saved);
+    if (saved && /^#[0-9A-Fa-f]{6}$/.test(saved)) setAccent(saved);
   }, []);
 
   function applyAccent(color: string) {
+    if (!/^#[0-9A-Fa-f]{6}$/.test(color)) return;
     setAccent(color);
     document.documentElement.style.setProperty('--accent', color);
     localStorage.setItem('trademind-accent', color);

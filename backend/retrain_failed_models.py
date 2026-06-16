@@ -38,20 +38,28 @@ FINAL_MODELS_DIR = os.path.join(_BACKEND_DIR, "final_models")
 MODELS_DIR = os.path.join(_BACKEND_DIR, "models")
 
 
-def find_failed_models() -> list[str]:
-    """Return list of symbol strings (e.g. 'TCS.NS') whose final model fails to load."""
+_JOBLIB_MAGIC = b'\x80'  # first byte of pickle protocol 2+ streams
+
+def find_failed_models():
+    """Return list of symbol strings whose final model file is missing or corrupt.
+
+    Uses a magic-byte header check instead of deserializing to avoid executing
+    arbitrary code from a maliciously crafted pickle file (CWE-502).
+    """
     failed = []
     for path in sorted(glob.glob(os.path.join(FINAL_MODELS_DIR, "*_final.pkl"))):
         try:
             with open(path, "rb") as f:
-                pickle.load(f)
+                header = f.read(1)
+            if header != _JOBLIB_MAGIC:
+                raise ValueError("Bad magic byte")
         except Exception:
             symbol = os.path.basename(path).replace("_final.pkl", "")
             failed.append(symbol)
     return failed
 
 
-def retrain_symbol(symbol_ns: str) -> dict | None:
+def retrain_symbol(symbol_ns: str):
     """
     Retrain the model for a single symbol using local DB data.
 

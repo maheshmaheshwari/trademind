@@ -101,8 +101,17 @@ def _fetchall(conn, sql: str, params: tuple = ()) -> List[tuple]:
     return cur.fetchall()
 
 
+_ALLOWED_TABLES = frozenset({
+    "users", "orders", "positions", "risk_settings", "trade_signals",
+    "authorized_trades", "autopilot_settings", "user_signal_volume",
+    "user_sessions", "broker_connections", "watchlist",
+})
+
+
 def _col_names(conn, table: str) -> List[str]:
     """Return column names for a table."""
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"Table '{table}' is not in the allowed list")
     cur = _execute(conn, f"SELECT * FROM {table} LIMIT 0")
     return [d[0] for d in cur.description]
 
@@ -255,6 +264,9 @@ def execute_signal(
 
     mode: "PAPER" (virtual balance) or "LIVE" (real Angel One orders + GTT)
     """
+    if mode == "LIVE":
+        raise ValueError("Live trading is not yet available. Please use PAPER mode.")
+
     conn = get_connection()
     angel_order_id = None
 
@@ -281,12 +293,12 @@ def execute_signal(
         if existing:
             raise ValueError(f"Already have an open position in {symbol}. Square off first.")
 
+        # Calculate quantity BEFORE capacity check so both use the same value.
+        quantity = int(investment_amount / buy_price)
+        if quantity < 1:
+            raise ValueError(f"Investment amount ₹{investment_amount:.2f} too small for {symbol} at ₹{buy_price:.2f}")
+
         # Hard platform-wide capacity check — the only quantity blocker.
-        # consumed_volume tracks total shares bought across ALL users for this signal.
-        # recommended_volume = 1% of avg_daily_volume (market impact ceiling).
-        # We never let the platform collectively move more than 1% of a stock's daily volume.
-        # Per-user suggested qty is a UI hint shown on the frontend — it is NOT enforced here.
-        # columns: 0=consumed_volume, 1=recommended_volume, 2=remaining_capacity
         sig_cap = _fetchone(conn, """
             SELECT consumed_volume, recommended_volume,
                    GREATEST(0, COALESCE(recommended_volume, 0) - COALESCE(consumed_volume, 0)) AS remaining
@@ -302,15 +314,8 @@ def execute_signal(
                     f"{symbol} has reached full platform capacity ({consumed:,}/{rec_vol:,} shares). "
                     f"No more users can buy this stock until the signal refreshes."
                 )
-            # If requested qty exceeds remaining, surface it to the caller so the
-            # frontend can show a confirmation modal (Option 2). Never silently cap.
             if rec_vol > 0 and quantity > remaining:
                 raise PartialCapacityError(symbol, quantity, remaining)
-
-        # Calculate quantity
-        quantity = int(investment_amount / buy_price)
-        if quantity < 1:
-            raise ValueError(f"Investment amount ₹{investment_amount:.2f} too small for {symbol} at ₹{buy_price:.2f}")
 
         actual_investment = round(quantity * buy_price, 2)
         bracket_id = f"BRK_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -326,14 +331,15 @@ def execute_signal(
         # Link to the active AI trade signal for this symbol (for user-wise traceability)
         trade_signal_id = get_active_signal_id(symbol)
 
-        # 1. BUY order — immediately executed
+        # 1. BUY order — PAPER: immediately EXECUTED; LIVE: PLACED until Angel One confirms
+        entry_status = "EXECUTED" if mode == "PAPER" else "PLACED"
         _execute(conn, """
             INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
                 quantity, price, status, mode, signal, confidence, horizon, fill_price, fees,
                 order_id, trade_signal_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'BUY', 'ENTRY', ?, ?, 'EXECUTED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, 'BUY', 'ENTRY', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (user_id, bracket_id, symbol, name, quantity, buy_price,
-              mode, signal, confidence, horizon, buy_price, fees,
+              entry_status, mode, signal, confidence, horizon, buy_price, fees,
               None, trade_signal_id, now, now))
 
         # ---- GTT or PAPER pending orders ----
@@ -433,9 +439,15 @@ def execute_signal(
         # ---- LIVE MODE: Place real BUY order on Angel One AFTER DB commit ----
         if mode == "LIVE":
             angel_order_id = _place_angel_buy(symbol, quantity, buy_price)
-            if not angel_order_id:
-                import logging
-                logging.getLogger(__name__).error(
+            if angel_order_id:
+                # Upgrade BUY order status from PLACED to EXECUTED and record Angel One order_id
+                _execute(conn, """
+                    UPDATE orders SET status = 'EXECUTED', order_id = ?, updated_at = ?
+                    WHERE bracket_id = ? AND order_purpose = 'ENTRY'
+                """, (angel_order_id, _now(), bracket_id))
+                conn.commit()
+            else:
+                _angel_log.error(
                     f"Angel One BUY failed for {symbol} after DB commit — position recorded without live order"
                 )
 

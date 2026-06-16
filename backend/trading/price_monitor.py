@@ -54,7 +54,12 @@ def _get_db_price(conn, symbol: str) -> float:
     return float(latest[0]) if latest else 0.0
 
 
+_ALLOWED_TABLES = frozenset({"positions", "orders", "users"})
+
+
 def _col_names(conn, table: str) -> List[str]:
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"Table '{table}' is not in the allowed list")
     cur = _execute(conn, f"SELECT * FROM {table} LIMIT 0")
     return [d[0] for d in cur.description]
 

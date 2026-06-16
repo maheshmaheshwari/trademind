@@ -105,10 +105,14 @@ export default function RiskSettingsPage() {
 
   useEffect(() => {
     const saved = localStorage.getItem('trademind-accent');
-    if (saved) { setAccent(saved); document.documentElement.style.setProperty('--accent', saved); }
+    if (saved && /^#[0-9A-Fa-f]{6}$/.test(saved)) {
+      setAccent(saved);
+      document.documentElement.style.setProperty('--accent', saved);
+    }
   }, []);
 
   function applyAccent(color: string) {
+    if (!/^#[0-9A-Fa-f]{6}$/.test(color)) return;
     setAccent(color);
     document.documentElement.style.setProperty('--accent', color);
     localStorage.setItem('trademind-accent', color);

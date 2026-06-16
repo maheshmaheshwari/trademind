@@ -32,33 +32,15 @@ except FileNotFoundError:
 
 
 def _get_angel_session():
-    """Create authenticated Angel One SmartConnect session using .env credentials."""
+    """Return the shared Angel One session from trading_engine (avoids per-call TOTP logins)."""
     try:
-        from SmartApi import SmartConnect
-        import pyotp
-
-        api_key = os.getenv("ANGEL_API_KEY")
-        client_id = os.getenv("ANGEL_CLIENT_ID")
-        password = os.getenv("ANGEL_PASSWORD")
-        totp_secret = os.getenv("ANGEL_TOTP_SECRET")
-
-        if not all([api_key, client_id, password, totp_secret]):
-            logger.error("Missing Angel One credentials in .env")
-            return None
-
-        smart_api = SmartConnect(api_key=api_key)
-        totp = pyotp.TOTP(totp_secret).now()
-        session = smart_api.generateSession(client_id, password, totp)
-
-        if not session or session.get("status") is False:
-            logger.error(f"Angel One login failed: {session}")
-            return None
-
-        logger.info("Angel One GTT session created")
-        return smart_api
-
+        from trading.trading_engine import _angel_cache
+        api = _angel_cache.get()
+        if api is None:
+            logger.error("Angel One session unavailable via shared cache")
+        return api
     except Exception as e:
-        logger.error(f"Error creating Angel One session: {e}")
+        logger.error(f"Error obtaining shared Angel One session: {e}")
         return None
 
 

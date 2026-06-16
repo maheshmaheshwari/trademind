@@ -84,13 +84,15 @@ class SquareOffRequest(BaseModel):
 # ==========================================
 
 async def get_current_user(authorization: Optional[str] = Header(None)):
-    """Extract user from JWT Bearer token."""
+    """Extract user from JWT Bearer token. Rejects MFA-step tokens (scope != full)."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
     token = authorization.split(" ", 1)[1]
     payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("scope") != "full":
+        raise HTTPException(status_code=401, detail="Incomplete authentication — please complete MFA")
     user = get_user(payload["user_id"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -151,32 +153,36 @@ async def api_get_me(user=Depends(get_current_user)):
 # ==========================================
 
 @router.post("/user", response_model=UserCreateOut)
-async def api_create_user(req: CreateUserRequest):
-    """Create a virtual trading account with ₹10,00,000 (legacy, use /register)."""
+async def api_create_user(req: CreateUserRequest, user=Depends(get_current_user)):
+    """Create a virtual trading account with ₹10,00,000 (legacy, use /register). Requires auth."""
     try:
-        pw_hash = hash_password(req.username)  # default password = username
-        user = create_user(req.username, pw_hash, req.display_name)
-        return {"status": "success", "user": _safe_user(user)}
+        pw_hash = hash_password(req.username)
+        new_user = create_user(req.username, pw_hash, req.display_name)
+        return {"status": "success", "user": _safe_user(new_user)}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/user/{user_id}", response_model=UserOut)
-async def api_get_user(user_id: int):
-    """Get user account details."""
-    user = get_user(user_id)
-    if not user:
+async def api_get_user(user_id: int, user=Depends(get_current_user)):
+    """Get user account details — only the authenticated user can read their own profile."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    fetched = get_user(user_id)
+    if not fetched:
         raise HTTPException(status_code=404, detail="User not found")
-    return _safe_user(user)
+    return _safe_user(fetched)
 
 
 @router.get("/user/by-username/{username}", response_model=UserOut)
-async def api_get_user_by_username(username: str):
-    """Get user by username."""
-    user = get_user_by_username(username)
-    if not user:
+async def api_get_user_by_username(username: str, user=Depends(get_current_user)):
+    """Get user by username — only the authenticated user can read their own profile."""
+    fetched = get_user_by_username(username)
+    if not fetched:
         raise HTTPException(status_code=404, detail="User not found")
-    return _safe_user(user)
+    if user["id"] != fetched["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return _safe_user(fetched)
 
 
 # ==========================================
@@ -209,6 +215,7 @@ async def api_execute_signal(req: ExecuteSignalRequest, user=Depends(get_current
         investment_amount=req.investment_amount,
         quantity=quantity,
         max_safe_qty=req.max_safe_qty,
+        mode=req.mode or "PAPER",
     )
 
     if not approved:

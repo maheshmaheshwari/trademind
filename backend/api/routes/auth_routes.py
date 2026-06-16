@@ -46,6 +46,8 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
     payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("scope") != "full":
+        raise HTTPException(status_code=401, detail="Incomplete authentication — please complete MFA")
     user = get_user(payload["user_id"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -149,7 +151,8 @@ async def update_me(req: UpdateProfileRequest, authorization: Optional[str] = He
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
-    updates = {k: v for k, v in req.dict().items() if v is not None}
+    _ALLOWED_PROFILE_FIELDS = {"display_name", "email", "phone"}
+    updates = {k: v for k, v in req.dict().items() if v is not None and k in _ALLOWED_PROFILE_FIELDS}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -221,8 +224,7 @@ async def password_reset_request(req: ResetRequestBody):
     finally:
         release_connection(conn)
 
-    # SMTP not configured — log OTP for dev/testing only
-    logger.info("[DEV] Password reset OTP for %s: %s", req.email, otp)
+    # SMTP not configured — OTP is not logged to prevent credential exposure in logs
 
     return {"status": "ok", "message": "If that email exists, an OTP has been sent"}
 
@@ -332,11 +334,11 @@ async def update_preferences(req: PreferencesRequest, authorization: Optional[st
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
-    updates = {k: v for k, v in req.dict().items() if v is not None}
+    _ALLOWED_PREF_FIELDS = {"default_account", "currency"}
+    updates = {k: v for k, v in req.dict().items() if v is not None and k in _ALLOWED_PREF_FIELDS}
     if not updates:
         raise HTTPException(status_code=400, detail="No preferences to update")
 
-    # Validate values
     if "default_account" in updates and updates["default_account"] not in ("PAPER", "LIVE"):
         raise HTTPException(status_code=400, detail="default_account must be PAPER or LIVE")
 

@@ -11,7 +11,7 @@ GET /api/signals/history/{user_id}      — AI signals the user has acted on
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from database.db import (
     get_news_for_user_watchlist,
@@ -25,17 +25,37 @@ router = APIRouter(prefix="/api/news", tags=["News"])
 signals_router = APIRouter(prefix="/api/signals", tags=["Signals"])
 
 
+async def _get_current_user(authorization: Optional[str] = Header(None)):
+    from api.auth import decode_token
+    from trading.trading_engine import get_user
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    token = authorization.split(" ", 1)[1]
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("scope") != "full":
+        raise HTTPException(status_code=401, detail="Incomplete authentication")
+    user = get_user(payload["user_id"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
 # ── Per-user news feed ────────────────────────────────────────────────────────
 
 @router.get("/watchlist/{user_id}")
 async def user_watchlist_news(
     user_id: int,
     limit: int = Query(default=50, le=200),
+    user=Depends(_get_current_user),
 ):
     """
     News feed for a user — articles for all stocks in their watchlist
     plus market-wide news, sorted by most recent.
     """
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     try:
         news = get_news_for_user_watchlist(user_id, limit=limit)
         return {"data": news, "total": len(news), "user_id": user_id}
@@ -45,11 +65,13 @@ async def user_watchlist_news(
 
 
 @router.get("/watchlist/{user_id}/summary")
-async def user_watchlist_sentiment_summary(user_id: int):
+async def user_watchlist_sentiment_summary(user_id: int, user=Depends(_get_current_user)):
     """
     Sentiment summary for a user's watchlist — per-stock avg sentiment
     over last 7 days + overall portfolio sentiment.
     """
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     try:
         summary = get_news_summary_for_user(user_id)
         return {**summary, "user_id": user_id}
@@ -106,12 +128,15 @@ async def market_news(limit: int = Query(default=30, le=100)):
 async def user_signal_history(
     user_id: int,
     limit: int = Query(default=50, le=200),
+    user=Depends(_get_current_user),
 ):
     """
     AI trade signals this user has acted on.
     Shows which AI signals (with is_active status) the user executed,
     when they traded, at what price, and the current signal status.
     """
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     try:
         history = get_user_signal_history(user_id, limit=limit)
         return {

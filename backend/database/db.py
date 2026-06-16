@@ -30,7 +30,7 @@ PGPORT     = int(os.getenv("PGPORT", "5433"))
 PGDATABASE = os.getenv("PGDATABASE", "trademind")
 PGUSER     = os.getenv("PGUSER", "trademind")
 PGPASSWORD = os.getenv("PGPASSWORD", "trademind")
-PGSSLMODE  = os.getenv("PGSSLMODE", "prefer")
+PGSSLMODE  = os.getenv("PGSSLMODE", "prefer")  # set PGSSLMODE=require in production; disable for local Docker
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +155,11 @@ def _on_conflict_ignore(sql: str, unique_cols: List[str]) -> str:
 
 def _on_conflict_replace(sql: str, unique_cols: List[str], update_cols: List[str]) -> str:
     """Append ON CONFLICT (...) DO UPDATE SET ... for upsert-replace semantics."""
+    import re as _re
+    _safe = _re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+    for col in unique_cols + update_cols:
+        if not _safe.match(col):
+            raise ValueError(f"Unsafe column name rejected: {col!r}")
     conflict = ", ".join(unique_cols)
     updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
     return sql + f" ON CONFLICT ({conflict}) DO UPDATE SET {updates}"

@@ -31,10 +31,10 @@ router = APIRouter(prefix="/api/brokers", tags=["Brokers"])
 # ---------------------------------------------------------------------------
 
 def _get_fernet():
-    """Return a Fernet instance with a key derived from JWT_SECRET."""
+    """Return a Fernet instance keyed by BROKER_ENCRYPTION_KEY (separate from JWT_SECRET)."""
     from cryptography.fernet import Fernet
-    jwt_secret = os.getenv("JWT_SECRET", "")
-    key = base64.urlsafe_b64encode(hashlib.sha256(jwt_secret.encode()).digest())
+    broker_key = os.getenv("BROKER_ENCRYPTION_KEY") or os.getenv("JWT_SECRET", "")
+    key = base64.urlsafe_b64encode(hashlib.sha256(broker_key.encode()).digest())
     return Fernet(key)
 
 

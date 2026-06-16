@@ -14,7 +14,12 @@ from typing import Dict, Tuple
 from database.db import get_connection, release_connection, _execute
 
 
+_ALLOWED_TABLES = frozenset({"users", "orders", "positions", "risk_settings", "trade_signals"})
+
+
 def _col_names(conn, table: str):
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"Table '{table}' is not in the allowed list")
     cur = _execute(conn, f"SELECT * FROM {table} LIMIT 0")
     return [d[0] for d in cur.description]
 
@@ -59,6 +64,7 @@ def check_order(
     investment_amount: float,
     quantity: int,
     max_safe_qty: int = None,
+    mode: str = "PAPER",
 ) -> Tuple[bool, str, list]:
     """
     Run all 6 risk checks. Returns (approved, reason, checks).
@@ -142,15 +148,20 @@ def check_order(
                 "detail": "No volume data — skipped"
             })
 
-        # 6. Market hours (IST: 9:15 - 15:30)
-        now = datetime.now()
-        hour, minute = now.hour, now.minute
-        market_open = (hour > 9 or (hour == 9 and minute >= 15)) and \
+        # 6. Market hours (IST: 9:15 - 15:30) — only enforced for LIVE mode
+        now_dt = datetime.now()
+        hour, minute = now_dt.hour, now_dt.minute
+        is_weekday = now_dt.weekday() < 5
+        market_open = is_weekday and (hour > 9 or (hour == 9 and minute >= 15)) and \
                       (hour < 15 or (hour == 15 and minute <= 30))
+        market_hours_pass = True if mode == "PAPER" else market_open
         checks.append({
             "name": "Market Hours",
-            "passed": True,  # Always pass for paper trading
-            "detail": "Market OPEN" if market_open else "Market CLOSED (paper trade OK)"
+            "passed": market_hours_pass,
+            "detail": "Market OPEN" if market_open else (
+                "Market CLOSED — LIVE orders rejected outside market hours"
+                if mode == "LIVE" else "Market CLOSED (paper trade OK)"
+            ),
         })
 
     finally:

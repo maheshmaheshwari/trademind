@@ -174,6 +174,9 @@ def fetch_intraday_30min(symbols: List[str] = None) -> int:
             for candle in data["data"]:
                 ts, o, h, l, c, v = candle
                 dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z")
+                if not (2000 <= dt.year <= 2035):
+                    logger.warning("Implausible timestamp %r — skipping", ts)
+                    continue
                 date_str = dt.strftime("%Y-%m-%d")
                 time_str = dt.strftime("%H:%M:%S")
                 

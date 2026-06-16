@@ -14,13 +14,30 @@ Full wiring:
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel
 
+from api.auth import decode_token
 from database.db import _execute, _rows_to_dicts, get_connection, release_connection, insert_notification
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/autopilot", tags=["Autopilot"])
+
+
+async def _get_current_user(authorization: Optional[str] = Header(None)):
+    from trading.trading_engine import get_user
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    token = authorization.split(" ", 1)[1]
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("scope") != "full":
+        raise HTTPException(status_code=401, detail="Incomplete authentication — please complete MFA")
+    user = get_user(payload["user_id"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 
 # ---------------------------------------------------------------------------
@@ -176,8 +193,10 @@ def _fire_pending_mandates(user_id: int):
 # ---------------------------------------------------------------------------
 
 @router.get("/status")
-async def get_status(user_id: int):
+async def get_status(user_id: int, user=Depends(_get_current_user)):
     """Autopilot enabled flag + summary stats."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     conn = get_connection()
     try:
         settings = _ensure_settings(conn, user_id)
@@ -207,8 +226,10 @@ async def get_status(user_id: int):
 
 
 @router.post("/toggle")
-async def toggle_autopilot(body: ToggleBody, background_tasks: BackgroundTasks):
+async def toggle_autopilot(body: ToggleBody, background_tasks: BackgroundTasks, user=Depends(_get_current_user)):
     """Flip autopilot on/off. Turning ON fires all pending mandates in the background."""
+    if user["id"] != body.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     conn = get_connection()
     try:
         settings = _ensure_settings(conn, body.user_id)
@@ -228,8 +249,10 @@ async def toggle_autopilot(body: ToggleBody, background_tasks: BackgroundTasks):
 
 
 @router.get("/trades")
-async def list_trades(user_id: int, status: Optional[str] = None):
+async def list_trades(user_id: int, status: Optional[str] = None, user=Depends(_get_current_user)):
     """List authorized trades, optionally filtered by status."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     conn = get_connection()
     try:
         if status and status != "All":
@@ -247,7 +270,7 @@ async def list_trades(user_id: int, status: Optional[str] = None):
 
 
 @router.post("/trades")
-async def authorize_trade(body: AuthorizeTradeBody, background_tasks: BackgroundTasks):
+async def authorize_trade(body: AuthorizeTradeBody, background_tasks: BackgroundTasks, user=Depends(_get_current_user)):
     """
     Authorize a new AI-managed trade.
 
@@ -255,6 +278,8 @@ async def authorize_trade(body: AuthorizeTradeBody, background_tasks: Background
     and sets status = EXECUTED.
     If OFF, saves with status = PENDING — will fire when autopilot is next turned ON.
     """
+    if user["id"] != body.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     conn = get_connection()
     try:
         settings = _ensure_settings(conn, body.user_id)
@@ -289,7 +314,7 @@ async def authorize_trade(body: AuthorizeTradeBody, background_tasks: Background
 
 
 @router.delete("/trades/{trade_id}")
-async def revoke_trade(trade_id: int):
+async def revoke_trade(trade_id: int, user=Depends(_get_current_user)):
     """
     Revoke an authorized trade:
       1. Cancel SL + Target GTTs on Angel One (if LIVE mode and GTT IDs present)
@@ -306,6 +331,9 @@ async def revoke_trade(trade_id: int):
         trade = rows[0]
     finally:
         release_connection(conn)
+
+    if user["id"] != trade["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
 
     if trade["status"] not in ("PENDING", "EXECUTED"):
         raise HTTPException(status_code=400,

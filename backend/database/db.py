@@ -54,12 +54,14 @@ def _get_pool():
             user=PGUSER,
             password=PGPASSWORD,
             sslmode=PGSSLMODE,
-            # Keep long-running connections alive through the OS/Docker network stack
             keepalives=1,
             keepalives_idle=60,
             keepalives_interval=10,
             keepalives_count=5,
             connect_timeout=10,
+            # Hard cap on query runtime — prevents 50-second hangs that exhaust
+            # the connection pool and kill the APScheduler thread pool.
+            options="-c statement_timeout=30000",
         )
     return _pool
 
@@ -217,9 +219,26 @@ def insert_price(
         release_connection(conn)
 
 
+def _sanitize_row(row: Tuple) -> Tuple:
+    """Convert numpy scalars / NaN floats to Python-native types for psycopg2."""
+    out = []
+    for v in row:
+        if v is None:
+            out.append(None)
+        elif hasattr(v, "item"):          # numpy scalar → Python native
+            native = v.item()
+            out.append(None if (isinstance(native, float) and native != native) else native)
+        elif isinstance(v, float) and v != v:  # Python float NaN → NULL
+            out.append(None)
+        else:
+            out.append(v)
+    return tuple(out)
+
+
 def insert_prices_batch(rows: List[Tuple], sync: bool = True) -> int:
     if not rows:
         return 0
+    rows = [_sanitize_row(r) for r in rows]
     conn = get_connection()
     try:
         # Split into daily (time=NULL) and intraday rows
@@ -484,9 +503,12 @@ def get_all_prices_df(symbol: str, days: int = 365) -> List[Dict]:
     conn = get_connection()
     try:
         cur = _execute(conn,
-            """SELECT date, open, high, low, close, volume FROM prices
-               WHERE symbol = ? AND interval = '1d' AND date >= ?
-               ORDER BY date ASC""",
+            """SELECT p.date, p.open, p.high, p.low, p.close, p.volume,
+                      COALESCE(d.delivery_pct, 50.0) AS delivery_pct
+               FROM prices p
+               LEFT JOIN delivery_data d ON d.symbol = p.symbol AND d.date = p.date
+               WHERE p.symbol = ? AND p.interval = '1d' AND p.date >= ?
+               ORDER BY p.date ASC""",
             (symbol, start_date),
         )
         return _rows_to_dicts(cur)
@@ -865,22 +887,17 @@ def get_trade_signals(
 
 
 def get_db_stats() -> Dict[str, int]:
-    # Use pg_class.reltuples for O(1) approximate counts — COUNT(*) on hypertables
-    # scans all chunks and can take 7+ minutes, causing TCP keepalive timeouts.
+    # approximate_row_count() is O(1) and works correctly for TimescaleDB hypertables
+    # (pg_class.reltuples returns 0 for hypertable parents because data lives in chunks).
     tables = ["prices", "technical_indicators", "news_sentiment",
               "market_overview", "trade_signals"]
     conn = get_connection()
     try:
-        placeholders = ",".join(["%s"] * len(tables))
         cur = conn.cursor()
-        cur.execute(
-            f"SELECT relname, reltuples::bigint FROM pg_class WHERE relname IN ({placeholders})",
-            tables,
-        )
-        stats = {row[0]: max(0, row[1]) for row in cur.fetchall()}
-        # Fill in zeros for any table not yet in pg_class
+        stats: Dict[str, int] = {}
         for t in tables:
-            stats.setdefault(t, 0)
+            cur.execute("SELECT approximate_row_count(%s)::bigint", (t,))
+            stats[t] = max(0, cur.fetchone()[0])
         return stats
     finally:
         release_connection(conn)

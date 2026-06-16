@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 def _rules_signal(df: pd.DataFrame) -> Tuple[str, float, List[str]]:
-    """Simple rules-based fallback using RSI, MACD, BB, ADX."""
+    """Rules-based fallback using RSI, MACD, BB, ADX, and delivery %."""
     latest = df.iloc[-1]
     reasons = ["Using rules-based fallback (no final model found)."]
     bull, bear = 0, 0
@@ -76,6 +76,21 @@ def _rules_signal(df: pd.DataFrame) -> Tuple[str, float, List[str]]:
 
     adx = latest.get("adx_14")
     trend_confirmed = adx is not None and not pd.isna(adx) and adx > 20
+
+    # Delivery % confirmation — institutional conviction filter
+    delivery_pct = latest.get("delivery_pct", 50.0)
+    if delivery_pct is not None and not pd.isna(delivery_pct):
+        delivery_ma5 = df["delivery_pct"].rolling(5).mean().iloc[-1] if "delivery_pct" in df.columns else 50.0
+        delivery_spike = delivery_pct > (delivery_ma5 * 1.3) if not pd.isna(delivery_ma5) else False
+        if delivery_pct > 65:
+            bull += 1
+            spike_note = " + spike" if delivery_spike else ""
+            reasons.append(f"High institutional delivery {delivery_pct:.1f}%{spike_note} (bullish conviction)")
+        elif delivery_pct < 30:
+            bear += 1
+            reasons.append(f"Low delivery {delivery_pct:.1f}% — speculative/distribution activity")
+        elif delivery_spike:
+            reasons.append(f"Delivery spike {delivery_pct:.1f}% vs 5d avg {delivery_ma5:.1f}% — watch for breakout")
 
     net = bull - bear
     strength = min(100.0, abs(net) / max(bull + bear, 1) * 100)
@@ -130,6 +145,10 @@ def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str
                 if f not in latest.columns:
                     latest[f] = 0.0
             latest = latest[features].replace([np.inf, -np.inf], 0).fillna(0)
+            # TabNet's DataLoader indexes rows by integer position, which fails on
+            # named-column DataFrames. Also, MPS (Apple Silicon) rejects float64 —
+            # use float32 numpy array for all models.
+            latest_arr = latest.to_numpy(dtype=np.float32)
 
             # Ensemble or single model
             sub_models  = artifact.get("sub_models")
@@ -137,21 +156,28 @@ def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str
             if sub_models and sub_weights:
                 total_w = sum(sub_weights.values())
                 buy_prob = sum(
-                    sub_models[mn].predict_proba(latest)[0][1] * (sub_weights[mn] / total_w)
+                    sub_models[mn].predict_proba(latest_arr)[0][1] * (sub_weights[mn] / total_w)
                     for mn in sub_models
                     if hasattr(sub_models[mn], "predict_proba")
                 )
             else:
                 model = artifact["model"]
-                buy_prob = float(model.predict_proba(latest)[0][1])
+                buy_prob = float(model.predict_proba(latest_arr)[0][1])
 
             acc  = metrics.get("accuracy", 0)
             prec = metrics.get("precision", 0)
+            delivery_pct = float(raw_df["delivery_pct"].iloc[-1]) if "delivery_pct" in raw_df.columns else 50.0
+            delivery_label = (
+                f"High institutional ({delivery_pct:.1f}%)" if delivery_pct > 65
+                else f"Speculative ({delivery_pct:.1f}%)" if delivery_pct < 30
+                else f"Normal ({delivery_pct:.1f}%)"
+            )
             reasons = [
                 f"{model_name} model | horizon: {horizon} | buy_prob: {buy_prob*100:.1f}%",
                 f"Model accuracy: {acc*100:.1f}%  precision: {prec*100:.1f}%",
                 f"RSI-14: {float(df['rsi_14'].iloc[-1]):.1f}",
                 f"MACD hist: {float(df['macd_hist'].iloc[-1]):.3f}",
+                f"Delivery: {delivery_label}",
             ]
 
             if buy_prob >= 0.75 and acc >= 0.80:

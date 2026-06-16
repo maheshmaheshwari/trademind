@@ -295,6 +295,25 @@ async def startup_event():
                 logger.error("Recovery queue error: %s", exc)
 
         asyncio.create_task(_recovery_task())
+
+        # Watchdog: every 5 minutes check the scheduler is still alive and
+        # restart it if its thread pool has died or it has been stopped.
+        async def _scheduler_watchdog():
+            while True:
+                await asyncio.sleep(300)
+                try:
+                    from scheduler.jobs import _bg_scheduler, start_background_scheduler
+                    if _bg_scheduler is None or not _bg_scheduler.running:
+                        logger.error(
+                            "🔁 Scheduler watchdog: scheduler is dead — restarting..."
+                        )
+                        start_background_scheduler()
+                    else:
+                        logger.debug("Scheduler watchdog: scheduler is alive ✓")
+                except Exception as exc:
+                    logger.error("Scheduler watchdog error: %s", exc)
+
+        asyncio.create_task(_scheduler_watchdog())
     else:
         logger.info("Scheduler already running in another worker — skipping (worker %d)", worker_pid)
 
@@ -308,6 +327,18 @@ async def shutdown_event():
         logger.info("Background scheduler stopped")
     except Exception as e:
         logger.error(f"Error stopping scheduler: {e}")
+
+    # Remove lock file so the next worker that starts can claim the scheduler
+    # without waiting for a dead-PID check.
+    _lock_path = os.path.join("logs", ".scheduler_owner.pid")
+    try:
+        if os.path.exists(_lock_path):
+            existing_pid = int(open(_lock_path).read().strip())
+            if existing_pid == os.getpid():
+                os.remove(_lock_path)
+                logger.info("Scheduler lock file removed (clean shutdown)")
+    except Exception:
+        pass
 
 
 # ==========================================
@@ -339,6 +370,19 @@ async def health_check():
         "timestamp": now.isoformat(),
         "version": "1.0.0",
     }
+
+
+# ==========================================
+# Scheduler Status Endpoint
+# ==========================================
+@app.get("/api/scheduler/status", tags=["Health"])
+async def scheduler_status():
+    """Return APScheduler state: running flag, job count, and next-run times."""
+    try:
+        from scheduler.jobs import get_scheduler_status
+        return get_scheduler_status()
+    except Exception as exc:
+        return {"running": False, "error": str(exc), "jobs": 0, "job_list": []}
 
 
 # ==========================================

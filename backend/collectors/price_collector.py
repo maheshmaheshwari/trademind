@@ -88,16 +88,20 @@ def collect_historical(
                 date_str = idx.strftime("%Y-%m-%d")
                 time_str = idx.strftime("%H:%M:%S")
 
+            try:
+                vol = int(row["Volume"]) if row["Volume"] == row["Volume"] else 0
+            except (ValueError, TypeError):
+                vol = 0
             rows.append((
                 symbol,
                 "NSE",
                 date_str,
                 time_str,
-                round(row["Open"], 2),
-                round(row["High"], 2),
-                round(row["Low"], 2),
-                round(row["Close"], 2),
-                int(row["Volume"]),
+                round(float(row["Open"]), 2),
+                round(float(row["High"]), 2),
+                round(float(row["Low"]), 2),
+                round(float(row["Close"]), 2),
+                vol,
                 interval,
             ))
 

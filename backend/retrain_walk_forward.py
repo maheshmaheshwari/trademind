@@ -27,6 +27,7 @@ import sys
 import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from datetime import datetime
 from typing import Optional
 
@@ -203,27 +204,64 @@ def retrain_all(symbol_filter: Optional[str] = None,
 
     WORKER_TIMEOUT = 600  # 10 minutes max per stock — auto-skip if stuck
 
+    def _run_with_pool(symbol_list):
+        """Run symbol_list through ProcessPoolExecutor. Returns (done, ok, failed, results)."""
+        _done, _ok, _failed, _results = 0, 0, [], []
+        try:
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                futs = {pool.submit(_worker, s): s for s in symbol_list}
+                for fut in as_completed(futs):
+                    sym = futs[fut]
+                    try:
+                        r = fut.result(timeout=WORKER_TIMEOUT)
+                    except Exception as e:
+                        err_msg = f"timeout after {WORKER_TIMEOUT}s" if "TimeoutError" in type(e).__name__ else str(e)
+                        logger.error(f"❌ {sym}: {err_msg} — skipping")
+                        r = {"symbol": sym, "status": "error", "error": err_msg,
+                             "best_model": "", "horizon": "", "accuracy": 0,
+                             "precision": 0, "recall": 0, "f1": 0,
+                             "train_rows": 0, "test_rows": 0, "elapsed_s": WORKER_TIMEOUT}
+                        _failed.append(sym)
+                    _results.append(r)
+                    writer.writerow({k: r.get(k, "") for k in csv_fields})
+                    csv_fh.flush()
+                    _done += 1
+                    if r["status"] == "ok":
+                        _ok += 1
+                    pct = (_done + done) / total * 100
+                    logger.info(f"[{_done + done}/{total} {pct:.0f}%] {r['symbol']} → {r['status']}")
+        except BrokenProcessPool as exc:
+            # A worker was killed (SIGSEGV / OOM / signal) — the pool cannot recover.
+            # Identify which symbols never returned a result and fall through to single-threaded mode.
+            finished = {r["symbol"] for r in _results}
+            orphaned = [s for s in symbol_list if s not in finished]
+            logger.error(
+                f"⚠️  ProcessPool broken ({exc}). "
+                f"{len(orphaned)} symbols never returned — retrying in single-threaded mode."
+            )
+            return _done, _ok, _failed, _results, orphaned
+        return _done, _ok, _failed, _results, []
+
     if workers > 1:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            futs = {pool.submit(_worker, s): s for s in pending}
-            for fut in as_completed(futs):
-                sym = futs[fut]
-                try:
-                    r = fut.result(timeout=WORKER_TIMEOUT)
-                except Exception as e:
-                    # Timeout or crash — log and skip, don't stall the whole run
-                    err_msg = f"timeout after {WORKER_TIMEOUT}s" if "TimeoutError" in type(e).__name__ else str(e)
-                    logger.error(f"❌ {sym}: {err_msg} — skipping")
-                    r = {"symbol": sym, "status": "error", "error": err_msg,
-                         "best_model": "", "horizon": "", "accuracy": 0,
-                         "precision": 0, "recall": 0, "f1": 0,
-                         "train_rows": 0, "test_rows": 0, "elapsed_s": WORKER_TIMEOUT}
-                    failed.append(sym)
+        pool_done, pool_ok, pool_failed, pool_results, orphaned = _run_with_pool(pending)
+        done += pool_done
+        ok += pool_ok
+        failed.extend(pool_failed)
+        results.extend(pool_results)
+
+        # Re-run orphaned symbols single-threaded (no OpenMP conflicts possible)
+        if orphaned:
+            logger.info(f"\n🔁 Single-threaded fallback for {len(orphaned)} orphaned stocks...")
+            for sym in orphaned:
+                r = train_one(sym)
                 results.append(r)
-                writer.writerow({k: r.get(k,"") for k in csv_fields})
+                writer.writerow({k: r.get(k, "") for k in csv_fields})
                 csv_fh.flush()
                 done += 1
-                if r["status"] == "ok": ok += 1
+                if r["status"] == "ok":
+                    ok += 1
+                else:
+                    failed.append(r["symbol"])
                 pct = done / total * 100
                 logger.info(f"[{done}/{total} {pct:.0f}%] {r['symbol']} → {r['status']}")
     else:

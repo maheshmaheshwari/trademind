@@ -73,104 +73,115 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
     Returns list of triggered (auto-closed) positions.
     """
     conn = get_connection()
-
-    # Get all open positions
-    if user_id:
-        positions = _execute(conn,
-            "SELECT * FROM positions WHERE user_id = ?", (user_id,)
-        ).fetchall()
-    else:
-        positions = _execute(conn, "SELECT * FROM positions").fetchall()
-
-    if not positions:
-        release_connection(conn)
-        return []
-
-    pos_cols = _col_names(conn, "positions")
-
-    # Collect unique symbols for batch LTP fetch
-    symbols = list(set(
-        dict(zip(pos_cols, pos))["symbol"] for pos in positions
-    ))
-
-    # Try live prices first, then fall back to DB
-    live_prices = _fetch_live_prices(symbols)
-    if live_prices:
-        logger.info(f"Using live LTP for {len(live_prices)} symbols")
-    else:
-        logger.info("Using DB prices (fallback)")
-
     triggered = []
+    try:
+        # Get all open positions
+        if user_id:
+            positions = _execute(conn,
+                "SELECT * FROM positions WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        else:
+            positions = _execute(conn, "SELECT * FROM positions").fetchall()
 
-    for pos in positions:
-        pos_dict = dict(zip(pos_cols, pos))
-        symbol = pos_dict["symbol"]
-        uid = pos_dict["user_id"]
+        if not positions:
+            return []
 
-        # Get price: live LTP > DB fallback
-        current_price = live_prices.get(symbol)
-        if not current_price:
-            current_price = _get_db_price(conn, symbol)
+        pos_cols = _col_names(conn, "positions")
 
-        if not current_price or current_price <= 0:
-            continue
+        # Collect unique symbols for batch LTP fetch
+        symbols = list(set(
+            dict(zip(pos_cols, pos))["symbol"] for pos in positions
+        ))
 
-        qty = pos_dict["quantity"]
-        invested = pos_dict["invested_amount"]
-        current_value = round(qty * current_price, 2)
-        pnl = round(current_value - invested, 2)
-        pnl_pct = round(pnl / invested * 100, 2) if invested > 0 else 0
+        # Try live prices first, then fall back to DB
+        live_prices = _fetch_live_prices(symbols)
+        if live_prices:
+            logger.info(f"Using live LTP for {len(live_prices)} symbols")
+        else:
+            logger.info("Using DB prices (fallback)")
 
-        price_source = "LTP" if symbol in live_prices else "DB"
+        for pos in positions:
+            pos_dict = dict(zip(pos_cols, pos))
+            symbol = pos_dict["symbol"]
+            uid = pos_dict["user_id"]
 
-        # Update position with latest price
-        _execute(conn, """
-            UPDATE positions SET
-                current_price = ?, current_value = ?,
-                unrealized_pnl = ?, unrealized_pnl_pct = ?,
-                updated_at = ?
-            WHERE id = ?
-        """, (current_price, current_value, pnl, pnl_pct,
-              datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pos_dict["id"]))
+            # Get price: live LTP > DB fallback
+            current_price = live_prices.get(symbol)
+            if not current_price:
+                current_price = _get_db_price(conn, symbol)
 
-        # Check SL trigger
-        sl = pos_dict.get("stop_loss")
-        target = pos_dict.get("target_price")
+            if not current_price or current_price <= 0:
+                continue
 
-        if sl and current_price <= sl:
+            qty = pos_dict["quantity"]
+            invested = pos_dict["invested_amount"]
+            current_value = round(qty * current_price, 2)
+            pnl = round(current_value - invested, 2)
+            pnl_pct = round(pnl / invested * 100, 2) if invested > 0 else 0
+
+            price_source = "LTP" if symbol in live_prices else "DB"
+
+            # Update position with latest price
+            _execute(conn, """
+                UPDATE positions SET
+                    current_price = ?, current_value = ?,
+                    unrealized_pnl = ?, unrealized_pnl_pct = ?,
+                    updated_at = ?
+                WHERE id = ?
+            """, (current_price, current_value, pnl, pnl_pct,
+                  datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pos_dict["id"]))
+
+            # Check SL trigger
+            sl = pos_dict.get("stop_loss")
+            target = pos_dict.get("target_price")
+
+            if sl and current_price <= sl:
+                conn.commit()
+                release_connection(conn)
+                conn = None  # mark released so finally doesn't double-release
+                logger.warning(
+                    f"🛑 STOP LOSS triggered: {symbol} @ ₹{current_price:.2f} "
+                    f"(SL: ₹{sl:.2f}) [{price_source}]"
+                )
+                result = square_off(uid, symbol, sell_price=sl)
+                result["trigger"] = "STOP_LOSS"
+                result["trigger_price"] = current_price
+                result["price_source"] = price_source
+                triggered.append(result)
+                conn = get_connection()
+                continue
+
+            # Check Target trigger
+            if target and current_price >= target:
+                conn.commit()
+                release_connection(conn)
+                conn = None
+                logger.warning(
+                    f"🎯 TARGET triggered: {symbol} @ ₹{current_price:.2f} "
+                    f"(Target: ₹{target:.2f}) [{price_source}]"
+                )
+                result = square_off(uid, symbol, sell_price=target)
+                result["trigger"] = "TARGET"
+                result["trigger_price"] = current_price
+                result["price_source"] = price_source
+                triggered.append(result)
+                conn = get_connection()
+                continue
+
+        if conn is not None:
             conn.commit()
-            release_connection(conn)
-            logger.warning(
-                f"🛑 STOP LOSS triggered: {symbol} @ ₹{current_price:.2f} "
-                f"(SL: ₹{sl:.2f}) [{price_source}]"
-            )
-            result = square_off(uid, symbol, sell_price=sl)
-            result["trigger"] = "STOP_LOSS"
-            result["trigger_price"] = current_price
-            result["price_source"] = price_source
-            triggered.append(result)
-            conn = get_connection()
-            continue
+        return triggered
 
-        # Check Target trigger
-        if target and current_price >= target:
-            conn.commit()
+    except Exception:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise
+    finally:
+        if conn is not None:
             release_connection(conn)
-            logger.warning(
-                f"🎯 TARGET triggered: {symbol} @ ₹{current_price:.2f} "
-                f"(Target: ₹{target:.2f}) [{price_source}]"
-            )
-            result = square_off(uid, symbol, sell_price=target)
-            result["trigger"] = "TARGET"
-            result["trigger_price"] = current_price
-            result["price_source"] = price_source
-            triggered.append(result)
-            conn = get_connection()
-            continue
-
-    conn.commit()
-    release_connection(conn)
-    return triggered
 
 
 def run_monitor():

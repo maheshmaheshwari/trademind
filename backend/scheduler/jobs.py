@@ -92,6 +92,9 @@ def run_recovery_queue():
         attempt 1 fails → status='failed', picked up on next startup
         attempt 2 fails → status='failed'
         attempt 3 fails → status='permanently_failed', skipped forever
+
+    Stale 'running' entries (started >2h ago, still in-progress) are reset to
+    'failed' so an interrupted job doesn't block its own retry forever.
     """
     if not RECOVERABLE_JOBS:
         return
@@ -100,6 +103,22 @@ def run_recovery_queue():
 
     now_ist  = datetime.now(IST)
     lookback = now_ist - timedelta(hours=24)
+
+    # Reset stale 'running' entries that are older than 2 hours — these are
+    # jobs that were killed mid-run (e.g. server restart) and never completed.
+    try:
+        conn = get_connection()
+        try:
+            _execute(conn, """
+                UPDATE scheduler_log SET status = 'failed'
+                WHERE status = 'running'
+                  AND started_at < ?
+            """, (now_ist - timedelta(minutes=30),))
+            conn.commit()
+        finally:
+            release_connection(conn)
+    except Exception as exc:
+        logger.debug("Stale running reset skipped: %s", exc)
 
     recovery_tasks = []
 
@@ -863,6 +882,75 @@ def _add_all_jobs(scheduler):
 
 
 
+def get_scheduler_status() -> dict:
+    """
+    Return scheduler state visible to ANY worker process.
+
+    Strategy (multi-worker safe):
+      1. If this process owns the scheduler, return live APScheduler state.
+      2. Otherwise, check the lock file: if the owner PID is alive → running.
+      3. Check scheduler.log for last activity timestamp.
+    """
+    import os
+
+    global _bg_scheduler
+
+    # If this worker owns the scheduler, return live state
+    if _bg_scheduler is not None:
+        jobs = []
+        for job in _bg_scheduler.get_jobs():
+            nrt = job.next_run_time
+            jobs.append({
+                "id": job.id,
+                "name": job.name,
+                "next_run": nrt.isoformat() if nrt else None,
+            })
+        return {
+            "running": _bg_scheduler.running,
+            "owner_pid": os.getpid(),
+            "jobs": len(jobs),
+            "job_list": jobs,
+        }
+
+    # Cross-process: inspect lock file
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+    lock_path = os.path.join(log_dir, ".scheduler_owner.pid")
+    owner_pid = None
+    owner_alive = False
+    try:
+        with open(lock_path) as f:
+            owner_pid = int(f.read().strip())
+        os.kill(owner_pid, 0)
+        owner_alive = True
+    except Exception:
+        pass
+
+    # Read last log line from scheduler.log for recent-activity timestamp
+    last_log = None
+    sched_log = os.path.join(log_dir, "scheduler.log")
+    try:
+        with open(sched_log, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 512))
+            tail = f.read().decode(errors="replace")
+        for line in reversed(tail.splitlines()):
+            if line.strip():
+                last_log = line.strip()
+                break
+    except Exception:
+        pass
+
+    return {
+        "running": owner_alive,
+        "owner_pid": owner_pid,
+        "this_pid": os.getpid(),
+        "jobs": len(RECOVERABLE_JOBS),
+        "last_log": last_log,
+        "job_list": [],
+    }
+
+
 def start_background_scheduler() -> Optional[BackgroundScheduler]:
     """
     Start a non-blocking BackgroundScheduler inside the API server process.
@@ -875,6 +963,7 @@ def start_background_scheduler() -> Optional[BackgroundScheduler]:
     import os
     import time as _time
     from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, EVENT_JOB_MISSED, EVENT_JOB_SUBMITTED
+    from apscheduler.executors.pool import ThreadPoolExecutor as APSThreadPool
 
     global _bg_scheduler
 
@@ -883,7 +972,10 @@ def start_background_scheduler() -> Optional[BackgroundScheduler]:
         return _bg_scheduler
 
     # ==========================================
-    # LOGGING SETUP
+    # LOGGING SETUP — attach handler to both
+    # 'scheduler' and 'scheduler.jobs' so that
+    # messages reach scheduler.log even if the
+    # root-logger propagation is disrupted.
     # ==========================================
     log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
     os.makedirs(log_dir, exist_ok=True)
@@ -894,21 +986,37 @@ def start_background_scheduler() -> Optional[BackgroundScheduler]:
         datefmt="%Y-%m-%d %H:%M:%S"
     )
 
-    # Add file handler to scheduler logger
-    sched_logger = logging.getLogger("scheduler")
-    sched_logger.setLevel(logging.INFO)
-    if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '').endswith('scheduler.log') for h in sched_logger.handlers):
-        fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
-        fh.setFormatter(fmt)
-        sched_logger.addHandler(fh)
+    def _add_sched_file_handler(logger_name: str) -> None:
+        lg = logging.getLogger(logger_name)
+        lg.setLevel(logging.INFO)
+        if not any(
+            isinstance(h, logging.FileHandler)
+            and getattr(h, "baseFilename", "").endswith("scheduler.log")
+            for h in lg.handlers
+        ):
+            fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+            fh.setFormatter(fmt)
+            lg.addHandler(fh)
+
+    # Add only to scheduler.jobs; it propagates to root for the daily log.
+    # Do NOT also add to the parent "scheduler" logger — that doubles every line.
+    _add_sched_file_handler("scheduler.jobs")
 
     logger.info("=" * 60)
     logger.info("🚀 TradeMind AI — Background Scheduler Starting (inside API)")
     logger.info(f"📁 Log file: {log_file}")
-    logger.info(f"🕐 Current time (IST): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"🕐 Current time (IST): {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 60)
 
-    _bg_scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
+    # 20 executor threads — prevents exhaustion when several intraday jobs
+    # fire simultaneously during market hours.
+    # coalesce=True + max_instances=1 ensures a lagging job can't pile up:
+    # missed fire times are merged into one catch-up run.
+    _bg_scheduler = BackgroundScheduler(
+        timezone="Asia/Kolkata",
+        executors={"default": APSThreadPool(20)},
+        job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
+    )
 
     # Event listeners
     _job_start_times: dict = {}

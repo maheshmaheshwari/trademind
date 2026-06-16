@@ -36,8 +36,9 @@ NSE_BHAVCOPY_URL = (
     "sec_bhavdata_full_{date}.csv"
 )
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.nseindia.com",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
 
@@ -62,7 +63,7 @@ def _ensure_table():
 
 def fetch_delivery_data(date: datetime) -> pd.DataFrame:
     """Fetch one day's bhavcopy from NSE. Returns DataFrame or empty."""
-    date_str = date.strftime("%d-%b-%Y").upper()
+    date_str = date.strftime("%d%m%Y")  # NSE format: DDMMYYYY (e.g. 12062026)
     url = NSE_BHAVCOPY_URL.format(date=date_str)
     try:
         resp = requests.get(url, headers=HEADERS, timeout=30)

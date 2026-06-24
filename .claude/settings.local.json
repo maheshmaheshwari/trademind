@@ -250,7 +250,16 @@
       "Bash(grep -c \"rows$\" /tmp/eod_collection.log)",
       "Bash(awk '{print \"PID:\"$2, \"CPU:\"$3\"%\", \"TIME:\"$10}')",
       "Bash(awk '{print \"CPU:\"$3\"% MEM:\"$4\"% PID:\"$2}')",
-      "Bash(awk '{print $2, $3, $8}')"
+      "Bash(awk '{print $2, $3, $8}')",
+      "WebFetch(domain:massive.com)",
+      "Bash(/opt/homebrew/bin/docker start *)",
+      "Bash(sample 98007 1)",
+      "Bash(sort -k3 -rn)",
+      "Bash(awk '{print \"PID:\"$2, \"CPU:\"$3\"%\", \"MEM:\"$4\"%\", $11}')",
+      "Bash(awk '{print \"PID:\"$2,\"CPU:\"$3\"%\",\"STATE:\"$8,\"TIME:\"$10}')",
+      "Bash(ps -*)",
+      "Bash(chmod +x *)",
+      "Bash(awk *)"
     ]
   }
 }

@@ -1,19 +1,22 @@
 """
 TradeMind AI — Weekly Retrain Pipeline
 
-Runs every Sunday at 20:00 IST (scheduled via APScheduler).
+Runs every Friday at 22:00 IST (scheduled via APScheduler).
+Finishes ~04:00 IST Saturday so Monday opens with fresh model predictions.
 Can also be triggered manually at any time.
 
 Pipeline:
   1. Wait for today's EOD prices to be fully collected (polls DB)
-  2. Retrain all 499 models (walk-forward, 4 workers)
+  2. Retrain all 502 models — walk-forward, single-threaded (workers=1)
+     IMPORTANT: workers must stay at 1. ProcessPoolExecutor spawns fresh
+     processes that don't share the in-memory data cache, causing per-symbol
+     DB round-trips that hang on the cloud Timescale connection.
   3. Regenerate trade signals from fresh models
 
-Logs: logs/weekly_retrain_YYYYMMDD.log
+Logs: logs/YYYY-MM-DD/weekly_retrain.log
 
 Usage:
     PYTHONPATH=. python weekly_retrain_pipeline.py
-    PYTHONPATH=. python weekly_retrain_pipeline.py --workers 4
     PYTHONPATH=. python weekly_retrain_pipeline.py --skip-wait   (skip price wait)
     PYTHONPATH=. python weekly_retrain_pipeline.py --no-resume   (retrain all, even if already done)
 """
@@ -31,7 +34,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ── Date-stamped log file ───────────────────────────────────────────────────────
 os.makedirs("logs", exist_ok=True)
-LOG_FILE = os.path.join("logs", f"weekly_retrain_{datetime.now().strftime('%Y%m%d')}.log")
+_LOG_DATE_DIR = os.path.join("logs", datetime.now().strftime("%Y-%m-%d"))
+os.makedirs(_LOG_DATE_DIR, exist_ok=True)
+LOG_FILE = os.path.join(_LOG_DATE_DIR, "weekly_retrain.log")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -143,7 +148,7 @@ def run_generate_signals() -> bool:
         return False
 
 
-def run_pipeline(workers: int = 4, resume: bool = True, skip_wait: bool = False):
+def run_pipeline(workers: int = 1, resume: bool = False, skip_wait: bool = False):
     start = datetime.now()
     logger.info("")
     logger.info("=" * 70)
@@ -188,8 +193,8 @@ def run_pipeline(workers: int = 4, resume: bool = True, skip_wait: bool = False)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Weekly retrain + signal generation pipeline")
-    parser.add_argument("--workers",    type=int,  default=4,
-                        help="Parallel training workers (default 4, ~6h for 499 stocks)")
+    parser.add_argument("--workers",    type=int,  default=1,
+                        help="Training workers (default 1 — must stay 1 for cache to work)")
     parser.add_argument("--skip-wait",  action="store_true", default=False,
                         help="Skip waiting for EOD prices (use existing latest data)")
     parser.add_argument("--no-resume",  action="store_true", default=False,
@@ -199,5 +204,5 @@ if __name__ == "__main__":
     run_pipeline(
         workers=args.workers,
         resume=not args.no_resume,
-        skip_wait=args.skip_wait,
+        skip_wait=args.skip_wait or True,  # Friday night — EOD prices already collected
     )

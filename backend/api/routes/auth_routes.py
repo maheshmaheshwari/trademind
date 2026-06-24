@@ -3,6 +3,7 @@ TradeMind AI — Extended Auth Routes
 
 GET    /auth/me
 PATCH  /auth/me
+POST   /auth/google
 POST   /auth/password/change
 POST   /auth/password/reset-request
 POST   /auth/password/reset-confirm
@@ -17,13 +18,14 @@ DELETE /auth/sessions
 """
 
 import logging
-import random
-import string
+import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import pyotp
-from fastapi import APIRouter, Header, HTTPException
+import requests as http_requests
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from api.auth import decode_token, create_token, hash_password, verify_password
@@ -92,6 +94,10 @@ class TotpDisableRequest(BaseModel):
     code: str
 
 
+class GoogleAuthRequest(BaseModel):
+    access_token: str
+
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
@@ -102,11 +108,16 @@ def _fetch_user_full(user_id: int) -> Optional[dict]:
     try:
         cur = _execute(conn, """
             SELECT id, username, display_name, email, phone, avatar_url,
-                   totp_enabled, default_account, currency, virtual_balance
+                   totp_enabled, default_account, currency, virtual_balance,
+                   password_hash
             FROM users
             WHERE id = ?
         """, (user_id,))
-        return _row_to_dict(cur)
+        row = _row_to_dict(cur)
+        if row:
+            # Expose whether the user has a password without leaking the hash
+            row["has_password"] = bool(row.pop("password_hash", ""))
+        return row
     finally:
         release_connection(conn)
 
@@ -116,18 +127,8 @@ def _fetch_user_full(user_id: int) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 @router.get("/auth/me")
-async def get_me(authorization: Optional[str] = Header(None)):
+async def get_me(user: dict = Depends(get_current_user)):
     """Return current user's profile."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     profile = _fetch_user_full(user["id"])
     if not profile:
         raise HTTPException(status_code=404, detail="User not found")
@@ -135,22 +136,101 @@ async def get_me(authorization: Optional[str] = Header(None)):
 
 
 # ---------------------------------------------------------------------------
+# POST /auth/google
+# ---------------------------------------------------------------------------
+
+@router.post("/auth/google")
+async def google_auth(req: GoogleAuthRequest):
+    """
+    Sign in or register via Google OAuth.
+    Accepts the access_token from Google Identity Services (implicit flow),
+    fetches the user profile from Google's userinfo endpoint, then:
+      - existing google_sub  → login
+      - matching email       → link accounts + login
+      - new user             → auto-register + login
+    Returns the same {status, user, token} shape as POST /login.
+    """
+    # Fetch user info from Google
+    try:
+        resp = http_requests.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {req.access_token}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        idinfo = resp.json()
+    except Exception as e:
+        logger.warning(f"Google userinfo fetch failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid Google access token")
+
+    google_sub     = idinfo.get("sub", "")
+    email          = idinfo.get("email", "")
+    name           = idinfo.get("name", "") or idinfo.get("given_name", "")
+    avatar_url     = idinfo.get("picture", "")
+    email_verified = idinfo.get("email_verified", False)
+
+    if not google_sub:
+        raise HTTPException(status_code=401, detail="Invalid Google token: missing sub")
+    if not email_verified:
+        raise HTTPException(status_code=400, detail="Google account email is not verified")
+
+    conn = get_connection()
+    try:
+        # 1. Returning Google user
+        cur = _execute(conn, "SELECT * FROM users WHERE google_sub = ?", (google_sub,))
+        user = _row_to_dict(cur)
+
+        if not user and email:
+            # 2. Existing password user with same email — link accounts
+            cur = _execute(conn, "SELECT * FROM users WHERE email = ?", (email,))
+            user = _row_to_dict(cur)
+            if user:
+                _execute(conn,
+                    "UPDATE users SET google_sub = ?, avatar_url = ? WHERE id = ?",
+                    (google_sub, avatar_url, user["id"]),
+                )
+                conn.commit()
+
+        if not user:
+            # 3. New user — auto-register
+            base_username = email.split("@")[0][:28].lower()
+            username = base_username
+            counter = 1
+            while True:
+                cur = _execute(conn, "SELECT id FROM users WHERE username = ?", (username,))
+                if not _row_to_dict(cur):
+                    break
+                username = f"{base_username}_{counter}"
+                counter += 1
+
+            _execute(conn, """
+                INSERT INTO users
+                  (username, display_name, email, password_hash, google_sub, avatar_url, virtual_balance)
+                VALUES (?, ?, ?, '', ?, ?, 1000000)
+            """, (username, name or base_username, email, google_sub, avatar_url))
+            conn.commit()
+
+            cur = _execute(conn, "SELECT * FROM users WHERE google_sub = ?", (google_sub,))
+            user = _row_to_dict(cur)
+
+        if not user:
+            raise HTTPException(status_code=500, detail="Failed to create or find user")
+
+        from trading.trading_engine import _safe_user
+        token = create_token(user["id"], user["username"])
+        return {"status": "success", "user": _safe_user(user), "token": token}
+
+    finally:
+        release_connection(conn)
+
+
+# ---------------------------------------------------------------------------
 # PATCH /auth/me
 # ---------------------------------------------------------------------------
 
 @router.patch("/auth/me")
-async def update_me(req: UpdateProfileRequest, authorization: Optional[str] = Header(None)):
+async def update_me(req: UpdateProfileRequest, user: dict = Depends(get_current_user)):
     """Update display_name, email, or phone."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     _ALLOWED_PROFILE_FIELDS = {"display_name", "email", "phone"}
     updates = {k: v for k, v in req.dict().items() if v is not None and k in _ALLOWED_PROFILE_FIELDS}
     if not updates:
@@ -174,18 +254,8 @@ async def update_me(req: UpdateProfileRequest, authorization: Optional[str] = He
 # ---------------------------------------------------------------------------
 
 @router.post("/auth/password/change")
-async def change_password(req: ChangePasswordRequest, authorization: Optional[str] = Header(None)):
+async def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current_user)):
     """Change password — requires current password verification."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     if not verify_password(req.current_password, user.get("password_hash", "")):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
@@ -204,13 +274,41 @@ async def change_password(req: ChangePasswordRequest, authorization: Optional[st
 
 
 # ---------------------------------------------------------------------------
+# POST /auth/password/set  (Google-only users setting a password for the first time)
+# ---------------------------------------------------------------------------
+
+class SetPasswordRequest(BaseModel):
+    new_password: str
+
+
+@router.post("/auth/password/set")
+async def set_password(req: SetPasswordRequest, user: dict = Depends(get_current_user)):
+    """Set a password for the first time — only allowed when password_hash is empty (Google-only account)."""
+    if user.get("password_hash", ""):
+        raise HTTPException(status_code=400, detail="Account already has a password. Use /auth/password/change instead.")
+
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    new_hash = hash_password(req.new_password)
+    conn = get_connection()
+    try:
+        _execute(conn, "UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user["id"]))
+        conn.commit()
+    finally:
+        release_connection(conn)
+
+    return {"status": "ok", "message": "Password set successfully"}
+
+
+# ---------------------------------------------------------------------------
 # POST /auth/password/reset-request
 # ---------------------------------------------------------------------------
 
 @router.post("/auth/password/reset-request")
 async def password_reset_request(req: ResetRequestBody):
     """Generate a 6-digit OTP and store its hash for password reset."""
-    otp = "".join(random.choices(string.digits, k=6))
+    otp = "".join(secrets.choice("0123456789") for _ in range(6))
     otp_hash = hash_password(otp)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
 
@@ -291,18 +389,8 @@ async def password_reset_confirm(req: ResetConfirmBody):
 # ---------------------------------------------------------------------------
 
 @router.get("/auth/preferences")
-async def get_preferences(authorization: Optional[str] = Header(None)):
+async def get_preferences(user: dict = Depends(get_current_user)):
     """Return user preferences: default_account, currency."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     conn = get_connection()
     try:
         cur = _execute(conn, "SELECT default_account, currency FROM users WHERE id = ?",
@@ -322,18 +410,8 @@ async def get_preferences(authorization: Optional[str] = Header(None)):
 # ---------------------------------------------------------------------------
 
 @router.put("/auth/preferences")
-async def update_preferences(req: PreferencesRequest, authorization: Optional[str] = Header(None)):
+async def update_preferences(req: PreferencesRequest, user: dict = Depends(get_current_user)):
     """Update default_account and/or currency."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     _ALLOWED_PREF_FIELDS = {"default_account", "currency"}
     updates = {k: v for k, v in req.dict().items() if v is not None and k in _ALLOWED_PREF_FIELDS}
     if not updates:
@@ -360,18 +438,8 @@ async def update_preferences(req: PreferencesRequest, authorization: Optional[st
 # ---------------------------------------------------------------------------
 
 @router.post("/auth/totp/setup")
-async def totp_setup(authorization: Optional[str] = Header(None)):
+async def totp_setup(user: dict = Depends(get_current_user)):
     """Generate a new TOTP secret and return provisioning URI."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     secret = pyotp.random_base32()
     qr_uri = pyotp.totp.TOTP(secret).provisioning_uri(
         name=user["username"], issuer_name="TradeMind"
@@ -408,18 +476,8 @@ async def totp_setup(authorization: Optional[str] = Header(None)):
 # ---------------------------------------------------------------------------
 
 @router.post("/auth/totp/confirm")
-async def totp_confirm(req: TotpConfirmRequest, authorization: Optional[str] = Header(None)):
+async def totp_confirm(req: TotpConfirmRequest, user: dict = Depends(get_current_user)):
     """Verify TOTP code and enable 2FA."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     conn = get_connection()
     try:
         cur = _execute(conn, "SELECT totp_secret FROM users WHERE id = ?", (user["id"],))
@@ -450,18 +508,8 @@ async def totp_confirm(req: TotpConfirmRequest, authorization: Optional[str] = H
 # ---------------------------------------------------------------------------
 
 @router.post("/auth/totp/disable")
-async def totp_disable(req: TotpDisableRequest, authorization: Optional[str] = Header(None)):
+async def totp_disable(req: TotpDisableRequest, user: dict = Depends(get_current_user)):
     """Verify TOTP code and disable 2FA."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     conn = get_connection()
     try:
         cur = _execute(conn, "SELECT totp_secret, totp_enabled FROM users WHERE id = ?", (user["id"],))
@@ -495,18 +543,8 @@ async def totp_disable(req: TotpDisableRequest, authorization: Optional[str] = H
 # ---------------------------------------------------------------------------
 
 @router.get("/auth/sessions")
-async def list_sessions(authorization: Optional[str] = Header(None)):
+async def list_sessions(user: dict = Depends(get_current_user)):
     """Return all active sessions for the current user."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     conn = get_connection()
     try:
         cur = _execute(conn, """
@@ -532,18 +570,8 @@ async def list_sessions(authorization: Optional[str] = Header(None)):
 # ---------------------------------------------------------------------------
 
 @router.delete("/auth/sessions/{session_id}")
-async def delete_session(session_id: str, authorization: Optional[str] = Header(None)):
+async def delete_session(session_id: str, user: dict = Depends(get_current_user)):
     """Delete a specific session by ID."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     conn = get_connection()
     try:
         _execute(conn, "DELETE FROM user_sessions WHERE id = ? AND user_id = ?",
@@ -560,18 +588,8 @@ async def delete_session(session_id: str, authorization: Optional[str] = Header(
 # ---------------------------------------------------------------------------
 
 @router.delete("/auth/sessions")
-async def delete_all_sessions(authorization: Optional[str] = Header(None)):
+async def delete_all_sessions(user: dict = Depends(get_current_user)):
     """Delete all sessions for the current user."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     conn = get_connection()
     try:
         _execute(conn, "DELETE FROM user_sessions WHERE user_id = ?", (user["id"],))

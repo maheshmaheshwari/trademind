@@ -91,7 +91,7 @@ NIFTY_50_STOCKS[45] = {"symbol": "LT.NS", "name": "Larsen & Toubro", "sector": "
 
 # Index symbols for market overview data
 INDEX_SYMBOLS = {
-    "NIFTY 500": "^CNX500",
+    "NIFTY 500": "^CRSLDX",  # ^CNX500 returned 404 from Yahoo Finance
     "NIFTY 50": "^NSEI",
     "SENSEX": "^BSESN",
     "INDIA VIX": "^INDIAVIX",

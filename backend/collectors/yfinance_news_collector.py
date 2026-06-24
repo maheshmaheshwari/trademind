@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime
 from typing import List, Optional
 
@@ -31,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 SLEEP_BETWEEN_STOCKS = 0.5
 BATCH_SIZE = 32
+_PER_SYMBOL_TIMEOUT = 12   # seconds before giving up on a single ticker.news call
+_MAX_JOB_SECONDS = 3600    # hard cap: abort after 60 min to protect downstream jobs
 
 
 class _FinBERT:
@@ -67,12 +70,22 @@ def _url_exists(conn, url: str) -> bool:
     return cur.fetchone() is not None
 
 
+def _fetch_news_with_timeout(symbol: str):
+    """Fetch ticker.news with a hard timeout to prevent indefinite hangs."""
+    import yfinance as yf
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(lambda: yf.Ticker(symbol).news)
+        try:
+            return future.result(timeout=_PER_SYMBOL_TIMEOUT)
+        except FuturesTimeoutError:
+            logger.warning(f"{symbol}: yfinance news timed out after {_PER_SYMBOL_TIMEOUT}s — skipping")
+            return []
+
+
 def collect_stock(symbol: str) -> int:
     """Fetch and store yfinance news for one stock. Returns rows inserted."""
     try:
-        import yfinance as yf
-        ticker = yf.Ticker(symbol)
-        articles = ticker.news
+        articles = _fetch_news_with_timeout(symbol)
         if not articles:
             return 0
 
@@ -97,9 +110,15 @@ def collect_stock(symbol: str) -> int:
                 if _url_exists(conn, url):
                     continue
 
-                pub_dt = (datetime.fromtimestamp(pub_ts).strftime("%Y-%m-%d %H:%M:%S")
-                          if isinstance(pub_ts, (int, float))
-                          else datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                if isinstance(pub_ts, (int, float)):
+                    pub_dt = datetime.fromtimestamp(pub_ts).strftime("%Y-%m-%d %H:%M:%S")
+                elif isinstance(pub_ts, str):
+                    try:
+                        pub_dt = datetime.strptime(pub_ts[:19], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        pub_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    pub_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 headlines.append(title[:500])
                 metas.append((url, pub_dt))
@@ -146,10 +165,17 @@ def collect_all(symbol_filter: Optional[str] = None) -> dict:
         symbols = [s for s in symbols if s == symbol_filter]
 
     total_inserted = 0
-    logger.info(f"yfinance news collection — {len(symbols)} stocks")
+    job_start = time.time()
+    logger.info(f"yfinance news collection — {len(symbols)} stocks (max {_MAX_JOB_SECONDS}s)")
 
     for idx, symbol in enumerate(symbols, 1):
+        if time.time() - job_start > _MAX_JOB_SECONDS:
+            remaining = len(symbols) - idx + 1
+            logger.warning(f"yfinance news: hit {_MAX_JOB_SECONDS}s cap — skipping {remaining} remaining stocks")
+            break
+
         inserted = collect_stock(symbol)
+        total_inserted += inserted
         if inserted:
             logger.info(f"[{idx}/{len(symbols)}] {symbol}: {inserted} new articles")
         time.sleep(SLEEP_BETWEEN_STOCKS)

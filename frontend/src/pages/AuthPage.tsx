@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLoginMutation, useLoginMfaMutation, useRegisterMutation, useRequestPasswordResetMutation, useConfirmPasswordResetMutation } from '../services/tradeMindApiService';
+import { useGoogleLogin } from '@react-oauth/google';
+import { useLoginMutation, useLoginMfaMutation, useRegisterMutation, useRequestPasswordResetMutation, useConfirmPasswordResetMutation, useGoogleAuthMutation } from '../services/tradeMindApiService';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../ThemeContext';
 import { useToast } from '../components/ui';
@@ -99,6 +100,7 @@ export default function AuthPage() {
   const [registerMutation, { isLoading: registering }]  = useRegisterMutation();
   const [requestReset,     { isLoading: sendingOtp }]   = useRequestPasswordResetMutation();
   const [confirmReset,     { isLoading: confirmingReset }] = useConfirmPasswordResetMutation();
+  const [googleAuthMutation, { isLoading: googleLoading }] = useGoogleAuthMutation();
 
   // MFA step state
   const [mfaToken,  setMfaToken]  = useState('');
@@ -106,11 +108,21 @@ export default function AuthPage() {
   const [mfaErr,    setMfaErr]    = useState('');
   const [showMfa,   setShowMfa]   = useState(false);
 
-  const busy = loggingIn || registering || verifyingMfa;
+  const busy = loggingIn || registering || verifyingMfa || googleLoading;
 
-  const handleGoogleLogin = () => {
-    toast({ type: 'info', title: 'Google OAuth coming soon' });
-  };
+  const initiateGoogleLogin = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      try {
+        const res = await googleAuthMutation({ access_token: tokenResponse.access_token }).unwrap();
+        localStorage.setItem('trademind_token', res.token);
+        login(res.user);
+        navigate('/dashboard');
+      } catch (err: any) {
+        toast({ type: 'error', title: 'Google sign-in failed', message: err?.data?.detail ?? 'Please try again' });
+      }
+    },
+    onError: () => toast({ type: 'error', title: 'Google sign-in cancelled' }),
+  });
 
   async function handleForgotSendOtp(e: React.FormEvent) {
     e.preventDefault();
@@ -300,10 +312,11 @@ export default function AuthPage() {
             {/* Google button */}
             <button
               type="button"
-              onClick={handleGoogleLogin}
-              className="w-full h-[46px] mb-[18px] inline-flex items-center justify-center gap-2 rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border border-line bg-surface-2 text-ink transition-colors hover:bg-surface-hover hover:border-line-strong"
+              onClick={() => initiateGoogleLogin()}
+              disabled={busy}
+              className="w-full h-[46px] mb-[18px] inline-flex items-center justify-center gap-2 rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border border-line bg-surface-2 text-ink transition-colors hover:bg-surface-hover hover:border-line-strong disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <GoogleIcon size={18} />Continue with Google
+              <GoogleIcon size={18} />{googleLoading ? 'Signing in…' : 'Continue with Google'}
             </button>
 
             {/* OR divider */}

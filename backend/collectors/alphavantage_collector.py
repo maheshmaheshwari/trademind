@@ -4,19 +4,27 @@ Alpha Vantage News & Sentiment Collector for Nifty 500 stocks.
 Fetches news articles with sentiment scores from the Alpha Vantage
 NEWS_SENTIMENT endpoint (free tier: 25 requests/day).
 
+Coverage note: Alpha Vantage only indexes US-listed equities. Indian NSE-only
+stocks return 0 articles. We maintain a mapping of NSE symbols → US ADR tickers
+(e.g. HDFCBANK.NS → HDB) for the ~7 Indian large-caps with NYSE/NASDAQ ADR
+listings. The av_coverage_tracker table tracks rotation so each stock is
+refreshed every ≤7 days.
+
+To add more ADR mappings, insert into av_coverage_tracker:
+    INSERT INTO av_coverage_tracker (nse_symbol, adr_ticker) VALUES ('XYZ.NS', 'XYZ');
+
 Usage:
     cd backend && source venv/bin/activate
-    python collectors/alphavantage_collector.py              # batch of 25
-    python collectors/alphavantage_collector.py --symbol TCS # single stock
+    python collectors/alphavantage_collector.py              # batch of 7 (all ADRs)
+    python collectors/alphavantage_collector.py --symbol HDFCBANK  # single stock
 """
 
 import argparse
-import json
 import logging
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from typing import Dict, List, Optional
 
 import requests
@@ -36,17 +44,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# Config
-# ==========================================
 AV_BASE_URL = "https://www.alphavantage.co/query"
-TOKENS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "angel_tokens.json")
-RATE_LIMIT_SECS = 3  # 25 req/day free tier — be conservative
+RATE_LIMIT_SECS = 3
 
 
-# ==========================================
-# Sentiment label mapping
-# ==========================================
 _LABEL_MAP = {
     "Bullish": "positive",
     "Somewhat-Bullish": "positive",
@@ -57,15 +58,10 @@ _LABEL_MAP = {
 
 
 def _map_sentiment(label: str) -> str:
-    """Convert Alpha Vantage sentiment label to positive/negative/neutral."""
     return _LABEL_MAP.get(label, "neutral")
 
 
 def _parse_av_timestamp(ts: str) -> str:
-    """
-    Convert Alpha Vantage timestamp '20240115T143000' to
-    ISO-8601 string '2024-01-15T14:30:00'.
-    """
     try:
         dt = datetime.strptime(ts, "%Y%m%dT%H%M%S")
         return dt.strftime("%Y-%m-%dT%H:%M:%S")
@@ -73,18 +69,51 @@ def _parse_av_timestamp(ts: str) -> str:
         return ts
 
 
-def fetch_av_news(symbol: str, from_date: str = "20210101T0000") -> List[Dict]:
+def _get_rotation_batch(max_requests: int) -> List[Dict]:
     """
-    Fetch news + sentiment from Alpha Vantage for one NSE symbol.
+    Return the least-recently-covered ADR stocks from av_coverage_tracker,
+    up to max_requests entries.
 
-    Args:
-        symbol: NSE ticker without exchange prefix, e.g. "TCS".
-        from_date: Earliest article date in 'YYYYMMDDTHHMM' format.
+    Returns list of dicts: {nse_symbol, adr_ticker, last_covered}
+    """
+    conn = get_connection()
+    try:
+        cur = _execute(conn, """
+            SELECT nse_symbol, adr_ticker, last_covered
+            FROM av_coverage_tracker
+            ORDER BY last_covered ASC NULLS FIRST
+            LIMIT %s
+        """, (max_requests,))
+        rows = cur.fetchall()
+        return [{"nse_symbol": r[0], "adr_ticker": r[1], "last_covered": r[2]} for r in rows]
+    finally:
+        release_connection(conn)
 
-    Returns:
-        List of dicts, each containing:
-            headline, source, published_at, symbol, sentiment,
-            confidence (float), url
+
+def _update_coverage(nse_symbol: str, articles_added: int) -> None:
+    """Mark a symbol as covered today in av_coverage_tracker."""
+    conn = get_connection()
+    try:
+        _execute(conn, """
+            UPDATE av_coverage_tracker
+            SET last_covered    = %s,
+                articles_total  = articles_total + %s,
+                attempt_count   = attempt_count + 1
+            WHERE nse_symbol = %s
+        """, (date.today(), articles_added, nse_symbol))
+        conn.commit()
+    finally:
+        release_connection(conn)
+
+
+def fetch_av_news(adr_ticker: str, nse_symbol: str) -> List[Dict]:
+    """
+    Fetch news + sentiment from Alpha Vantage for one stock.
+
+    Uses the US ADR ticker (e.g. 'HDB') to query AV, then tags articles
+    with the NSE symbol (e.g. 'HDFCBANK.NS') for storage.
+
+    Returns list of article dicts ready for insert_news().
     """
     api_key = os.getenv("ALPHAVANTAGE_API_KEY", "")
     if not api_key:
@@ -92,8 +121,7 @@ def fetch_av_news(symbol: str, from_date: str = "20210101T0000") -> List[Dict]:
 
     params = {
         "function": "NEWS_SENTIMENT",
-        "tickers": f"NSE:{symbol}",
-        "time_from": from_date,
+        "tickers": adr_ticker,
         "limit": 200,
         "apikey": api_key,
     }
@@ -103,12 +131,11 @@ def fetch_av_news(symbol: str, from_date: str = "20210101T0000") -> List[Dict]:
         resp.raise_for_status()
         payload = resp.json()
     except requests.RequestException as e:
-        logger.error(f"HTTP error fetching AV news for {symbol}: {e}")
+        logger.error(f"HTTP error fetching AV news for {adr_ticker}: {e}")
         return []
 
-    # Alpha Vantage returns {"Information": "..."} when rate-limited
     if "Information" in payload:
-        logger.warning(f"Alpha Vantage rate limit / info message: {payload['Information']}")
+        logger.warning(f"Alpha Vantage rate limit: {payload['Information']}")
         return []
 
     feed = payload.get("feed", [])
@@ -121,22 +148,18 @@ def fetch_av_news(symbol: str, from_date: str = "20210101T0000") -> List[Dict]:
         url = item.get("url", "").strip()
         published_at = _parse_av_timestamp(published_raw)
 
-        # Find the ticker_sentiment entry for this specific symbol
+        # Find sentiment entry for this ADR ticker
         ticker_sentiments = item.get("ticker_sentiment", [])
-        matched = None
-        for ts in ticker_sentiments:
-            if ts.get("ticker", "").upper() == f"NSE:{symbol}".upper():
-                matched = ts
-                break
-
+        matched = next(
+            (ts for ts in ticker_sentiments
+             if ts.get("ticker", "").upper() == adr_ticker.upper()),
+            None,
+        )
         if matched is None:
-            # Article mentions the ticker but no direct sentiment entry — skip
             continue
 
         label = matched.get("ticker_sentiment_label", "Neutral")
         sentiment = _map_sentiment(label)
-
-        # relevance_score as confidence proxy (0.0–1.0 string from AV)
         try:
             confidence = float(matched.get("relevance_score", 0.0))
         except (ValueError, TypeError):
@@ -146,35 +169,14 @@ def fetch_av_news(symbol: str, from_date: str = "20210101T0000") -> List[Dict]:
             "headline": title,
             "source": "alphavantage",
             "published_at": published_at,
-            "symbol": symbol,
+            "symbol": nse_symbol,  # store as NSE symbol for model features
             "sentiment": sentiment,
             "confidence": confidence,
             "url": url,
         })
 
-    logger.info(f"  {symbol}: {len(articles)} articles fetched from Alpha Vantage")
+    logger.info(f"  {adr_ticker} ({nse_symbol}): {len(articles)} articles fetched")
     return articles
-
-
-def _get_covered_symbols() -> set:
-    """Return set of symbols already in news_sentiment from alphavantage."""
-    try:
-        conn = get_connection()
-        rows = _execute(conn,
-            "SELECT DISTINCT symbol FROM news_sentiment WHERE source='alphavantage'"
-        ).fetchall()
-        release_connection(conn)
-        return {row[0] for row in rows}
-    except Exception as e:
-        logger.warning(f"Could not query covered symbols: {e}")
-        return set()
-
-
-def _load_all_symbols() -> List[str]:
-    """Load all symbol names from angel_tokens.json."""
-    with open(TOKENS_FILE) as f:
-        token_map = json.load(f)
-    return list(token_map.keys())
 
 
 def collect_av_batch(
@@ -182,42 +184,57 @@ def collect_av_batch(
     max_requests: int = 25,
 ) -> Dict:
     """
-    Fetch Alpha Vantage news for a batch of symbols and insert into DB.
+    Fetch Alpha Vantage news using the rotation queue.
 
-    Prioritises symbols that have no AV news yet. Processes up to
-    max_requests symbols (free tier = 25/day).
+    Picks the least-recently-covered ADR stocks from av_coverage_tracker,
+    processes up to max_requests, and updates last_covered after each call.
 
     Args:
-        symbols: Explicit list of symbols to process. If None, loads all
-                 499 from data/angel_tokens.json and picks uncovered ones.
-        max_requests: Maximum API calls to make (default: 25 for free tier).
+        symbols: Optional explicit NSE symbol list (e.g. ['HDFCBANK.NS']).
+                 If None, uses rotation queue order.
+        max_requests: Max API calls (default 25, free-tier limit).
 
     Returns:
-        Dict with keys: processed, total_articles, remaining
+        Dict: processed, total_articles, remaining
     """
-    if symbols is None:
-        all_symbols = _load_all_symbols()
-        covered = _get_covered_symbols()
-        # Prioritise uncovered symbols
-        pending = [s for s in all_symbols if s not in covered]
-        remaining_after = max(0, len(pending) - max_requests)
-        batch = pending[:max_requests]
-        logger.info(
-            f"Symbols total={len(all_symbols)}, covered={len(covered)}, "
-            f"pending={len(pending)}, processing={len(batch)}"
-        )
+    if symbols is not None:
+        # Manual override: look up ADR tickers for the given NSE symbols
+        conn = get_connection()
+        try:
+            batch = []
+            for nse_sym in symbols[:max_requests]:
+                cur = _execute(conn,
+                    "SELECT nse_symbol, adr_ticker FROM av_coverage_tracker WHERE nse_symbol = %s",
+                    (nse_sym,))
+                row = cur.fetchone()
+                if row:
+                    batch.append({"nse_symbol": row[0], "adr_ticker": row[1]})
+                else:
+                    logger.warning(f"{nse_sym}: no ADR mapping in av_coverage_tracker — skipping")
+        finally:
+            release_connection(conn)
+        remaining_after = max(0, len(symbols) - len(batch))
     else:
-        batch = symbols[:max_requests]
-        remaining_after = max(0, len(symbols) - max_requests)
+        batch = _get_rotation_batch(max_requests)
+        total_tracked = _execute(
+            get_connection(), "SELECT COUNT(*) FROM av_coverage_tracker", ()
+        ).fetchone()[0]
+        remaining_after = max(0, total_tracked - len(batch))
+        logger.info(
+            f"Rotation queue: {len(batch)} stocks this run, {remaining_after} remaining"
+        )
 
     processed = 0
     total_articles = 0
 
-    for symbol in batch:
+    for entry in batch:
+        nse_sym = entry["nse_symbol"]
+        adr = entry["adr_ticker"]
         try:
-            articles = fetch_av_news(symbol)
+            articles = fetch_av_news(adr, nse_sym)
+            inserted = 0
             for art in articles:
-                insert_news(
+                if insert_news(
                     headline=art["headline"],
                     source=art["source"],
                     published_at=art["published_at"],
@@ -225,11 +242,13 @@ def collect_av_batch(
                     sentiment=art["sentiment"],
                     confidence=art["confidence"],
                     url=art["url"],
-                )
-            total_articles += len(articles)
+                ):
+                    inserted += 1
+            _update_coverage(nse_sym, inserted)
+            total_articles += inserted
             processed += 1
         except Exception as e:
-            logger.error(f"Failed to process {symbol}: {e}")
+            logger.error(f"Failed to process {nse_sym} ({adr}): {e}")
 
         time.sleep(RATE_LIMIT_SECS)
 
@@ -242,18 +261,15 @@ def collect_av_batch(
     return result
 
 
-# ==========================================
-# CLI entry point
-# ==========================================
 def main():
     parser = argparse.ArgumentParser(
-        description="Fetch Alpha Vantage news & sentiment for Nifty 500 stocks"
+        description="Fetch Alpha Vantage news & sentiment for Indian ADR stocks"
     )
     parser.add_argument(
         "--symbol",
         type=str,
         default=None,
-        help="Fetch a single stock (e.g. TCS). Omit to run today's batch of 25.",
+        help="NSE symbol to fetch (e.g. HDFCBANK). Omit to run full rotation batch.",
     )
     parser.add_argument(
         "--max",
@@ -264,23 +280,14 @@ def main():
     args = parser.parse_args()
 
     if args.symbol:
-        print(f"\nFetching AV news for single symbol: {args.symbol}")
-        articles = fetch_av_news(args.symbol.upper())
-        inserted = 0
-        for art in articles:
-            if insert_news(
-                headline=art["headline"],
-                source=art["source"],
-                published_at=art["published_at"],
-                symbol=art["symbol"],
-                sentiment=art["sentiment"],
-                confidence=art["confidence"],
-                url=art["url"],
-            ):
-                inserted += 1
-        print(f"  Fetched {len(articles)} articles, inserted {inserted}")
+        nse_sym = args.symbol.upper()
+        if not nse_sym.endswith(".NS"):
+            nse_sym += ".NS"
+        print(f"\nFetching AV news for: {nse_sym}")
+        result = collect_av_batch(symbols=[nse_sym], max_requests=1)
+        print(f"  Articles inserted: {result['total_articles']}")
     else:
-        print(f"\nRunning Alpha Vantage batch (max {args.max} requests)...")
+        print(f"\nRunning Alpha Vantage rotation batch (max {args.max} requests)...")
         result = collect_av_batch(max_requests=args.max)
         print(f"\nDone:")
         print(f"  Symbols processed : {result['processed']}")

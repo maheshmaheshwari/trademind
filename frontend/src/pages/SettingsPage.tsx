@@ -9,6 +9,7 @@ import {
   useGetMeQuery,
   useUpdateMeMutation,
   useChangePasswordMutation,
+  useSetPasswordMutation,
   useGetPreferencesQuery,
   useUpdatePreferencesMutation,
   useGetNotifPreferencesQuery,
@@ -536,6 +537,7 @@ function SecurityTab() {
   const { data: meData } = useGetMeQuery();
   const { data: sessionsData } = useGetSessionsQuery();
   const [changePassword, { isLoading: changingPw }] = useChangePasswordMutation();
+  const [setPassword,    { isLoading: settingPw }]  = useSetPasswordMutation();
   const [totpSetup,    { isLoading: totpSetupLoading }] = useTotpSetupMutation();
   const [totpConfirm,  { isLoading: totpConfirmLoading }] = useTotpConfirmMutation();
   const [totpDisable,  { isLoading: totpDisableLoading }] = useTotpDisableMutation();
@@ -553,7 +555,20 @@ function SecurityTab() {
   const [totpMode,    setTotpMode]    = useState<'idle' | 'setup' | 'disable'>('idle');
 
   const totpEnabled = meData?.totp_enabled ?? false;
+  const hasPassword = (meData as any)?.has_password ?? true;
   const sessions    = (sessionsData as any)?.data ?? [];
+
+  async function handleSetPassword() {
+    if (pwNew !== pwConfirm) { toast({ type: 'error', title: 'Passwords do not match' }); return; }
+    if (!pwNew) { toast({ type: 'error', title: 'Please enter a password' }); return; }
+    try {
+      await setPassword({ new_password: pwNew }).unwrap();
+      toast({ type: 'success', title: 'Password set successfully' });
+      setPwNew(''); setPwConfirm('');
+    } catch {
+      toast({ type: 'error', title: 'Failed to set password' });
+    }
+  }
 
   async function handleChangePassword() {
     if (pwNew !== pwConfirm) { toast({ type: 'error', title: 'Passwords do not match' }); return; }
@@ -610,15 +625,17 @@ function SecurityTab() {
 
   return (
     <div className="flex flex-col gap-[calc(16px*var(--u))]">
-      {/* Change Password */}
+      {/* Change / Set Password */}
       <SectionCard>
-        <SectionHead title="Change Password" />
+        <SectionHead title={hasPassword ? 'Change Password' : 'Set Password'} sub={!hasPassword ? 'Your account uses Google sign-in. Set a password to also enable email login.' : undefined} />
         <SectionBody>
           <div className="flex flex-col gap-4 py-4">
-            <div className="flex flex-col gap-[7px]">
-              <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Current password</label>
-              <input type={show ? 'text' : 'password'} value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} placeholder="••••••••" className={inputCls} />
-            </div>
+            {hasPassword && (
+              <div className="flex flex-col gap-[7px]">
+                <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Current password</label>
+                <input type={show ? 'text' : 'password'} value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} placeholder="••••••••" className={inputCls} />
+              </div>
+            )}
             <div className="flex flex-col gap-[7px]">
               <label className="text-[12.5px] font-semibold text-[var(--text-2)]">New password</label>
               <input type={show ? 'text' : 'password'} value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="••••••••" className={inputCls} />
@@ -633,12 +650,12 @@ function SecurityTab() {
             </label>
             <button
               type="button"
-              onClick={handleChangePassword}
-              disabled={changingPw}
-              className={`self-start h-10 px-5 rounded-[11px] font-sans text-[13.5px] font-semibold border-none bg-[var(--accent)] text-white shadow-[0_4px_14px_rgba(59,130,246,.32)] inline-flex items-center gap-2 transition-opacity ${changingPw ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
+              onClick={hasPassword ? handleChangePassword : handleSetPassword}
+              disabled={changingPw || settingPw}
+              className={`self-start h-10 px-5 rounded-[11px] font-sans text-[13.5px] font-semibold border-none bg-[var(--accent)] text-white shadow-[0_4px_14px_rgba(59,130,246,.32)] inline-flex items-center gap-2 transition-opacity ${(changingPw || settingPw) ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
             >
-              {changingPw ? <Loader2 size={15} className="animate-spin" /> : null}
-              {changingPw ? 'Updating…' : 'Update Password'}
+              {(changingPw || settingPw) ? <Loader2 size={15} className="animate-spin" /> : null}
+              {changingPw ? 'Updating…' : settingPw ? 'Setting…' : hasPassword ? 'Update Password' : 'Set Password'}
             </button>
           </div>
         </SectionBody>

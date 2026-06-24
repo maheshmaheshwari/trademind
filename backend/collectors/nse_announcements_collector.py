@@ -171,6 +171,101 @@ def already_has_news(symbol_ns: str) -> bool:
         release_connection(conn)
 
 
+def collect_daily(lookback_days: int = 2) -> dict:
+    """
+    Incremental daily job: fetch announcements from the last `lookback_days` days
+    for all 499 stocks. Designed for the daily scheduler (runs after market close).
+
+    Returns dict with total_rows, processed, failed counts.
+    """
+    init_database()
+
+    from_dt = (datetime.now() - timedelta(days=lookback_days)).strftime("%d-%m-%Y")
+
+    if not os.path.exists(_TOKENS_FILE):
+        conn = get_connection()
+        try:
+            cur = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d' ORDER BY symbol")
+            all_symbols = [r[0].replace(".NS", "") for r in cur.fetchall()]
+        finally:
+            release_connection(conn)
+    else:
+        with open(_TOKENS_FILE) as f:
+            all_symbols = list(json.load(f).keys())
+
+    session    = _make_session()
+    total_rows = 0
+    processed  = 0
+    failed     = 0
+
+    for symbol in all_symbols:
+        symbol_ns = f"{symbol}.NS"
+        try:
+            announcements = fetch_announcements(session, symbol, from_dt)
+            if not announcements:
+                time.sleep(0.3)
+                continue
+
+            headlines = []
+            for ann in announcements:
+                desc = ann.get("desc", "") or ""
+                text = ann.get("attchmntText", "") or ""
+                headline = (text[:400] if text.strip() else desc).strip() or "Corporate announcement"
+                headlines.append(headline)
+
+            scores = _FinBERT.score(headlines)
+            url = f"https://www.nseindia.com/api/corporate-announcements?symbol={symbol}"
+
+            rows = []
+            for ann, headline, score in zip(announcements, headlines, scores):
+                raw_dt = ann.get("an_dt", "") or ann.get("sort_date", "")
+                if not raw_dt:
+                    continue
+                try:
+                    pub_dt = (datetime.strptime(raw_dt[:10], "%Y-%m-%d")
+                              if "T" in raw_dt
+                              else datetime.strptime(raw_dt[:11], "%d-%b-%Y"))
+                except ValueError:
+                    continue
+                rows.append((
+                    headline[:500], "NSE",
+                    pub_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    symbol_ns,
+                    str(score["sentiment"]), score["confidence"],
+                    f"{url}&an_dt={pub_dt.date()}",  # unique URL per announcement
+                ))
+
+            if rows:
+                conn = get_connection()
+                try:
+                    from database.db import _executemany as _em
+                    _em(conn,
+                        """INSERT INTO news_sentiment
+                           (headline, source, published_at, symbol, sentiment, confidence, url)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT DO NOTHING""",
+                        rows,
+                    )
+                    conn.commit()
+                    total_rows += len(rows)
+                    processed  += 1
+                except Exception as e:
+                    conn.rollback()
+                    logger.warning(f"{symbol} insert error: {e}")
+                    failed += 1
+                finally:
+                    release_connection(conn)
+
+        except Exception as e:
+            logger.warning(f"{symbol}: {e}")
+            failed += 1
+
+        time.sleep(0.3)
+
+    logger.info(f"NSE daily done: {total_rows} rows, {processed} stocks, {failed} errors")
+    return {"total_rows": total_rows, "processed": processed, "failed": failed}
+
+
 def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None,
                  skip_existing: bool = True, start_idx: int = 0, end_idx: int = None):
     init_database()

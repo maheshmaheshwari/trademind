@@ -80,32 +80,44 @@ def _scheduler_log_write(
 # Jobs eligible for recovery. High-frequency intraday jobs are excluded —
 # recovering stale 5-min SL checks or 30-min candles is pointless.
 # Populated after the job functions are defined (see bottom of file).
-RECOVERABLE_JOBS: dict = {}   # job_id → (job_name, cron_hour, cron_minute, fn)
+RECOVERABLE_JOBS: dict = {}
+# job_id → (job_name, cron_hour, cron_minute, fn, day_of_week, lookback_hours)
+# day_of_week: "mon-fri" for weekday-only jobs, or a specific day e.g. "fri" for weekly jobs
+# lookback_hours: how far back to search for a missed fire (24h for daily, 80h for weekly)
+
+
+_DAY_NAME_TO_WEEKDAY = {
+    "mon": 0, "tue": 1, "wed": 2, "thu": 3,
+    "fri": 4, "sat": 5, "sun": 6,
+}
 
 
 def run_recovery_queue():
     """
-    Called 30s after server startup. Finds daily jobs that should have fired
-    in the last 24h but have no 'done' record, then runs them FIFO one at a time.
+    Called 30s after server startup. Finds jobs that should have fired within
+    their lookback window but have no 'done' record, then runs them FIFO.
+
+    Each RECOVERABLE_JOBS entry specifies its own lookback_hours:
+      - Daily weekday jobs: 24h  (check today + yesterday)
+      - Weekly Friday retrain:  80h  (covers full weekend downtime:
+        Friday 22:00 → Monday 06:00 = 56h, with 24h margin)
 
     Retry logic:
-        attempt 1 fails → status='failed', picked up on next startup
+        attempt 1 fails → status='failed', retried on next startup
         attempt 2 fails → status='failed'
         attempt 3 fails → status='permanently_failed', skipped forever
 
-    Stale 'running' entries (started >2h ago, still in-progress) are reset to
-    'failed' so an interrupted job doesn't block its own retry forever.
+    Stale 'running' entries (started >30 min ago) are reset to 'failed'
+    so an interrupted job doesn't block its own retry.
     """
     if not RECOVERABLE_JOBS:
         return
 
     from database.db import get_connection, release_connection, _execute
 
-    now_ist  = datetime.now(IST)
-    lookback = now_ist - timedelta(hours=24)
+    now_ist = datetime.now(IST)
 
-    # Reset stale 'running' entries that are older than 2 hours — these are
-    # jobs that were killed mid-run (e.g. server restart) and never completed.
+    # Reset stale 'running' entries
     try:
         conn = get_connection()
         try:
@@ -125,20 +137,37 @@ def run_recovery_queue():
     try:
         conn = get_connection()
         try:
-            for job_id, (job_name, cron_hour, cron_minute, fn) in RECOVERABLE_JOBS.items():
-                # Walk through today and yesterday to find expected fire times in lookback
-                for delta_days in (0, 1):
+            for job_id, entry in RECOVERABLE_JOBS.items():
+                job_name, cron_hour, cron_minute, fn = entry[0], entry[1], entry[2], entry[3]
+                day_of_week  = entry[4] if len(entry) > 4 else "mon-fri"
+                lookback_hrs = entry[5] if len(entry) > 5 else 24
+
+                lookback = now_ist - timedelta(hours=lookback_hrs)
+
+                # Resolve allowed weekdays from day_of_week spec
+                if "-" in day_of_week:
+                    start_d, end_d = day_of_week.split("-")
+                    allowed_weekdays = set(range(
+                        _DAY_NAME_TO_WEEKDAY[start_d],
+                        _DAY_NAME_TO_WEEKDAY[end_d] + 1,
+                    ))
+                else:
+                    allowed_weekdays = {_DAY_NAME_TO_WEEKDAY[day_of_week]}
+
+                # Walk back far enough to cover the full lookback window
+                max_days_back = lookback_hrs // 24 + 2
+                for delta_days in range(int(max_days_back) + 1):
                     candidate_date = (now_ist - timedelta(days=delta_days)).date()
-                    if datetime(candidate_date.year, candidate_date.month, candidate_date.day).weekday() >= 5:
-                        continue  # skip weekends
+                    if candidate_date.weekday() not in allowed_weekdays:
+                        continue
                     scheduled = IST.localize(datetime(
                         candidate_date.year, candidate_date.month, candidate_date.day,
                         cron_hour, cron_minute,
                     ))
                     if scheduled > now_ist or scheduled < lookback:
-                        continue   # not yet due, or too old
+                        continue
 
-                    # Check scheduler_log for this fire time (±10 min window)
+                    # Check scheduler_log for this fire time (±10 min before, +8h after for long jobs)
                     row = _execute(conn, """
                         SELECT status, attempt FROM scheduler_log
                         WHERE job_id = ?
@@ -146,13 +175,13 @@ def run_recovery_queue():
                         ORDER BY scheduled_at DESC LIMIT 1
                     """, (job_id,
                           scheduled - timedelta(minutes=10),
-                          scheduled + timedelta(hours=3))).fetchone()
+                          scheduled + timedelta(hours=8))).fetchone()
 
                     if row and row[0] in ('done', 'running', 'permanently_failed'):
-                        continue   # already handled
+                        continue
                     attempt = int(row[1]) if row else 0
                     if attempt >= 3:
-                        continue   # exhausted retries
+                        continue
                     recovery_tasks.append((job_id, job_name, scheduled, fn, attempt))
         finally:
             release_connection(conn)
@@ -233,6 +262,33 @@ def collect_yfinance_news_job():
         logger.info(f"yfinance news done: {result['total']} new articles")
     except Exception as e:
         logger.error(f"yfinance news collection failed: {e}")
+
+
+def collect_nse_announcements_job():
+    """Daily job: fetch last 2 days of NSE corporate announcements for all 499 stocks."""
+    logger.info("⏰ Running NSE corporate announcements collection...")
+    try:
+        from collectors.nse_announcements_collector import collect_daily
+        result = collect_daily(lookback_days=2)
+        logger.info(f"NSE announcements done: {result['total_rows']} rows, {result['processed']} stocks")
+    except Exception as e:
+        logger.error(f"NSE announcements collection failed: {e}")
+
+
+def collect_corporate_actions_job():
+    """Daily EOD job: scrape Trendlyne for new Nifty 500 bonus/split events."""
+    logger.info("Running Trendlyne corporate actions collection...")
+    try:
+        from collectors.trendlyne_collector import collect_corporate_actions
+        result = collect_corporate_actions(lookback_days=7)
+        logger.info(
+            f"Corporate actions done: {result['scraped']} scraped, "
+            f"{result['new']} new, {result['skipped']} already in DB"
+        )
+        if result["new"]:
+            logger.info(f"NEW corporate action(s) detected — {result['new']} event(s) added")
+    except Exception as e:
+        logger.error(f"Corporate actions collection failed: {e}")
 
 
 def collect_delivery_job():
@@ -536,14 +592,25 @@ def collect_av_news_job():
 
 
 def score_pending_news_job():
-    """Hourly job: run FinBERT on any unscored news articles."""
+    """Hourly job: run FinBERT batch inference on any unscored news articles."""
     logger.info("⏰ Scoring pending news with FinBERT...")
     try:
         from collectors.gdelt_collector import score_pending_news
-        count = score_pending_news(batch_limit=500)
+        count = score_pending_news(batch_limit=2000)
         logger.info(f"FinBERT scoring done: {count} articles scored")
     except Exception as e:
         logger.error(f"News scoring failed: {e}")
+
+
+def score_pending_news_nightly_job():
+    """Nightly high-capacity scoring job: clear backlog with a large batch."""
+    logger.info("⏰ Nightly FinBERT scoring (high-capacity)...")
+    try:
+        from collectors.gdelt_collector import score_pending_news
+        count = score_pending_news(batch_limit=5000)
+        logger.info(f"Nightly FinBERT scoring done: {count} articles scored")
+    except Exception as e:
+        logger.error(f"Nightly news scoring failed: {e}")
 
 
 def notify_signal_changes_job():
@@ -664,12 +731,24 @@ def sync_gtt_status_job():
 
 
 def weekly_retrain_job():
-    """Sunday 21:00 IST: retrain all 499 models with latest data, then regenerate signals."""
-    logger.info("⏰ Starting weekly model retrain pipeline...")
+    """
+    Friday 22:00 IST: retrain all 502 models with the week's latest data,
+    then regenerate trade signals so Monday opens with fresh predictions.
+
+    workers=1 is required — ProcessPoolExecutor workers start as fresh
+    processes without the pre-fetched data cache, causing per-symbol DB
+    queries that hang on the cloud connection. Single-threaded keeps
+    everything in one process where the cache is live.
+
+    resume=False ensures all 502 symbols are retrained, not just new ones.
+    skip_wait=True skips the EOD price poll (prices already collected
+    by the earlier EOD job at 15:35 IST).
+    """
+    logger.info("⏰ Starting Friday night model retrain pipeline...")
     try:
         from weekly_retrain_pipeline import run_pipeline
-        run_pipeline(workers=4, resume=True, skip_wait=True)
-        logger.info("✅ Weekly retrain pipeline complete")
+        run_pipeline(workers=1, resume=False, skip_wait=True)
+        logger.info("✅ Weekly retrain pipeline complete — signals ready for Monday")
     except Exception as e:
         logger.error(f"❌ Weekly retrain pipeline failed: {e}", exc_info=True)
 
@@ -829,6 +908,10 @@ def _add_all_jobs(scheduler):
     # NOTE: indicators + trade signals are now chained inside collect_eod_data_job (step 2 & 3)
     # 18:00 — NSE delivery % (NSE uploads bhavcopy ~5:30 PM IST)
     scheduler.add_job(collect_delivery_job, CronTrigger(hour=18, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="delivery_data", name="NSE Delivery % Collection", misfire_grace_time=3600, replace_existing=True)
+    # 18:30 — NSE corporate announcements (covers all 499 stocks, no API key required)
+    scheduler.add_job(collect_nse_announcements_job, CronTrigger(hour=18, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="nse_announcements", name="NSE Corporate Announcements", misfire_grace_time=3600, replace_existing=True)
+    # 18:45 — Trendlyne bonus/split oracle (7-day lookback, catches any new announcements)
+    scheduler.add_job(collect_corporate_actions_job, CronTrigger(hour=18, minute=45, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="corporate_actions", name="Trendlyne Corporate Actions (Splits/Bonus)", misfire_grace_time=3600, replace_existing=True)
     # 16:30 — RSS market-wide news (ET, Moneycontrol, Business Standard)
     scheduler.add_job(collect_rss_news_job, CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="rss_news", name="RSS Market News", misfire_grace_time=3600, replace_existing=True)
     # 16:45 — yfinance per-stock news (~10 articles × 499 stocks)
@@ -857,8 +940,10 @@ def _add_all_jobs(scheduler):
     # HOURLY JOBS — 9 AM–4 PM IST weekdays
     # Every hour: RSS news refresh
     scheduler.add_job(collect_news_job, CronTrigger(hour="9-16", minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="hourly_news", name="Hourly News Refresh", misfire_grace_time=1800, replace_existing=True)
-    # Every hour: score unscored news with FinBERT
+    # Every hour: score unscored news with FinBERT (batch_limit=2000)
     scheduler.add_job(score_pending_news_job, CronTrigger(hour="9-20", minute=5, timezone="Asia/Kolkata"), id="score_news", name="FinBERT News Scoring", misfire_grace_time=1800, replace_existing=True)
+    # 23:00 nightly: high-capacity backlog clearing (batch_limit=5000)
+    scheduler.add_job(score_pending_news_nightly_job, CronTrigger(hour=23, minute=0, timezone="Asia/Kolkata"), id="score_news_nightly", name="FinBERT Nightly Scoring", misfire_grace_time=3600, replace_existing=True)
     # Every hour (market hours): check watchlist price alerts
     scheduler.add_job(price_alert_job, CronTrigger(hour="9-15", minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="price_alerts", name="Price Alert Checker", misfire_grace_time=1800, replace_existing=True)
 
@@ -877,8 +962,10 @@ def _add_all_jobs(scheduler):
     # WEEKLY JOBS — Sunday 8 PM IST
     scheduler.add_job(cleanup_old_data_job, CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="Asia/Kolkata"), id="cleanup", name="Weekly Data Cleanup", misfire_grace_time=7200, replace_existing=True)
     scheduler.add_job(verify_data_integrity_job, CronTrigger(day_of_week="sun", hour=20, minute=30, timezone="Asia/Kolkata"), id="integrity", name="Weekly Data Integrity Check", misfire_grace_time=7200, replace_existing=True)
-    # Sunday 21:00 — Weekly retrain all 499 models → regenerate signals (~6h with 4 workers)
-    scheduler.add_job(weekly_retrain_job, CronTrigger(day_of_week="sun", hour=21, minute=0, timezone="Asia/Kolkata"), id="weekly_retrain", name="Weekly Model Retrain + Signals", misfire_grace_time=7200, replace_existing=True)
+    # Friday 22:00 — Retrain all 502 models → regenerate signals so Monday has fresh predictions
+    # misfire_grace_time=28800 (8h) allows a delayed start if server was down at 22:00
+    # but still completes before Monday market open (~04:00 IST finish + 8h window = covered)
+    # scheduler.add_job(weekly_retrain_job, CronTrigger(day_of_week="fri", hour=22, minute=0, timezone="Asia/Kolkata"), id="weekly_retrain", name="Friday Night Model Retrain + Signals", misfire_grace_time=28800, replace_existing=True)
 
 
 
@@ -1089,13 +1176,20 @@ def stop_background_scheduler():
 # when called without starting the scheduler first (e.g. from server.py startup).
 # ──────────────────────────────────────────────────────────────────────────────
 RECOVERABLE_JOBS.update({
-    "eod_data":             ("EOD Price Collection",           15, 35, collect_eod_data_job),
-    "index_data_eod":       ("Index & Market Overview",        16,  0, collect_index_data_eod_job),
-    "index_data":           ("Index Data Collection (legacy)", 16,  5, collect_index_data_job),
-    "fii_dii_live":         ("FII/DII Data (live)",            17,  0, collect_fii_data_job),
-    "fii_dii_fo":           ("FII/DII F&O Volume",             17, 30, collect_fii_fo_job),
-    "daily_news":           ("Daily News Collection",          16, 30, collect_news_job),
-    "rss_news":             ("RSS Market News",                16, 30, collect_rss_news_job),
-    "delivery_data":        ("NSE Delivery % Collection",      18,  0, collect_delivery_job),
-    "signal_notifications": ("Signal Change Notifications",   17, 30, notify_signal_changes_job),
+    # (job_name, cron_hour, cron_minute, fn, day_of_week, lookback_hours)
+    # Daily weekday jobs — 24h lookback covers today + yesterday
+    "eod_data":             ("EOD Price Collection",                        15, 35, collect_eod_data_job,          "mon-fri", 24),
+    "index_data_eod":       ("Index & Market Overview",                     16,  0, collect_index_data_eod_job,    "mon-fri", 24),
+    "index_data":           ("Index Data Collection (legacy)",              16,  5, collect_index_data_job,        "mon-fri", 24),
+    "fii_dii_live":         ("FII/DII Data (live)",                         17,  0, collect_fii_data_job,          "mon-fri", 24),
+    "fii_dii_fo":           ("FII/DII F&O Volume",                          17, 30, collect_fii_fo_job,            "mon-fri", 24),
+    "daily_news":           ("Daily News Collection",                       16, 30, collect_news_job,              "mon-fri", 24),
+    "rss_news":             ("RSS Market News",                             16, 30, collect_rss_news_job,          "mon-fri", 24),
+    "delivery_data":        ("NSE Delivery % Collection",                   18,  0, collect_delivery_job,          "mon-fri", 24),
+    "nse_announcements":    ("NSE Corporate Announcements",                 18, 30, collect_nse_announcements_job, "mon-fri", 24),
+    "corporate_actions":    ("Trendlyne Corporate Actions",                 18, 45, collect_corporate_actions_job, "mon-fri", 24),
+    "signal_notifications": ("Signal Change Notifications",                 17, 30, notify_signal_changes_job,     "mon-fri", 24),
+    # Weekly Friday retrain — 80h lookback so Monday startup still recovers a missed Friday run
+    # (Friday 22:00 → Monday 06:00 = 56h; 80h gives 24h extra margin)
+    # "weekly_retrain":       ("Friday Night Model Retrain + Signals",        22,  0, weekly_retrain_job,            "fri",     80),
 })

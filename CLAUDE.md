@@ -7,6 +7,7 @@ AI-powered trading platform for Nifty 500 stocks (Indian market).
 - **Frontend**: React + TypeScript + Vite + MUI + TailwindCSS
 - **Database**: TimescaleDB (PostgreSQL) in Docker on port 5433
 - **ML**: 480 per-stock binary classification models, 6 prediction horizons (1W–6M)
+- **Primary data source**: Angel One SmartAPI — ALL price/OHLCV data comes from Angel One, not Yahoo Finance or any other provider
 
 ---
 
@@ -78,6 +79,24 @@ Key functions: `get_connection()`, `init_database()`, `get_db_stats()`, `get_tra
 **Hypertables**: `prices` (64 chunks), `technical_indicators` (60 chunks), `news_sentiment` (3 chunks)
 
 **Continuous aggregate**: `news_daily_sentiment` — auto-refreshed hourly.
+
+---
+
+## Data Sources
+
+**All price data (OHLCV) comes exclusively from Angel One SmartAPI** — never Yahoo Finance, NSE direct, or any other provider.
+
+- `collectors/angel_collector.py` — EOD + intraday candles via SmartAPI
+- `collectors/ltp_fetcher.py` — live price (LTP) via SmartAPI
+- `data/angel_tokens.json` — maps stock symbols to Angel One instrument tokens
+
+**Angel One's corporate action behaviour (important):** Angel One sometimes retroactively adjusts historical candles after a split or bonus. This means for some stocks the price history is already adjusted by Angel One, and for others it is not. The `apply_corporate_action_adjustments()` function in `model_training.py` detects this automatically — it checks the actual price ratio on the ex-date and skips adjustment if Angel One already did it, to avoid double-adjusting.
+
+News/sentiment sources (secondary, not price data):
+- GDELT — news headlines bootstrap (`collectors/gdelt_collector.py`)
+- RSS feeds — `collectors/rss_collector.py`
+- NSE announcements — `collectors/nse_announcements_collector.py`
+- FinBERT — sentiment scoring (`analysis/sentiment.py`)
 
 ---
 

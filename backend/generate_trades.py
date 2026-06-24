@@ -266,11 +266,133 @@ def calculate_position_sizing(df, signal, buy_price, symbol: str = ""):
     }
 
 
+def _infer_one_horizon(symbol: str, name: str, df, X_latest, h_art: dict, timestamp: str) -> "dict | None":
+    """
+    Run inference for one (symbol, horizon_artifact) pair.
+    Returns a trade-signal dict or None if inference fails.
+    """
+    model       = h_art.get("model")
+    sub_models  = h_art.get("sub_models") or {}
+    sub_weights = h_art.get("sub_weights") or {}
+    features    = h_art["features"]
+    threshold   = h_art.get("threshold", 0.5)
+    metrics     = h_art.get("metrics", {})
+    model_name  = h_art.get("model_name", "Unknown")
+    horizon     = h_art.get("horizon", "Unknown")
+    target_pct  = h_art.get("target_pct", 2.0)
+    forward_days = h_art.get("forward_days", 20)
+
+    try:
+        latest = X_latest.copy()
+        for f in features:
+            if f not in latest.columns:
+                latest[f] = 0
+        latest = latest[features].replace([np.inf, -np.inf], 0).fillna(0)
+
+        if model is not None:
+            prob = model.predict_proba(latest)[0]
+            buy_prob = float(prob[1] if len(prob) > 1 else prob[0])
+        elif sub_models:
+            probs, weights = [], []
+            for mn, sm in sub_models.items():
+                if sm is None:
+                    continue
+                try:
+                    p = sm.predict_proba(latest)[0]
+                    probs.append(float(p[1] if len(p) > 1 else p[0]))
+                    weights.append(abs(sub_weights.get(mn, 1.0)))
+                except Exception:
+                    pass
+            if not probs:
+                return None
+            total_w = sum(weights) or 1.0
+            buy_prob = sum(p * w / total_w for p, w in zip(probs, weights))
+        else:
+            return None
+    except Exception:
+        return None
+
+    acc  = metrics.get("accuracy",  0.0)
+    prec = metrics.get("precision", 0.0)
+
+    if buy_prob >= 0.75 and acc >= 0.80:
+        signal = "STRONG BUY"
+    elif buy_prob >= 0.60 and acc >= 0.70:
+        signal = "BUY"
+    elif buy_prob >= 0.40:
+        signal = "HOLD"
+    elif buy_prob >= 0.25:
+        signal = "SELL"
+    else:
+        signal = "STRONG SELL"
+
+    levels   = calculate_trade_levels(df, signal, horizon, target_pct)
+    position = calculate_position_sizing(df, signal, levels["buy_price"], symbol=symbol)
+
+    top_features = []
+    if model is not None and hasattr(model, "feature_importances_"):
+        imp = dict(zip(features, model.feature_importances_))
+        top_features = [{"feature": f, "importance": round(float(v), 4)}
+                        for f, v in sorted(imp.items(), key=lambda x: x[1], reverse=True)[:5]]
+
+    sent_info = {}
+    for col in ["sent_stock", "mkt_sentiment"]:
+        if col in df.columns:
+            val = df[col].iloc[-1]
+            sent_info[col] = round(float(val), 4) if not pd.isna(val) else 0
+
+    return {
+        "symbol":     symbol,
+        "name":       name,
+        "signal":     signal,
+        "confidence": round(buy_prob * 100, 1),
+        "trade": {
+            "type":                levels["trade_type"],
+            "buy_price":           levels["buy_price"],
+            "target_price":        levels["target_price"],
+            "stop_loss":           levels["stop_loss"],
+            "risk_reward":         levels["risk_reward"],
+            "expected_return_pct": levels["expected_return_pct"],
+        },
+        "position": {
+            "avg_daily_volume":              position["avg_daily_volume"],
+            "daily_turnover_cr":             position["daily_turnover_cr"],
+            "liquidity":                     position["liquidity"],
+            "max_safe_qty":                  position["max_safe_qty_total"],
+            "suggested_qty_per_user":        position["suggested_qty_per_user"],
+            "suggested_investment_per_user": position["suggested_investment_per_user"],
+            "min_qty":                       position["min_qty"],
+            "recommended_volume":            position["max_safe_qty_total"],
+            "active_users":                  position["active_users"],
+            "volatility_pct":                position["volatility_pct"],
+            "delivery_pct":                  position["delivery_pct"],
+            "price_impact_pct":              position["price_impact_pct"],
+            "consumed_volume":               position["consumed_volume"],
+            "remaining_volume":              position["remaining_volume"],
+            "volume_utilisation_pct":        position["volume_utilisation_pct"],
+        },
+        "price": {
+            "current": levels["current_price"],
+            "atr_14":  levels["atr_14"],
+            "atr_pct": levels["atr_pct"],
+        },
+        "model": {
+            "name":      model_name,
+            "horizon":   horizon,
+            "accuracy":  round(acc * 100, 1),
+            "precision": round(prec * 100, 1),
+        },
+        "sentiment":   sent_info,
+        "top_drivers": top_features,
+        "generated_at": timestamp,
+    }
+
+
 def generate_signals():
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
-    
+
     # Load stock names from angel_tokens.json
     name_map = {}
     tokens_path = os.path.join(OUTPUT_DIR, "angel_tokens.json")
@@ -280,26 +402,30 @@ def generate_signals():
         for sym, info in tokens.items():
             name_map[f"{sym}.NS"] = info.get("name", sym)
     
-    model_files = sorted([f for f in os.listdir(FINAL_DIR) if f.endswith("_final.pkl") and ".NS_final.pkl" in f])
-    print(f"📊 {len(model_files)} final models found\n")
-    
+    # Deduplicate by symbol: if both RELIANCE_final.pkl and RELIANCE.NS_final.pkl
+    # exist, prefer the bare form (newer per-horizon artifact from model_training.py).
+    all_pkl = [f for f in os.listdir(FINAL_DIR) if f.endswith("_final.pkl")]
+    symbol_to_file: dict = {}
+    for f in sorted(all_pkl):
+        bare = f.replace("_final.pkl", "")
+        sym = bare if bare.endswith(".NS") else f"{bare}.NS"
+        if sym not in symbol_to_file or not bare.endswith(".NS"):
+            symbol_to_file[sym] = f
+    model_files = sorted(symbol_to_file.items())
+    total = len(model_files)
+    print(f"📊 {total} unique stocks ({len(all_pkl)} pkl files found)\n")
+
     trades = []
     errors = []
-    
-    for mf in model_files:
-        symbol = mf.replace("_final.pkl", "")
-        
+
+    for idx, (symbol, mf) in enumerate(model_files, 1):
+        name = name_map.get(symbol, symbol.replace(".NS", ""))
+        print(f"[{idx}/{total}] {symbol}", flush=True)
+
         try:
             artifact = joblib.load(os.path.join(FINAL_DIR, mf))
-            model = artifact["model"]
-            features = artifact["features"]
-            metrics = artifact["metrics"]
-            model_name = artifact.get("model_name", "Unknown")
-            horizon = artifact.get("horizon", "Unknown")
-            threshold = artifact.get("threshold", 0.5)
-            target_pct = artifact.get("target_pct", 2.0)
-            
-            # Load latest data
+
+            # Load data and engineer features ONCE per stock (shared across all horizons)
             df = load_data_for_symbol(symbol)
             if df.empty:
                 print(f"Skipping {symbol}: df is empty")
@@ -307,143 +433,163 @@ def generate_signals():
             if len(df) < 60:
                 print(f"Skipping {symbol}: df length {len(df)} < 60")
                 continue
-            
-            # Engineer features
+
             try:
                 X, _ = engineer_features_and_target(df, forward_days=5, target_pct=0.5)
             except Exception as e:
                 print(f"Skipping {symbol}: Error in engineer_features_and_target: {e}")
                 continue
-                
+
             if X.empty:
                 print(f"Skipping {symbol}: X is empty")
                 continue
-            
-            latest = X.iloc[-1:]
-            missing = [f for f in features if f not in latest.columns]
-            for f in missing:
-                latest[f] = 0
-            latest = latest[features]
-            latest = latest.replace([np.inf, -np.inf], 0).fillna(0)
-            
-            # Predict
-            if model is not None:
-                prob = model.predict_proba(latest)[0]
-                buy_prob = prob[1] if len(prob) > 1 else prob[0]
-            else:
-                # Ensemble / StackEnsemble: weighted average of sub-models
-                sub_models = artifact.get("sub_models") or {}
-                sub_weights = artifact.get("sub_weights") or {}
-                probs, weights = [], []
-                for mn, sm in sub_models.items():
-                    if sm is None:
+
+            X_latest = X.iloc[-1:]
+
+            if "horizons" in artifact:
+                # New per-horizon format: emit one signal per horizon (up to 6 per stock)
+                for h_short, h_art in artifact["horizons"].items():
+                    result = _infer_one_horizon(symbol, name, df, X_latest, h_art, timestamp)
+                    if result is None:
                         continue
-                    try:
-                        p = sm.predict_proba(latest)[0]
-                        probs.append(p[1] if len(p) > 1 else p[0])
-                        weights.append(abs(sub_weights.get(mn, 1.0)))
-                    except Exception:
-                        pass
-                if not probs:
-                    print(f"Skipping {symbol}: no valid sub-models")
-                    continue
-                total_w = sum(weights) or 1.0
-                buy_prob = sum(p * w / total_w for p, w in zip(probs, weights))
-            
-            acc = metrics["accuracy"]
-            prec = metrics["precision"]
-            
-            # Determine signal
-            if buy_prob >= 0.75 and acc >= 0.80:
-                signal = "STRONG BUY"
-            elif buy_prob >= 0.60 and acc >= 0.70:
-                signal = "BUY"
-            elif buy_prob >= 0.40:
-                signal = "HOLD"
-            elif buy_prob >= 0.25:
-                signal = "SELL"
+                    trades.append(result)
+                    sig = result["signal"]
+                    lvl = result["trade"]
+                    if sig in ("STRONG BUY", "BUY"):
+                        icon = "🟢🟢" if sig == "STRONG BUY" else "🟢"
+                        print(f"   {icon} {symbol:<18} [{h_short}] {sig:<12} "
+                              f"conf:{result['confidence']:.0f}%  "
+                              f"BUY:₹{lvl['buy_price']:.2f}  "
+                              f"TARGET:₹{lvl['target_price']:.2f}  "
+                              f"SL:₹{lvl['stop_loss']:.2f}  R:R={lvl['risk_reward']}")
+                    elif sig in ("SELL", "STRONG SELL"):
+                        icon = "🔴🔴" if sig == "STRONG SELL" else "🔴"
+                        print(f"   {icon} {symbol:<18} [{h_short}] {sig:<12} "
+                              f"conf:{result['confidence']:.0f}%  "
+                              f"price:₹{result['price']['current']:.2f}")
             else:
-                signal = "STRONG SELL"
-            
-            # Calculate trade levels
-            levels = calculate_trade_levels(df, signal, horizon, target_pct)
-            
-            # Calculate position sizing with volume caps
-            position = calculate_position_sizing(df, signal, levels["buy_price"], symbol=symbol)
-            
-            # Feature importance — top 5
-            top_features = []
-            if hasattr(model, "feature_importances_"):
-                imp = dict(zip(features, model.feature_importances_))
-                top_features = [{"feature": f, "importance": round(float(v), 4)} 
-                               for f, v in sorted(imp.items(), key=lambda x: x[1], reverse=True)[:5]]
-            
-            # Sentiment info
-            sent_info = {}
-            for col in ["sent_stock", "mkt_sentiment"]:
-                if col in df.columns:
-                    val = df[col].iloc[-1]
-                    sent_info[col] = round(float(val), 4) if not pd.isna(val) else 0
-            
-            trade = {
-                "symbol": symbol,
-                "name": name_map.get(symbol, symbol.replace(".NS", "")),
-                "signal": signal,
-                "confidence": round(float(buy_prob) * 100, 1),
-                "trade": {
-                    "type": levels["trade_type"],
-                    "buy_price": levels["buy_price"],
-                    "target_price": levels["target_price"],
-                    "stop_loss": levels["stop_loss"],
-                    "risk_reward": levels["risk_reward"],
-                    "expected_return_pct": levels["expected_return_pct"],
-                },
-                "position": {
-                    "avg_daily_volume":              position["avg_daily_volume"],
-                    "daily_turnover_cr":             position["daily_turnover_cr"],
-                    "liquidity":                     position["liquidity"],
-                    "max_safe_qty":                  position["max_safe_qty_total"],
-                    "suggested_qty_per_user":        position["suggested_qty_per_user"],
-                    "suggested_investment_per_user": position["suggested_investment_per_user"],
-                    "min_qty":                       position["min_qty"],
-                    "recommended_volume":            position["max_safe_qty_total"],
-                    "active_users":                  position["active_users"],
-                    # Market impact analytics
-                    "volatility_pct":                position["volatility_pct"],
-                    "delivery_pct":                  position["delivery_pct"],
-                    "price_impact_pct":              position["price_impact_pct"],
-                    "consumed_volume":               position["consumed_volume"],
-                    "remaining_volume":              position["remaining_volume"],
-                    "volume_utilisation_pct":        position["volume_utilisation_pct"],
-                },
-                "price": {
-                    "current": levels["current_price"],
-                    "atr_14": levels["atr_14"],
-                    "atr_pct": levels["atr_pct"],
-                },
-                "model": {
-                    "name": model_name,
-                    "horizon": horizon,
-                    "accuracy": round(acc * 100, 1),
-                    "precision": round(prec * 100, 1),
-                },
-                "sentiment": sent_info,
-                "top_drivers": top_features,
-                "generated_at": timestamp,
-            }
-            trades.append(trade)
-            
-            # Print actionable trades only
-            if signal in ("STRONG BUY", "BUY"):
-                icon = "🟢🟢" if signal == "STRONG BUY" else "🟢"
-                print(f"   {icon} {symbol:<18} {signal:<12} conf:{buy_prob:.0%}  "
-                      f"BUY:₹{levels['buy_price']:.2f}  TARGET:₹{levels['target_price']:.2f}  "
-                      f"SL:₹{levels['stop_loss']:.2f}  R:R={levels['risk_reward']}")
-            elif signal in ("SELL", "STRONG SELL"):
-                icon = "🔴🔴" if signal == "STRONG SELL" else "🔴"
-                print(f"   {icon} {symbol:<18} {signal:<12} conf:{buy_prob:.0%}  "
-                      f"AVOID BUYING  price:₹{levels['current_price']:.2f}")
-            
+                # Backward-compat: old single-model artifact
+                model = artifact["model"]
+                features = artifact["features"]
+                metrics = artifact["metrics"]
+                model_name = artifact.get("model_name", "Unknown")
+                horizon = artifact.get("horizon", "Unknown")
+                target_pct = artifact.get("target_pct", 2.0)
+
+                latest = X_latest.copy()
+                for f in features:
+                    if f not in latest.columns:
+                        latest[f] = 0
+                latest = latest[features].replace([np.inf, -np.inf], 0).fillna(0)
+
+                if model is not None:
+                    prob = model.predict_proba(latest)[0]
+                    buy_prob = float(prob[1] if len(prob) > 1 else prob[0])
+                else:
+                    sub_models = artifact.get("sub_models") or {}
+                    sub_weights = artifact.get("sub_weights") or {}
+                    probs, weights = [], []
+                    for mn, sm in sub_models.items():
+                        if sm is None:
+                            continue
+                        try:
+                            p = sm.predict_proba(latest)[0]
+                            probs.append(float(p[1] if len(p) > 1 else p[0]))
+                            weights.append(abs(sub_weights.get(mn, 1.0)))
+                        except Exception:
+                            pass
+                    if not probs:
+                        print(f"Skipping {symbol}: no valid sub-models")
+                        continue
+                    total_w = sum(weights) or 1.0
+                    buy_prob = sum(p * w / total_w for p, w in zip(probs, weights))
+
+                acc  = metrics["accuracy"]
+                prec = metrics["precision"]
+
+                if buy_prob >= 0.75 and acc >= 0.80:
+                    signal = "STRONG BUY"
+                elif buy_prob >= 0.60 and acc >= 0.70:
+                    signal = "BUY"
+                elif buy_prob >= 0.40:
+                    signal = "HOLD"
+                elif buy_prob >= 0.25:
+                    signal = "SELL"
+                else:
+                    signal = "STRONG SELL"
+
+                levels   = calculate_trade_levels(df, signal, horizon, target_pct)
+                position = calculate_position_sizing(df, signal, levels["buy_price"], symbol=symbol)
+
+                top_features = []
+                if model is not None and hasattr(model, "feature_importances_"):
+                    imp = dict(zip(features, model.feature_importances_))
+                    top_features = [{"feature": f, "importance": round(float(v), 4)}
+                                   for f, v in sorted(imp.items(), key=lambda x: x[1], reverse=True)[:5]]
+
+                sent_info = {}
+                for col in ["sent_stock", "mkt_sentiment"]:
+                    if col in df.columns:
+                        val = df[col].iloc[-1]
+                        sent_info[col] = round(float(val), 4) if not pd.isna(val) else 0
+
+                trade = {
+                    "symbol": symbol,
+                    "name":   name,
+                    "signal": signal,
+                    "confidence": round(buy_prob * 100, 1),
+                    "trade": {
+                        "type":                levels["trade_type"],
+                        "buy_price":           levels["buy_price"],
+                        "target_price":        levels["target_price"],
+                        "stop_loss":           levels["stop_loss"],
+                        "risk_reward":         levels["risk_reward"],
+                        "expected_return_pct": levels["expected_return_pct"],
+                    },
+                    "position": {
+                        "avg_daily_volume":              position["avg_daily_volume"],
+                        "daily_turnover_cr":             position["daily_turnover_cr"],
+                        "liquidity":                     position["liquidity"],
+                        "max_safe_qty":                  position["max_safe_qty_total"],
+                        "suggested_qty_per_user":        position["suggested_qty_per_user"],
+                        "suggested_investment_per_user": position["suggested_investment_per_user"],
+                        "min_qty":                       position["min_qty"],
+                        "recommended_volume":            position["max_safe_qty_total"],
+                        "active_users":                  position["active_users"],
+                        "volatility_pct":                position["volatility_pct"],
+                        "delivery_pct":                  position["delivery_pct"],
+                        "price_impact_pct":              position["price_impact_pct"],
+                        "consumed_volume":               position["consumed_volume"],
+                        "remaining_volume":              position["remaining_volume"],
+                        "volume_utilisation_pct":        position["volume_utilisation_pct"],
+                    },
+                    "price": {
+                        "current": levels["current_price"],
+                        "atr_14":  levels["atr_14"],
+                        "atr_pct": levels["atr_pct"],
+                    },
+                    "model": {
+                        "name":      model_name,
+                        "horizon":   horizon,
+                        "accuracy":  round(acc * 100, 1),
+                        "precision": round(prec * 100, 1),
+                    },
+                    "sentiment":   sent_info,
+                    "top_drivers": top_features,
+                    "generated_at": timestamp,
+                }
+                trades.append(trade)
+
+                if signal in ("STRONG BUY", "BUY"):
+                    icon = "🟢🟢" if signal == "STRONG BUY" else "🟢"
+                    print(f"   {icon} {symbol:<18} {signal:<12} conf:{buy_prob:.0%}  "
+                          f"BUY:₹{levels['buy_price']:.2f}  TARGET:₹{levels['target_price']:.2f}  "
+                          f"SL:₹{levels['stop_loss']:.2f}  R:R={levels['risk_reward']}")
+                elif signal in ("SELL", "STRONG SELL"):
+                    icon = "🔴🔴" if signal == "STRONG SELL" else "🔴"
+                    print(f"   {icon} {symbol:<18} {signal:<12} conf:{buy_prob:.0%}  "
+                          f"AVOID BUYING  price:₹{levels['current_price']:.2f}")
+
         except Exception as e:
             errors.append({"symbol": symbol, "error": str(e)})
             print(f"   ❌ {symbol}: {e}")
@@ -457,6 +603,7 @@ def generate_signals():
         "generated_at": timestamp,
         "total_models": len(model_files),
         "total_signals": len(trades),
+        "total_stocks": len(symbol_to_file),
         "summary": {
             "STRONG_BUY": len([t for t in trades if t["signal"] == "STRONG BUY"]),
             "BUY": len([t for t in trades if t["signal"] == "BUY"]),

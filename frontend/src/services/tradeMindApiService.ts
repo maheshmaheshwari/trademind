@@ -86,6 +86,28 @@ export interface SignalsResponse {
   hold_list: TradeSignal[];
 }
 
+export interface AllSignal {
+  symbol: string;
+  name: string;
+  sector: string;
+  signal: 'BUY' | 'SELL' | 'HOLD';
+  raw_signal: string;
+  confidence: number;
+  horizon: string;
+  horizon_long: string;
+  expReturn: number | null;
+  buy_price: number | null;
+  target_price: number | null;
+  stop_loss: number | null;
+  risk_reward: number | null;
+  sentiment: number;
+  accuracy: number | null;
+  precision: number | null;
+  model_name: string | null;
+  updatedMin: number;
+  generated_at: string;
+}
+
 export interface StockQueryParams {
   page?: number;
   size?: number;
@@ -208,6 +230,10 @@ export const tradeMindApiService = createApi({
     changePassword: builder.mutation<{ status: string }, { current_password: string; new_password: string }>({
       query: (data) => ({ url: '/auth/password/change', method: 'POST', data }),
     }),
+    setPassword: builder.mutation<{ status: string }, { new_password: string }>({
+      query: (data) => ({ url: '/auth/password/set', method: 'POST', data }),
+      invalidatesTags: ['User'],
+    }),
     requestPasswordReset: builder.mutation<{ status: string }, { email: string }>({
       query: (data) => ({ url: '/auth/password/reset-request', method: 'POST', data }),
     }),
@@ -290,8 +316,11 @@ export const tradeMindApiService = createApi({
       query: ({ userId, size = 100 }) => ({ url: `/api/trading/positions/${userId}`, params: { size } }),
       providesTags: ['Positions'],
     }),
-    getOrders: builder.query<{ data: Trade[]; total: number }, { userId: number; size?: number }>({
-      query: ({ userId, size = 50 }) => ({ url: `/api/trading/orders/${userId}`, params: { size } }),
+    getOrders: builder.query<{ data: Trade[]; total: number }, { userId: number; size?: number; limit?: number; globalFilter?: string }>({
+      query: ({ userId, size = 50, limit, globalFilter }) => ({
+        url: `/api/trading/orders/${userId}`,
+        params: { size, ...(limit ? { limit } : {}), ...(globalFilter ? { globalFilter } : {}) },
+      }),
       providesTags: ['Orders'],
     }),
     squareOff: builder.mutation<{ status: string; realized_pnl: number }, { userId: number; symbol: string }>({
@@ -318,6 +347,11 @@ export const tradeMindApiService = createApi({
       providesTags: ['Signals'],
       keepUnusedDataFor: 300,
     }),
+    getAllSignals: builder.query<{ count: number; generated_at: string; total_stocks: number; signals: AllSignal[] }, void>({
+      query: () => ({ url: '/api/signals/all' }),
+      providesTags: ['Signals'],
+      keepUnusedDataFor: 300,
+    }),
     getSignalHistory: builder.query<{ data: SignalsResponse[] }, void>({
       query: () => ({ url: '/api/signals/history' }),
       keepUnusedDataFor: 0,
@@ -325,6 +359,9 @@ export const tradeMindApiService = createApi({
     refreshSignals: builder.mutation<{ status: string; message: string }, void>({
       query: () => ({ url: '/api/signals/refresh', method: 'POST', data: {} }),
       invalidatesTags: ['Signals'],
+    }),
+    googleAuth: builder.mutation<{ status: string; user: User; token: string }, { access_token: string }>({
+      query: (data) => ({ url: '/auth/google', method: 'POST', data }),
     }),
 
     // ── Stocks ────────────────────────────────────────────────────────────
@@ -489,7 +526,7 @@ export const tradeMindApiService = createApi({
 export const {
   // Auth
   useLoginMutation, useLoginMfaMutation, useRegisterMutation, useGetMeQuery,
-  useUpdateMeMutation, useChangePasswordMutation,
+  useUpdateMeMutation, useChangePasswordMutation, useSetPasswordMutation,
   useRequestPasswordResetMutation, useConfirmPasswordResetMutation,
   useGetPreferencesQuery, useUpdatePreferencesMutation,
   useGetNotifPreferencesQuery, useUpdateNotifPreferencesMutation,
@@ -506,7 +543,8 @@ export const {
   useSquareOffMutation, useSquareOffAllMutation, useExecuteSignalMutation,
   // Signals
   useGetLatestSignalsQuery, useGetActionableSignalsQuery,
-  useGetSignalHistoryQuery, useRefreshSignalsMutation,
+  useGetAllSignalsQuery,
+  useGetSignalHistoryQuery, useRefreshSignalsMutation, useGoogleAuthMutation,
   // Stocks
   useGetStocksQuery, useLazyGetStocksQuery,
   useGetStockDetailQuery, useLazyGetStockDetailQuery,

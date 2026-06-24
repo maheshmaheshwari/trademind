@@ -246,12 +246,54 @@ def try_get_market_breadth() -> Dict[str, int]:
 # ---------------------------------------------------------------------------
 # Public function: collect_index_history
 # ---------------------------------------------------------------------------
+_YFINANCE_MAP = {
+    "NIFTY50":  "^NSEI",
+    "NIFTY500": "^CRSLDX",
+    "SENSEX":   "^BSESN",
+    "INDIAVIX": "^INDIAVIX",
+}
+
+
+def _fetch_yfinance_history(idx_name: str, start_dt: datetime, end_dt: datetime) -> List[Dict[str, Any]]:
+    """Fetch daily candles for an index via yfinance (no auth required)."""
+    yf_sym = _YFINANCE_MAP.get(idx_name)
+    if not yf_sym:
+        return []
+    try:
+        import yfinance as yf
+        import pandas as pd
+        df = yf.download(
+            yf_sym,
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=(end_dt + timedelta(days=1)).strftime("%Y-%m-%d"),
+            auto_adjust=False,
+            progress=False,
+        )
+        if df.empty:
+            return []
+        # yfinance v2 returns MultiIndex columns
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        results = []
+        for ts, row in df.iterrows():
+            results.append({
+                "date":   ts.strftime("%Y-%m-%d"),
+                "close":  round(float(row["Close"]), 4),
+                "volume": int(row["Volume"]) if pd.notna(row.get("Volume")) else 0,
+            })
+        logger.info(f"{idx_name}: {len(results)} candles (yfinance fallback)")
+        return results
+    except Exception as e:
+        logger.warning(f"{idx_name} yfinance fallback failed: {e}")
+        return []
+
+
 def collect_index_history(from_date: str = "2021-01-01") -> int:
     """
     Bootstrap 5 years of daily index data for all 4 indices.
 
-    Fetches in 390-day chunks to stay within Angel One limits, merges all
-    index series by date, and calls insert_market_overview() for each date.
+    Tries Angel One first; falls back to yfinance if Angel One is rate-limited
+    or returns no data for a given index.
 
     Args:
         from_date: ISO date string to start from, e.g. "2021-01-01"
@@ -260,12 +302,23 @@ def collect_index_history(from_date: str = "2021-01-01") -> int:
         Total number of rows inserted into market_overview.
     """
     init_database()
-    smart_api = _angel_login()
 
     start_dt = datetime.strptime(from_date, "%Y-%m-%d")
     end_dt = datetime.now()
 
-    # Build date chunks of up to _CHUNK_DAYS each
+    logger.info(f"collect_index_history: {from_date} → {end_dt.date()}")
+    print(f"Bootstrapping index history: {from_date} → {end_dt.date().isoformat()}")
+
+    # Try Angel One login; fall back to yfinance-only mode on failure
+    try:
+        smart_api = _angel_login()
+        angel_ok = True
+    except Exception as e:
+        logger.warning(f"Angel One login failed ({e}) — using yfinance fallback for all indices")
+        smart_api = None
+        angel_ok = False
+
+    # Build date chunks
     chunks: List[tuple] = []
     cursor = start_dt
     while cursor < end_dt:
@@ -273,30 +326,27 @@ def collect_index_history(from_date: str = "2021-01-01") -> int:
         chunks.append((cursor, chunk_end))
         cursor = chunk_end + timedelta(days=1)
 
-    logger.info(
-        f"collect_index_history: {from_date} → {end_dt.date()} "
-        f"({len(chunks)} chunks per index)"
-    )
-    print(
-        f"Bootstrapping index history: {from_date} → {end_dt.date().isoformat()} "
-        f"({len(chunks)} chunks × 4 indices)"
-    )
-
-    # Collect all candles per index across all chunks
+    # Collect all candles per index
     all_series: Dict[str, List[Dict[str, Any]]] = {name: [] for name in INDEX_TOKENS}
 
     for idx_name in INDEX_TOKENS:
         print(f"  Fetching {idx_name} ...")
-        # INDIAVIX: Angel One getCandleData returns empty for VIX — use yfinance fallback
-        if idx_name == "INDIAVIX":
-            all_series[idx_name] = _fetch_vix_yfinance(start_dt, end_dt)
-            logger.info(f"{idx_name}: {len(all_series[idx_name])} candles (yfinance)")
+        if not angel_ok or idx_name == "INDIAVIX":
+            # Angel unavailable or VIX (Angel never returns VIX data) → yfinance
+            all_series[idx_name] = _fetch_yfinance_history(idx_name, start_dt, end_dt)
             continue
+
         for chunk_from, chunk_to in chunks:
             candles = _fetch_candles(smart_api, idx_name, chunk_from, chunk_to)
             all_series[idx_name].extend(candles)
             time.sleep(_RATE_SLEEP)
-        logger.info(f"{idx_name}: {len(all_series[idx_name])} candles fetched")
+
+        # If Angel One returned nothing for this index, fall back to yfinance
+        if not all_series[idx_name]:
+            logger.warning(f"{idx_name}: Angel One returned 0 candles — trying yfinance fallback")
+            all_series[idx_name] = _fetch_yfinance_history(idx_name, start_dt, end_dt)
+
+        logger.info(f"{idx_name}: {len(all_series[idx_name])} candles total")
 
     # Try to enrich today's row with market breadth
     breadth = try_get_market_breadth()

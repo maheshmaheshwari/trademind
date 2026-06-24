@@ -421,10 +421,10 @@ def insert_trade_signals_batch(
              top_drivers, sentiment, generated_date, generated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
         sql = _on_conflict_replace(
-            base_sql, ["symbol", "generated_date"],
+            base_sql, ["symbol", "generated_date", "model_horizon"],
             ["signal", "confidence", "trade_type", "buy_price", "target_price",
              "stop_loss", "risk_reward", "expected_return_pct", "current_price",
-             "atr_14", "atr_pct", "model_name", "model_horizon",
+             "atr_14", "atr_pct", "model_name",
              "model_accuracy", "model_precision", "top_drivers", "sentiment", "generated_at"],
         )
         # Deactivate all previous signals for each symbol before inserting new ones
@@ -442,9 +442,10 @@ def insert_trade_signals_batch(
             # Carry forward consumed_volume from the current active signal so
             # capacity tracking survives signal refreshes (EOD overwriting intraday).
             try:
+                model_horizon = t.get("model", {}).get("horizon", "")
                 cv_row = _execute(conn,
-                    "SELECT consumed_volume FROM trade_signals WHERE symbol = ? AND is_active = TRUE ORDER BY generated_date DESC LIMIT 1",
-                    (symbol,)
+                    "SELECT consumed_volume FROM trade_signals WHERE symbol = ? AND model_horizon = ? AND is_active = TRUE ORDER BY generated_date DESC LIMIT 1",
+                    (symbol, model_horizon)
                 ).fetchone()
                 carried_consumed = int(cv_row[0] or 0) if cv_row else 0
             except Exception:
@@ -462,8 +463,8 @@ def insert_trade_signals_batch(
                 t.get("position", {}).get("daily_turnover_cr"),
                 t.get("position", {}).get("liquidity"),
                 t.get("position", {}).get("max_safe_qty"),
-                t.get("position", {}).get("max_qty_per_user"),
-                t.get("position", {}).get("max_investment_per_user"),
+                t.get("position", {}).get("max_qty_per_user") or t.get("position", {}).get("suggested_qty_per_user"),
+                t.get("position", {}).get("max_investment_per_user") or t.get("position", {}).get("suggested_investment_per_user"),
                 t.get("position", {}).get("min_qty"),
                 t.get("position", {}).get("recommended_volume"), carried_consumed,
                 t.get("model", {}).get("name"), t.get("model", {}).get("horizon"),
@@ -1092,6 +1093,34 @@ def insert_notification(user_id: int, type: str, title: str, message: str = None
         conn.commit()
     finally:
         release_connection(conn)
+
+
+def get_all_corporate_actions() -> Dict[str, List[Dict]]:
+    """
+    Load all rows from corporate_actions grouped by nse_symbol.
+    Returns {nse_symbol: [{"ex_date": date, "adj_factor": float, "event_type": str}, ...]}
+    Sorted ex_date ASC per symbol so compound adjustment applies oldest→newest.
+    """
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT nse_symbol, ex_date, adj_factor, event_type "
+            "FROM corporate_actions "
+            "WHERE adj_factor IS NOT NULL "
+            "ORDER BY nse_symbol, ex_date ASC"
+        )
+        rows = cur.fetchall()
+    finally:
+        release_connection(conn)
+
+    result: Dict[str, List[Dict]] = {}
+    for nse_symbol, ex_date, adj_factor, event_type in rows:
+        result.setdefault(nse_symbol, []).append({
+            "ex_date":    ex_date,
+            "adj_factor": float(adj_factor),
+            "event_type": event_type,
+        })
+    return result
 
 
 def _format_trade_signal(row: Dict) -> Dict:

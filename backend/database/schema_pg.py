@@ -351,6 +351,22 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS default_account TEXT DEFAULT 'PAPER';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR';
 """
 
+# Migration: widen trade_signals UNIQUE from (symbol, date) to (symbol, date, horizon)
+# so that 6 per-horizon signals can coexist for the same stock on the same day.
+SQL_TRADE_SIGNALS_MIGRATE = [
+    "ALTER TABLE trade_signals DROP CONSTRAINT IF EXISTS trade_signals_symbol_generated_date_key",
+    """DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'trade_signals_symbol_date_horizon_key'
+        ) THEN
+            ALTER TABLE trade_signals
+              ADD CONSTRAINT trade_signals_symbol_date_horizon_key
+              UNIQUE (symbol, generated_date, model_horizon);
+        END IF;
+    END $$""",
+]
+
 SQL_MARKET_OVERVIEW = """
 CREATE TABLE IF NOT EXISTS market_overview (
     date                    DATE PRIMARY KEY,
@@ -438,6 +454,34 @@ CREATE TABLE IF NOT EXISTS news_sentiment (
     url          TEXT,
     created_at   TIMESTAMPTZ DEFAULT NOW()
 );
+"""
+
+SQL_AV_COVERAGE_TRACKER = """
+CREATE TABLE IF NOT EXISTS av_coverage_tracker (
+    nse_symbol      TEXT PRIMARY KEY,
+    adr_ticker      TEXT NOT NULL,
+    last_covered    DATE,
+    articles_total  INT DEFAULT 0,
+    attempt_count   INT DEFAULT 0
+);
+"""
+
+SQL_CORPORATE_ACTIONS = """
+CREATE TABLE IF NOT EXISTS corporate_actions (
+    id              BIGSERIAL PRIMARY KEY,
+    nse_symbol      TEXT NOT NULL,
+    ticker          TEXT NOT NULL,
+    ex_date         DATE NOT NULL,
+    event_type      TEXT NOT NULL,
+    ratio           TEXT,
+    adj_factor      DOUBLE PRECISION,
+    notes           TEXT,
+    source          TEXT DEFAULT 'trendlyne',
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (nse_symbol, ex_date, event_type)
+);
+CREATE INDEX IF NOT EXISTS idx_corp_actions_symbol  ON corporate_actions (nse_symbol);
+CREATE INDEX IF NOT EXISTS idx_corp_actions_ex_date ON corporate_actions (ex_date DESC);
 """
 
 # ---------------------------------------------------------------------------
@@ -581,6 +625,8 @@ def init_timescale(conn) -> None:
         SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG,
         SQL_PASSWORD_RESET_OTPS, SQL_USER_SESSIONS,
         SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
+        SQL_AV_COVERAGE_TRACKER,
+        SQL_CORPORATE_ACTIONS,
     ]:
         cur.execute(sql)
 
@@ -593,6 +639,15 @@ def init_timescale(conn) -> None:
             except Exception as e:
                 conn.rollback()
                 logger.warning(f"ALTER TABLE users: {e}")
+
+    # Widen trade_signals UNIQUE constraint to include model_horizon (per-horizon signals)
+    for stmt in SQL_TRADE_SIGNALS_MIGRATE:
+        try:
+            cur.execute(stmt)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"trade_signals migration: {e}")
 
     # Hypertable candidates
     for sql in [SQL_PRICES, SQL_TECHNICAL_INDICATORS, SQL_NEWS_SENTIMENT]:

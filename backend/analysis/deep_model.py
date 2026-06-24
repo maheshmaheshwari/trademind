@@ -32,8 +32,8 @@ def train_tabnet(
     X_val: pd.DataFrame,
     y_val: pd.Series,
     pos_weight: float = 1.0,
-    max_epochs: int = 200,
-    patience: int = 20,
+    max_epochs: int = 100,
+    patience: int = 15,
 ):
     """
     Train a TabNet classifier on tabular financial data.
@@ -62,10 +62,12 @@ def train_tabnet(
         from pytorch_tabnet.tab_model import TabNetClassifier
         import torch
 
-        # Auto-detect device: MPS (Apple Silicon) > CUDA > CPU
-        if torch.backends.mps.is_available():
-            device = "mps"
-        elif torch.cuda.is_available():
+        # Prevent OpenMP deadlock: PyTorch's batch_norm uses __kmpc_fork_call (libomp),
+        # which conflicts with macOS Accelerate's GCD thread pool after heavy pandas/numpy work.
+        torch.set_num_threads(1)
+
+        # MPS (Apple Silicon) hangs on pytorch-tabnet's DataLoader — use CPU
+        if torch.cuda.is_available():
             device = "cuda"
         else:
             device = "cpu"
@@ -89,6 +91,10 @@ def train_tabnet(
         # Class weights to handle imbalance
         class_weights = {0: 1.0, 1: float(pos_weight)}
 
+        # virtual_batch_size must equal batch_size to disable Ghost Batch Norm.
+        # Ghost Batch Norm (virtual_batch_size < batch_size) calls batch_norm_cpu
+        # in a way that deadlocks on macOS ARM (Apple Silicon).
+        bs = min(256, len(X_tr))
         clf.fit(
             X_train=X_tr.values.astype(np.float32),
             y_train=y_tr.values,
@@ -97,8 +103,8 @@ def train_tabnet(
             max_epochs=max_epochs,
             patience=patience,
             weights=class_weights,
-            batch_size=min(256, len(X_tr)),
-            virtual_batch_size=min(128, len(X_tr) // 2),
+            batch_size=bs,
+            virtual_batch_size=bs,
             drop_last=False,
         )
 

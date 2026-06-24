@@ -24,6 +24,10 @@ _TOKENS_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "..", "data", "angel_tokens.json"
 )
+_SIGNALS_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "..", "data", "trade_signals_latest.json"
+)
 _SECTOR_MAP: dict = {}
 try:
     with open(_TOKENS_FILE) as f:
@@ -93,16 +97,19 @@ def _build_signal_map() -> dict:
 
                 sent_val = (sentiment.get("sent_stock") or sentiment.get("mkt_sentiment") or 0)
 
+                pos = t.get("position") or {}
                 sig_map[sym] = {
-                    "signal":               signal,
-                    "confidence":           round(float(t.get("confidence") or 0)),
-                    "horizon":              horizon,
-                    "expected_return_pct":  exp_ret,
-                    "expReturn":            exp_ret,      # alias for frontend Stock type
-                    "sentiment":            round(float(sent_val), 4),
-                    "updatedMin":           updated_min,
-                    "target_price":         trade.get("target_price"),
-                    "stop_loss":            trade.get("stop_loss"),
+                    "signal":                        signal,
+                    "confidence":                    round(float(t.get("confidence") or 0)),
+                    "horizon":                       horizon,
+                    "expected_return_pct":           exp_ret,
+                    "expReturn":                     exp_ret,
+                    "sentiment":                     round(float(sent_val), 4),
+                    "updatedMin":                    updated_min,
+                    "target_price":                  trade.get("target_price"),
+                    "stop_loss":                     trade.get("stop_loss"),
+                    "suggested_qty_per_user":        pos.get("suggested_qty_per_user"),
+                    "suggested_investment_per_user": pos.get("suggested_investment_per_user"),
                 }
         return sig_map
     except Exception as exc:
@@ -514,6 +521,25 @@ async def get_stock_detail(symbol: str):
                 model_precision = float(row[21]) if row[21] is not None else None
                 consumed_vol    = int(row[22])   if row[22] is not None else 0
                 recommended_vol = int(row[23])   if row[23] is not None else 0
+
+        # ── 2b. Fallback: read position sizing from JSON if DB has nulls ──────
+        if max_qty_user is None:
+            try:
+                with open(_SIGNALS_FILE) as _f:
+                    _raw = json.load(_f)
+                for _cat in ("actionable_trades", "avoid_list", "hold_list"):
+                    for _t in _raw.get(_cat, []):
+                        if _t.get("symbol") == sym:
+                            _pos = _t.get("position") or {}
+                            v = _pos.get("suggested_qty_per_user")
+                            if v is not None:
+                                max_qty_user = int(v)
+                            v = _pos.get("suggested_investment_per_user")
+                            if v is not None:
+                                max_invest = float(v)
+                            break
+            except Exception:
+                pass
 
         # ── 3. Technical indicators (latest row) ──────────────────────────────
         ti_row = _execute(conn, """

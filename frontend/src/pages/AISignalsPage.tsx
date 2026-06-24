@@ -1,13 +1,12 @@
 import { useDeferredValue, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
-import { useGetStocksQuery } from '../services/tradeMindApiService';
+import { useGetAllSignalsQuery } from '../services/tradeMindApiService';
+import type { AllSignal } from '../services/tradeMindApiService';
 import {
   Card, SignalBadge, SkeletonRows,
   SymbolCell, Conf, Pager, useSort, Th, PlainTh, Td,
 } from '../components/ui';
-
-import type { Stock } from '../types';
 
 const HORIZONS = ['All', '1W', '2W', '1M', '2M', '3M', '6M'] as const;
 const SIGNALS  = ['All', 'BUY', 'SELL', 'HOLD'] as const;
@@ -33,34 +32,31 @@ export default function AISignalsPage() {
   const { sort, toggle } = useSort('confidence');
   const dSearch = useDeferredValue(search);
 
-  const { data: res, isLoading: loading } = useGetStocksQuery({ size: 500 });
-  // Cast to any — API returns extra fields (expReturn, updatedMin, sentiment) alongside Stock fields
-  const allStocks: any[] = (res as any)?.data ?? [];
-  // Only show stocks that have a signal
-  const signalStocks = allStocks.filter(s => s.signal != null && s.confidence != null);
+  const { data: res, isLoading: loading } = useGetAllSignalsQuery();
+  const allSignals: AllSignal[] = res?.signals ?? [];
 
-  const filtered = useMemo(() => [...signalStocks]
+  const filtered = useMemo(() => [...allSignals]
     .filter(s =>
-      (sigType  === 'All' || s.signal   === sigType)  &&
-      (horizon  === 'All' || s.horizon  === horizon)  &&
-      (sector   === 'All' || s.sector   === sector)   &&
+      (sigType  === 'All' || s.signal  === sigType)  &&
+      (horizon  === 'All' || s.horizon === horizon)  &&
+      (sector   === 'All' || s.sector  === sector)   &&
       (s.confidence ?? 0) >= conf &&
-      (!dSearch || s.symbol?.toLowerCase()?.includes(dSearch.toLowerCase()) ||
-                   s.name?.toLowerCase()?.includes(dSearch.toLowerCase()))
+      (!dSearch || s?.symbol?.toLowerCase()?.includes(dSearch.toLowerCase()) ||
+                   s?.name?.toLowerCase()?.includes(dSearch.toLowerCase()))
     )
     .sort((a, b) => {
-      const va = a[sort.key as keyof Stock], vb = b[sort.key as keyof Stock];
+      const va = a[sort.key as keyof AllSignal], vb = b[sort.key as keyof AllSignal];
       let cmp = 0;
       if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
       else if (typeof va === 'string' && typeof vb === 'string') cmp = va.localeCompare(vb);
       return sort.dir === 'asc' ? cmp : -cmp;
-    }), [allStocks, sigType, horizon, sector, conf, dSearch, sort]);
+    }), [allSignals, sigType, horizon, sector, conf, dSearch, sort]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const rows  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   const counts = { BUY: 0, SELL: 0, HOLD: 0 };
-  signalStocks.forEach(s => { if (s.signal in counts) counts[s.signal as keyof typeof counts]++; });
+  (allSignals ?? []).forEach(s => { if (s?.signal in counts) counts[s.signal as keyof typeof counts]++; });
 
   const segBtn = (active: boolean) =>
     `border-none font-sans text-[12.5px] font-semibold px-3 py-[6px] rounded-[7px] cursor-pointer transition-colors ${
@@ -75,7 +71,7 @@ export default function AISignalsPage() {
         <div>
           <h1 className="font-bold tracking-tight m-0 text-ink" style={{ fontSize: 'calc(25px * var(--u))' }}>AI Signals</h1>
           <p className="text-ink-2 text-[13.5px] mt-1 m-0">
-            Machine-learning signals across all <b className="tabular-nums">498</b> Nifty 500 constituents · refreshed every 15 min
+            Machine-learning signals across all horizons · <b className="tabular-nums">{loading ? '…' : (res?.total_stocks ?? 0)}</b> stocks · <b className="tabular-nums">{loading ? '…' : (res?.count ?? 0)}</b> signals
           </p>
         </div>
         {!loading && (
@@ -167,9 +163,9 @@ export default function AISignalsPage() {
                 <tr><td colSpan={8} className="text-center py-[50px] px-5 text-ink-3">
                   No signals match your filters. Try lowering the confidence threshold.
                 </td></tr>
-              ) : rows.map(s => (
-                <tr key={s.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)}>
-                  <Td><SymbolCell symbol={s.symbol} name={s.name} sector={s.sector} showSector={false} /></Td>
+              ) : (rows ?? []).map(s => (
+                <tr key={`${s?.symbol}-${s?.horizon}`} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)}>
+                  <Td><SymbolCell symbol={s?.symbol} name={s?.name} sector={s?.sector} showSector={false} /></Td>
                   <Td>
                     <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 border border-line"
                       style={{ color: SECTOR_COLORS[s.sector] ?? 'var(--text-2)' }}>{s.sector}</span>

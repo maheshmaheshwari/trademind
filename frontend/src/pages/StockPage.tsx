@@ -5,14 +5,16 @@ import { ArrowLeft, Bookmark, AlertTriangle } from 'lucide-react';
 import {
   useLazyGetStockDetailQuery,
   useGetPositionsQuery,
+  useGetOrdersQuery,
   useExecuteSignalMutation,
+  useSquareOffMutation,
   useAddToWatchlistMutation,
   useGetStockHistoryQuery,
 } from '../services/tradeMindApiService';
 import { useAuth } from '../AuthContext';
 import { useToast, symColor } from '../components/ui';
 import { AreaChart } from '../components/Charts';
-import type { NewsItem, HorizonBreakdown, OpenPosition } from '../types';
+import type { NewsItem, HorizonBreakdown, OpenPosition, Trade } from '../types';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +53,179 @@ const SENT_TAG: Record<string, [string, string, string]> = {
   neg: ['Bearish', 'var(--red)',    'var(--red-soft)'],
   neu: ['Neutral', 'var(--text-2)', 'var(--surface-3)'],
 };
+
+// ─── Your Position card ───────────────────────────────────────────────────────
+
+function YourPosition({ position, currentPrice, onClose, closing }: {
+  position: OpenPosition; currentPrice: number;
+  onClose: () => void; closing: boolean;
+}) {
+  const qty          = position?.quantity ?? 0;
+  const avgBuy       = position?.avg_buy_price ?? 0;
+  const invested     = qty * avgBuy;
+  const currentValue = qty * currentPrice;
+  const pnl          = position?.unrealized_pnl ?? (currentValue - invested);
+  const pnlPct       = position?.unrealized_pnl_pct ?? (avgBuy > 0 ? ((currentPrice - avgBuy) / avgBuy) * 100 : 0);
+  const target       = position?.target_price ?? 0;
+  const sl           = position?.stop_loss ?? 0;
+  const isProfit     = pnl >= 0;
+  const pnlColor     = isProfit ? 'var(--green)' : 'var(--red)';
+  const pnlBg        = isProfit ? 'var(--green-soft)' : 'var(--red-soft)';
+
+  const totalRange   = target - sl;
+  const progressPct  = totalRange > 0
+    ? Math.max(0, Math.min(100, ((currentPrice - sl) / totalRange) * 100))
+    : 50;
+
+  const days = position?.created_at
+    ? Math.floor((Date.now() - new Date(position.created_at).getTime()) / 86400000)
+    : null;
+
+  const toTargetPct = target > 0 && currentPrice > 0
+    ? ((target - currentPrice) / currentPrice) * 100
+    : null;
+
+  return (
+    <div style={{ background: 'var(--surface)', border: `1px solid ${isProfit ? 'rgba(16,185,129,.3)' : 'rgba(239,68,68,.3)'}`, borderRadius: 14, padding: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: pnlColor, display: 'inline-block' }} />
+          Your Position
+        </h4>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {days !== null && (
+            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{days === 0 ? 'Opened today' : `${days}d held`}</span>
+          )}
+          <span style={{ display: 'inline-flex', alignItems: 'center', height: 20, padding: '0 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, color: pnlColor, background: pnlBg }}>
+            {isProfit ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(2)}%
+          </span>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 1, background: 'var(--border)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', marginBottom: 14 }}>
+        {([
+          ['Quantity',    `${qty?.toLocaleString('en-IN') || 0} sh`,   undefined],
+          ['Avg Buy',     inr(avgBuy),                                  undefined],
+          ['Unrealised',  signed(pnl, 0),                               pnlColor],
+          ['Invested',    inrCompact(invested),                         undefined],
+          ['Cur. Value',  inrCompact(currentValue),                     undefined],
+          ['Stop Loss',   inr(sl),                                      'var(--red)'],
+        ] as [string, string, string | undefined][]).map(([label, value, col]) => (
+          <div key={label} style={{ background: 'var(--surface)', padding: '11px 13px' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>{label}</div>
+            <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 13, color: col ?? 'var(--text)' }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {target > 0 && sl > 0 && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--red)', fontFamily: 'var(--font-mono,monospace)', fontWeight: 600 }}>SL {inr(sl)}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-3)' }}>price range</span>
+            <span style={{ fontSize: 11, color: 'var(--green)', fontFamily: 'var(--font-mono,monospace)', fontWeight: 600 }}>TGT {inr(target)}</span>
+          </div>
+          <div style={{ position: 'relative', height: 8, borderRadius: 99, background: 'var(--surface-3)', overflow: 'visible', marginBottom: 8 }}>
+            <div style={{ height: '100%', width: `${progressPct}%`, borderRadius: 99, background: isProfit ? 'var(--green)' : 'var(--gold)', transition: 'width .4s ease' }} />
+            <div style={{ position: 'absolute', top: '50%', left: `${progressPct}%`, transform: 'translate(-50%,-50%)', width: 12, height: 12, borderRadius: '50%', background: 'var(--text)', border: '2px solid var(--surface)', boxShadow: '0 1px 4px rgba(0,0,0,.3)' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            {toTargetPct !== null && (
+              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                To target: <span style={{ color: toTargetPct >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                  {toTargetPct >= 0 ? '+' : ''}{toTargetPct.toFixed(1)}%
+                </span>
+              </span>
+            )}
+            <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 'auto' }}>
+              Target value: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{inrCompact(qty * target)}</span>
+            </span>
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={onClose}
+        disabled={closing}
+        style={{
+          marginTop: 14, width: '100%', height: 38, borderRadius: 10,
+          fontFamily: 'inherit', fontSize: 13, fontWeight: 600, border: 'none',
+          background: '#EF4444', color: '#fff', cursor: closing ? 'not-allowed' : 'pointer',
+          opacity: closing ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+          boxShadow: '0 4px 14px rgba(239,68,68,.25)',
+        }}
+      >
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        {closing ? 'Closing…' : `Close Position · ${qty?.toLocaleString('en-IN') || 0} sh`}
+      </button>
+    </div>
+  );
+}
+
+// ─── Trade History card ───────────────────────────────────────────────────────
+
+function TradeHistory({ orders }: { orders: Trade[] }) {
+  if (!orders.length) return null;
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
+      <h4 style={{ margin: '0 0 14px', fontSize: 13.5, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-3)' }}>
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+        Your Trade History
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', height: 18, padding: '0 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: 'var(--surface-3)', color: 'var(--text-2)' }}>
+          {orders?.length || 0} trade{(orders?.length ?? 0) !== 1 ? 's' : ''}
+        </span>
+      </h4>
+
+      {/* Header row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px 64px 88px 88px 70px', gap: 0, background: 'var(--surface-2)', padding: '7px 13px', borderRadius: '9px 9px 0 0', border: '1px solid var(--border)', borderBottom: 'none' }}>
+        {['Date', 'Type', 'Qty', 'Price', 'Value', 'P&L'].map(h => (
+          <div key={h} style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)' }}>{h}</div>
+        ))}
+      </div>
+
+      <div style={{ border: '1px solid var(--border)', borderRadius: '0 0 9px 9px', overflow: 'hidden' }}>
+        {(orders ?? []).map((o, idx) => {
+          const isBuy  = o?.order_type === 'BUY';
+          const pnl    = o?.pnl;
+          const val    = o?.value != null ? o.value : (o?.quantity ?? 0) * (o?.price ?? 0);
+          const dateStr = o?.created_at
+            ? new Date(o.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })
+            : '—';
+          const timeStr = o?.created_at
+            ? new Date(o.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+            : '';
+          return (
+            <div key={o?.id ?? idx} style={{ display: 'grid', gridTemplateColumns: '1fr 56px 64px 88px 88px 70px', gap: 0, background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)', padding: '10px 13px', alignItems: 'center', borderTop: idx === 0 ? 'none' : '1px solid var(--border)' }}>
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text)' }}>{dateStr}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{timeStr}</div>
+              </div>
+              <div>
+                <span style={{ display: 'inline-flex', alignItems: 'center', height: 20, padding: '0 7px', borderRadius: 5, fontSize: 11, fontWeight: 700, background: isBuy ? 'var(--green-soft)' : 'var(--red-soft)', color: isBuy ? 'var(--green)' : 'var(--red)' }}>
+                  {o?.order_type ?? '—'}
+                </span>
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 12.5, color: 'var(--text)', fontWeight: 600 }}>
+                {(o?.quantity ?? 0)?.toLocaleString('en-IN') || 0}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 12.5, color: 'var(--text)' }}>
+                {inr(o?.price ?? 0)}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 12.5, color: 'var(--text-2)' }}>
+                {inrCompact(val)}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 12.5, fontWeight: 600, color: pnl == null ? 'var(--text-3)' : pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {pnl != null ? signed(pnl, 0) : '—'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // ─── Partial capacity modal ────────────────────────────────────────────────────
 
@@ -103,7 +278,10 @@ function PartialCapacityModal({ symbol, requested, available, onConfirm, onCance
 
 // ─── Capacity meter ────────────────────────────────────────────────────────────
 
-function CapacityMeter({ consumed, total, suggested }: { consumed: number; total: number; suggested: number }) {
+function CapacityMeter({ consumed, total, suggested, affordable, cantAffordFull, extraNeeded }: {
+  consumed: number; total: number; suggested: number;
+  affordable: number; cantAffordFull: boolean; extraNeeded: number;
+}) {
   if (!total) return null;
   const pct      = Math.min(100, Math.round((consumed / total) * 100));
   const barColor = pct >= 80 ? 'var(--red)' : pct >= 50 ? 'var(--gold)' : 'var(--green)';
@@ -120,11 +298,19 @@ function CapacityMeter({ consumed, total, suggested }: { consumed: number; total
         <div style={{ height: '100%', width: `${pct}%`, borderRadius: 99, background: barColor, transition: 'width .4s ease' }} />
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Suggested for you</span>
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{cantAffordFull ? 'With your balance' : 'Suggested for you'}</span>
         <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent-2)', fontFamily: 'var(--font-mono,monospace)' }}>
-          {suggested?.toLocaleString('en-IN') || 0} shares
+          {(cantAffordFull ? affordable : suggested)?.toLocaleString('en-IN') || 0} shares
         </span>
       </div>
+      {cantAffordFull && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 }}>
+          <span style={{ fontSize: 10.5, color: 'var(--text-3)' }}>Full suggestion: {suggested?.toLocaleString('en-IN') || 0} shares</span>
+          <span style={{ fontSize: 10.5, color: 'var(--gold)', fontFamily: 'var(--font-mono,monospace)' }}>
+            Need {inr(extraNeeded, 0)} more
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -144,12 +330,15 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
   const maxBuy     = price > 0 ? Math.floor(balance / price) : 0;
   const qtyNum     = Math.max(0, parseInt(qty) || 0);
   const totalCost  = qtyNum * price;
-  const suggestedQty = data?.suggested_qty_per_user ?? 0;
+  const suggestedQty   = data?.suggested_qty_per_user ?? 0;
+  const affordableQty  = suggestedQty > 0 ? Math.min(suggestedQty, maxBuy) : 0;
+  const cantAffordFull = suggestedQty > 0 && maxBuy < suggestedQty;
+  const extraNeeded    = cantAffordFull ? (suggestedQty - maxBuy) * price : 0;
   const estSL      = +(price * 0.93).toFixed(2);
   const estTarget  = +(price * 1.12).toFixed(2);
 
   useEffect(() => {
-    if (suggestedQty > 0 && qty === '') setQty(String(suggestedQty));
+    if (suggestedQty > 0 && qty === '') setQty(String(affordableQty));
   }, [suggestedQty]);
 
   const consumed    = data?.consumed_volume ?? 0;
@@ -251,7 +440,7 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
   // BUY / HOLD
   return (
     <div style={{ padding: '18px', background: 'var(--surface-2)', borderRadius: 14, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 0 }}>
-      {showCapacity && <CapacityMeter consumed={consumed} total={recommended} suggested={suggestedQty} />}
+      {showCapacity && <CapacityMeter consumed={consumed} total={recommended} suggested={suggestedQty} affordable={affordableQty} cantAffordFull={cantAffordFull} extraNeeded={extraNeeded} />}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, padding: '12px', background: 'var(--surface)', borderRadius: 10, marginBottom: 12 }}>
         {[['Available', inrCompact(balance)], ['Est. SL', `${inr(estSL)} -7%`], ['Est. Target', `${inr(estTarget)} +12%`]].map(([l, v], i) => (
@@ -275,7 +464,12 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
         </div>
       </div>
 
-      {insufficient && <p style={{ fontSize: 12, color: 'var(--red)', margin: '0 0 8px' }}>Total cost {inr(totalCost)} exceeds balance {inrCompact(balance)}.</p>}
+      {insufficient && (
+        <p style={{ fontSize: 12, color: 'var(--red)', margin: '0 0 8px' }}>
+          Total cost {inr(totalCost)} exceeds balance {inrCompact(balance)}.{' '}
+          <span style={{ color: 'var(--gold)' }}>Add {inr(totalCost - balance, 0)} to buy {qtyNum?.toLocaleString('en-IN') || 0} shares.</span>
+        </p>
+      )}
       {showCapacity && qtyNum > remaining && remaining > 0 && !insufficient && (
         <p style={{ fontSize: 12, color: 'var(--gold)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 5 }}>
           <AlertTriangle size={13} style={{ flexShrink: 0 }} /> Only {remaining?.toLocaleString('en-IN') || 0} shares of capacity left.
@@ -331,11 +525,32 @@ export default function StockPage() {
   const { symbol = '' } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
   const { user }  = useAuth();
+  const toast     = useToast();
   const [chartRange, setChartRange] = useState<'1D' | '1W' | '1M' | '3M' | '1Y'>('1M');
 
   const [fetchDetail, { data: detailRes, isLoading: loadDetail }] = useLazyGetStockDetailQuery();
   const { data: posRes } = useGetPositionsQuery({ userId: user!.id, size: 100 }, { skip: !user || !symbol });
   const { data: histRes, isFetching: loadHist } = useGetStockHistoryQuery({ symbol, range: chartRange }, { skip: !symbol });
+  const { data: ordersRes } = useGetOrdersQuery(
+    { userId: user!.id, limit: 500, size: 500, globalFilter: symbol },
+    { skip: !user || !symbol },
+  );
+  const [squareOff, { isLoading: closing }] = useSquareOffMutation();
+
+  async function handleClosePosition() {
+    if (!user || !symbol || !position) return;
+    try {
+      const res = await squareOff({ userId: user.id, symbol }).unwrap();
+      const pnl = (res as any)?.realized_pnl ?? position?.unrealized_pnl ?? 0;
+      toast({
+        type: pnl >= 0 ? 'success' : 'info',
+        title: `Closed ${symbol}`,
+        msg: `Realised ${pnl >= 0 ? '+' : ''}₹${Number(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+      });
+    } catch (e: unknown) {
+      toast({ type: 'error', title: 'Close failed', msg: e instanceof Error ? e.message : 'Try again' });
+    }
+  }
 
   useEffect(() => {
     if (symbol) fetchDetail(symbol);
@@ -343,6 +558,7 @@ export default function StockPage() {
 
   const data: StockDetail | null = (detailRes as any)?.data ?? null;
   const position: OpenPosition | null = ((posRes as any)?.data ?? []).find((p: OpenPosition) => p?.symbol === symbol) ?? null;
+  const stockOrders: Trade[] = ((ordersRes as any)?.data ?? []).filter((o: Trade) => o?.symbol === symbol);
 
   const histPrices    = histRes?.prices ?? [];
   const histLabels    = histRes?.labels ?? [];
@@ -453,6 +669,16 @@ export default function StockPage() {
             }
           </div>
 
+          {/* Your Position */}
+          {position && data && (
+            <YourPosition
+              position={position}
+              currentPrice={data?.price ?? 0}
+              onClose={handleClosePosition}
+              closing={closing}
+            />
+          )}
+
           {/* Key metrics */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
             <h4 style={sectionTitle}>Key Metrics</h4>
@@ -546,6 +772,9 @@ export default function StockPage() {
               })
             }
           </div>
+
+          {/* Trade History */}
+          <TradeHistory orders={stockOrders} />
         </div>
 
         {/* ── Right column: sticky trade panel ── */}

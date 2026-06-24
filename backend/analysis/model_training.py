@@ -31,7 +31,7 @@ try:
 except ImportError:
     _CATBOOST_AVAILABLE = False
 
-from database.db import get_connection, release_connection
+from database.db import get_connection, release_connection, get_all_corporate_actions
 import json as _json
 import os as _os
 
@@ -71,7 +71,7 @@ def prefetch_all_data(symbols: list = None) -> None:
     try:
         # ── 1. Prices + indicators + market overview + delivery (one big JOIN) ──
         log.info("   Loading prices + indicators + market + delivery...")
-        conn.cursor().execute("SET statement_timeout = '120s'")
+        conn.cursor().execute("SET statement_timeout = '600s'")
         df_all = _query_to_df(conn, """
             SELECT
                 p.symbol, p.date,
@@ -96,7 +96,7 @@ def prefetch_all_data(symbols: list = None) -> None:
             LEFT JOIN delivery_data d        ON p.symbol = d.symbol AND p.date = d.date
             WHERE p.interval = '1d'
             ORDER BY p.symbol, p.date ASC
-        """, timeout="120s")
+        """, timeout="600s")
         log.info(f"   Prices loaded: {len(df_all):,} rows across {df_all['symbol'].nunique()} symbols")
 
         # ── 2. Stock-level news sentiment ─────────────────────────────────────
@@ -112,7 +112,7 @@ def prefetch_all_data(symbols: list = None) -> None:
             FROM news_daily_sentiment
             WHERE symbol IS NOT NULL
             ORDER BY symbol, date ASC
-        """, timeout="60s")
+        """, timeout="120s")
         log.info(f"   Sentiment loaded: {len(df_sent):,} rows")
 
         # ── 3. Market-wide sentiment ──────────────────────────────────────────
@@ -156,6 +156,12 @@ def prefetch_all_data(symbols: list = None) -> None:
     sent_fill_cols = ['sent_stock','news_count_stock','news_pos','news_neg',
                       'sent_max_pos','sent_max_neg']
 
+    # Load corporate actions once — applied per symbol inside the loop below
+    corp_actions_map = get_all_corporate_actions()
+    affected = [s for s in corp_actions_map if s in df_all['symbol'].values]
+    log.info(f"   Corporate actions: {len(corp_actions_map)} symbols with events "
+             f"({len(affected)} present in this dataset)")
+
     target_symbols = symbols if symbols else df_all['symbol'].unique().tolist()
 
     for sym in target_symbols:
@@ -182,6 +188,14 @@ def prefetch_all_data(symbols: list = None) -> None:
             if col not in sym_df.columns:
                 sym_df[col] = 0.0
             sym_df[col] = pd.to_numeric(sym_df[col], errors='coerce').fillna(0)
+
+        # Corporate action price adjustment + indicator recompute
+        actions = corp_actions_map.get(sym, [])
+        if actions:
+            sym_df = _apply_price_adjustment(sym_df, actions)
+            sym_df = _recompute_indicators(sym_df)
+            log.info(f"   {sym}: adjusted for {len(actions)} corporate event(s) "
+                     f"(combined adj_factor={round(np.prod([a['adj_factor'] for a in actions]),4)})")
 
         _DATA_CACHE[sym] = sym_df
 
@@ -265,6 +279,21 @@ HORIZONS = {
     120: ("6 Months", 10.0),
 }
 
+# Short display keys used in artifact["horizons"] and trade_signals.model_horizon
+HORIZON_SHORT = {
+    "1 Week":   "1W",
+    "2 Weeks":  "2W",
+    "1 Month":  "1M",
+    "2 Months": "2M",
+    "3 Months": "3M",
+    "6 Months": "6M",
+}
+
+# Minimum quality bar for a per-horizon model to be included in the artifact.
+# Horizons whose best model falls below either threshold are silently dropped.
+MIN_HORIZON_ACC  = 0.60
+MIN_HORIZON_PREC = 0.60
+
 
 class PurgedTimeSeriesSplit:
     """
@@ -301,6 +330,108 @@ def _query_to_df(conn, sql: str, params: tuple = (), timeout: str = "30s") -> pd
     cur.execute("SET statement_timeout = 0")  # reset after query
     cur.close()
     return pd.DataFrame(rows, columns=cols)
+
+
+# Indicator columns stored in technical_indicators table (computed from raw prices).
+# Must be dropped and recomputed when prices are adjusted for corporate actions.
+_STORED_INDICATOR_COLS = [
+    "sma_20", "sma_50", "sma_200", "ema_9", "ema_21",
+    "rsi_14", "macd", "macd_signal", "macd_hist",
+    "bb_upper", "bb_lower", "bb_middle",
+    "atr_14", "adx_14", "stoch_k", "stoch_d", "obv",
+    "support_1", "support_2", "support_3",
+    "resistance_1", "resistance_2", "resistance_3",
+]
+
+
+def _apply_price_adjustment(sym_df: pd.DataFrame, actions: list) -> pd.DataFrame:
+    """
+    Apply backward OHLC adjustment for corporate actions, oldest→newest.
+
+    For each event all rows before ex_date are multiplied by adj_factor so
+    the entire price series lands on the current (post-event) price scale.
+    Multiple events compound naturally: a row before two events is multiplied
+    by both factors in sequence.
+
+    Sanity check: compare the actual price ratio at ex_date against a midpoint
+    between adj_factor and 1.0.  If the ratio lands above that midpoint the
+    provider has already adjusted prices retroactively — skip to avoid
+    double-adjustment.  Angel One is known to adjust historical candles after
+    corporate events.
+
+    Volume for Split events is multiplied by 1/adj_factor to normalise traded
+    quantity to the post-split share count.  Bonus issues leave volume unchanged.
+    """
+    import logging as _log
+    _logger = _log.getLogger(__name__)
+    sym_df     = sym_df.copy()
+    price_cols = [c for c in ("open", "high", "low", "close") if c in sym_df.columns]
+    today      = pd.Timestamp.now().normalize()
+
+    for action in actions:   # already sorted ex_date ASC by get_all_corporate_actions()
+        ex_date    = pd.Timestamp(action["ex_date"])
+        adj        = action["adj_factor"]
+        event_type = action["event_type"]
+
+        # Skip events whose ex_date is in the future — no data yet
+        if ex_date > today:
+            continue
+
+        mask = sym_df.index < ex_date
+        if not mask.any():
+            continue
+
+        # Sanity check: find the first trading day on or after ex_date,
+        # compare its close to the previous day's close.
+        # Expected (unadjusted data): actual_ratio ≈ adj_factor
+        # Already-adjusted data:      actual_ratio ≈ 1.0
+        # Threshold = midpoint between the two: (1.0 + adj) / 2
+        # If actual_ratio > threshold → already adjusted → skip.
+        if "close" in sym_df.columns:
+            post_dates = sym_df.index[sym_df.index >= ex_date]
+            if len(post_dates) > 0:
+                loc = sym_df.index.get_loc(post_dates[0])
+                if loc > 0:
+                    prev_c = float(sym_df["close"].iloc[loc - 1])
+                    curr_c = float(sym_df["close"].iloc[loc])
+                    if prev_c > 0:
+                        actual_ratio = curr_c / prev_c
+                        threshold    = (1.0 + adj) / 2   # midpoint
+                        if actual_ratio > threshold:
+                            _logger.info(
+                                f"  Skipping {event_type} {ex_date.date()}: "
+                                f"ratio={actual_ratio:.3f} > threshold={threshold:.3f} "
+                                "(provider already adjusted)"
+                            )
+                            continue
+
+        sym_df.loc[mask, price_cols] = sym_df.loc[mask, price_cols] * adj
+        if "Split" in event_type and "volume" in sym_df.columns and adj > 0:
+            sym_df.loc[mask, "volume"] = sym_df.loc[mask, "volume"] / adj
+        _logger.info(
+            f"  Applied {event_type} {ex_date.date()} adj={adj} "
+            f"to {mask.sum()} rows"
+        )
+
+    return sym_df
+
+
+def _recompute_indicators(sym_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop raw stored indicator columns and recompute from adjusted OHLCV.
+
+    Stored indicators were computed from unadjusted prices; after price
+    adjustment they are on a different scale from close and must be replaced.
+    calculate_all() returns a new df with all indicator columns added.
+    """
+    from analysis.indicators import calculate_all
+    sym_df = sym_df.drop(columns=[c for c in _STORED_INDICATOR_COLS if c in sym_df.columns])
+    try:
+        sym_df = calculate_all(sym_df)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"_recompute_indicators failed: {e} — continuing without indicators")
+    return sym_df
 
 
 def load_data_for_symbol(symbol: str) -> pd.DataFrame:
@@ -717,7 +848,8 @@ def _tune_xgboost(Xtr, ytr, Xval, yval, pos_weight, n_trials: int = 30):
                 "scale_pos_weight": pos_weight,
                 "eval_metric": "logloss", "random_state": 42, "verbosity": 0,
             }
-            m = xgb.XGBClassifier(**params, early_stopping_rounds=20)
+            # nthread=1 prevents OpenMP deadlock with macOS Accelerate (GCD conflict)
+            m = xgb.XGBClassifier(**params, early_stopping_rounds=20, nthread=1)
             m.fit(Xtr, ytr, eval_set=[(Xval, yval)], verbose=False)
             proba = m.predict_proba(Xval)[:, 1]
             thr   = _best_threshold(proba, yval)
@@ -751,7 +883,7 @@ def _tune_lightgbm(Xtr, ytr, Xval, yval, pos_weight, n_trials: int = 30):
                 "scale_pos_weight": pos_weight,
                 "random_state": 42, "verbose": -1,
             }
-            m = lgb.LGBMClassifier(**params)
+            m = lgb.LGBMClassifier(**params, num_threads=1)
             m.fit(Xtr, ytr, eval_set=[(Xval, yval)], callbacks=[lgb.early_stopping(20, verbose=False), lgb.log_evaluation(-1)])
             proba = m.predict_proba(Xval)[:, 1]
             thr   = _best_threshold(proba, yval)
@@ -855,31 +987,33 @@ def _build_models(pos_weight: float) -> dict:
     """Return a fresh dict of models, parameterised for the current class balance."""
     pw = max(1.0, pos_weight)
     models = {
+        # nthread=1 / num_threads=1: prevents OpenMP deadlock with macOS Accelerate.
+        # After heavy pandas/numpy ops, XGBoost's OpenMP init conflicts with GCD threads.
         "XGBoost": xgb.XGBClassifier(
             n_estimators=500, learning_rate=0.02, max_depth=5,
             min_child_weight=5, subsample=0.8, colsample_bytree=0.7,
             gamma=0.1, reg_alpha=0.5, reg_lambda=2.0,
-            scale_pos_weight=pw,
+            scale_pos_weight=pw, nthread=1,
             random_state=42, eval_metric='logloss', early_stopping_rounds=50),
         "XGB_HiReg": xgb.XGBClassifier(
             n_estimators=800, learning_rate=0.01, max_depth=3,
             min_child_weight=10, subsample=0.7, colsample_bytree=0.5,
             gamma=0.3, reg_alpha=2.0, reg_lambda=5.0,
-            scale_pos_weight=pw,
+            scale_pos_weight=pw, nthread=1,
             random_state=42, eval_metric='logloss', early_stopping_rounds=80),
         "LightGBM": lgb.LGBMClassifier(
             n_estimators=500, learning_rate=0.02, max_depth=5,
             num_leaves=31, min_child_samples=20,
             subsample=0.8, colsample_bytree=0.7,
             reg_alpha=0.5, reg_lambda=2.0,
-            scale_pos_weight=pw,
+            scale_pos_weight=pw, num_threads=1,
             random_state=42, verbose=-1),
         "LGB_HiReg": lgb.LGBMClassifier(
             n_estimators=800, learning_rate=0.01, max_depth=4,
             num_leaves=15, min_child_samples=30,
             subsample=0.7, colsample_bytree=0.5,
             reg_alpha=2.0, reg_lambda=5.0,
-            scale_pos_weight=pw,
+            scale_pos_weight=pw, num_threads=1,
             random_state=42, verbose=-1),
         "RandForest": RandomForestClassifier(
             n_estimators=500, max_depth=6, min_samples_leaf=15,
@@ -990,12 +1124,12 @@ def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date:
         optuna_xgb_params = {}
         optuna_lgb_params = {}
         if len(Xtr) >= 500:
-            print(f"   🔍 Optuna tuning XGBoost ({30} trials)...")
+            print(f"   🔍 Optuna tuning XGBoost ({10} trials)...")
             _val_split = int(len(Xtr) * 0.8)
             _Xopt_tr, _yopt_tr = Xtr.iloc[:_val_split], ytr.iloc[:_val_split]
             _Xopt_va, _yopt_va = Xtr.iloc[_val_split:], ytr.iloc[_val_split:]
-            optuna_xgb_params = _tune_xgboost(_Xopt_tr, _yopt_tr, _Xopt_va, _yopt_va, pos_weight, n_trials=30)
-            optuna_lgb_params = _tune_lightgbm(_Xopt_tr, _yopt_tr, _Xopt_va, _yopt_va, pos_weight, n_trials=30)
+            optuna_xgb_params = _tune_xgboost(_Xopt_tr, _yopt_tr, _Xopt_va, _yopt_va, pos_weight, n_trials=10)
+            optuna_lgb_params = _tune_lightgbm(_Xopt_tr, _yopt_tr, _Xopt_va, _yopt_va, pos_weight, n_trials=10)
             if optuna_xgb_params: print(f"   ✅ XGB best: lr={optuna_xgb_params.get('lr','?'):.4f} depth={optuna_xgb_params.get('max_depth','?')}")
             if optuna_lgb_params: print(f"   ✅ LGB best: lr={optuna_lgb_params.get('lr','?'):.4f} leaves={optuna_lgb_params.get('num_leaves','?')}")
 
@@ -1010,7 +1144,7 @@ def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date:
                     models[mn] = xgb.XGBClassifier(
                         **p, learning_rate=optuna_xgb_params.get("lr", 0.02),
                         scale_pos_weight=pos_weight, eval_metric="logloss",
-                        random_state=42, verbosity=0,
+                        random_state=42, verbosity=0, nthread=1,
                     )
         if optuna_lgb_params:
             for mn in ["LightGBM", "LGB_HiReg"]:
@@ -1019,7 +1153,7 @@ def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date:
                     p.pop("lr", None)
                     models[mn] = lgb.LGBMClassifier(
                         **p, learning_rate=optuna_lgb_params.get("lr", 0.02),
-                        scale_pos_weight=pos_weight, random_state=42, verbose=-1,
+                        scale_pos_weight=pos_weight, random_state=42, verbose=-1, num_threads=1,
                     )
 
         horizon_probas = {}  # for ensemble
@@ -1237,10 +1371,50 @@ def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date:
         for feat, imp in fi.head(10).items():
             print(f"   {feat:25s}: {imp:.4f} {'█' * int(imp * 200)}")
 
+    # ── Per-horizon best ──────────────────────────────────────────────────────
+    # For each of the 6 horizons, pick the best model independently.
+    # Stored in artifact["horizons"] so generate_trades.py can emit 6 signals.
+    from collections import defaultdict
+    _by_horizon: dict = defaultdict(dict)
+    for _k, _r in all_results.items():
+        _by_horizon[_r['horizon']][_k] = _r
+
+    horizon_bests = {}
+    for _label, _candidates in _by_horizon.items():
+        _short = HORIZON_SHORT.get(_label, _label)
+        _bk = max(_candidates, key=lambda k: _selection_score(_candidates[k]))
+        _hr = _candidates[_bk]
+        # Skip this horizon if even the best model doesn't clear the quality bar.
+        if _hr['acc'] < MIN_HORIZON_ACC or _hr['prec'] < MIN_HORIZON_PREC:
+            print(f"  [{_short}] dropped — best={_hr['model_name']} acc={_hr['acc']:.1%} prec={_hr['prec']:.1%} below threshold")
+            continue
+        horizon_bests[_short] = {
+            'model':       _hr.get('model'),
+            'sub_models':  _hr.get('sub_models'),
+            'sub_weights': _hr.get('sub_weights'),
+            'threshold':   _hr['thr'],
+            'features':    _hr['features'],
+            'metrics': {
+                'accuracy':  _hr['acc'],
+                'precision': _hr['prec'],
+                'recall':    _hr['rec'],
+                'f1':        _hr['f1'],
+            },
+            # e.g. "XGBoost_1W" — encodes both algorithm and horizon for DB clarity
+            'model_name':   f"{_hr['model_name']}_{_short}",
+            'horizon':      _hr['horizon'],
+            'forward_days': _hr['fwd'],
+            'target_pct':   _hr['tgt_pct'],
+        }
+
     # ── Save ──────────────────────────────────────────────────────────────────
     os.makedirs("models", exist_ok=True)
     path = f"models/best_{symbol}_v3.pkl"
     artifact = {
+        # Per-horizon bests (Option A: one model per horizon per stock)
+        'horizons':      horizon_bests,
+        'best_horizon':  HORIZON_SHORT.get(best['horizon'], best['horizon']),
+        # Backward-compat top-level fields (global best, for any old code)
         'model':        best.get('model'),
         'sub_models':   best.get('sub_models'),   # populated for Ensemble
         'sub_weights':  best.get('sub_weights'),

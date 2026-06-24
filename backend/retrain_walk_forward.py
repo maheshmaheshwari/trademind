@@ -87,7 +87,7 @@ def train_one(symbol: str) -> dict:
         "best_model": "", "horizon": "",
         "accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0,
         "train_rows": 0, "test_rows": 0,
-        "elapsed_s": 0, "error": "",
+        "elapsed_s": 0, "corp_adj": False, "error": "",
     }
     try:
         art = train_and_evaluate(
@@ -119,8 +119,31 @@ def train_one(symbol: str) -> dict:
         art["train_end_date"]  = TRAIN_END
         art["test_start_date"] = TEST_START
         art["retrained_at"]    = datetime.now().isoformat()
+        art["retrained_date"]  = datetime.now().strftime("%Y-%m-%d")
+        # Flag whether corporate action price adjustment was applied to training data.
+        # Check _DATA_CACHE to see if this symbol's prices were adjusted.
+        from analysis.model_training import _DATA_CACHE
+        from database.db import get_all_corporate_actions
+        _corp_actions = get_all_corporate_actions()
+        art["corp_adj"] = symbol in _corp_actions and len(_corp_actions[symbol]) > 0
+        result["corp_adj"] = art["corp_adj"]
 
         out_path = os.path.join(FINAL_DIR, f"{symbol}_final.pkl")
+
+        # Archive the existing model before overwriting it.
+        # Name: previous_models/{symbol}_final_{YYYY-MM-DD}.pkl  using the old model's retrained_date.
+        prev_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "previous_models")
+        os.makedirs(prev_dir, exist_ok=True)
+        if os.path.exists(out_path):
+            try:
+                old_art  = joblib.load(out_path)
+                old_date = old_art.get("retrained_date") or old_art.get("retrained_at", "unknown")[:10]
+            except Exception:
+                old_date = "unknown"
+            archive_path = os.path.join(prev_dir, f"{symbol}_final_{old_date}.pkl")
+            import shutil
+            shutil.move(out_path, archive_path)
+
         joblib.dump(art, out_path)
 
         result.update({
@@ -193,14 +216,18 @@ def retrain_all(symbol_filter: Optional[str] = None,
     failed = []
 
     # Write CSV header
-    csv_fields = ["symbol","status","best_model","horizon",
+    csv_fields = ["run_id","symbol","status","best_model","horizon",
                   "accuracy","precision","recall","f1",
-                  "train_rows","test_rows","elapsed_s","error"]
+                  "train_rows","test_rows","elapsed_s","corp_adj","error"]
     write_header = not os.path.exists(RESULTS_CSV)
     csv_fh = open(RESULTS_CSV, "a", newline="")
     writer = csv.DictWriter(csv_fh, fieldnames=csv_fields)
     if write_header:
         writer.writeheader()
+
+    # Shared run identifier — all rows from this invocation share the same run_id
+    # so you can filter retrain_results.csv by run_id to see only the latest run.
+    RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     WORKER_TIMEOUT = 600  # 10 minutes max per stock — auto-skip if stuck
 
@@ -223,7 +250,8 @@ def retrain_all(symbol_filter: Optional[str] = None,
                              "train_rows": 0, "test_rows": 0, "elapsed_s": WORKER_TIMEOUT}
                         _failed.append(sym)
                     _results.append(r)
-                    writer.writerow({k: r.get(k, "") for k in csv_fields})
+                    writer.writerow({k: r.get(k, "") for k in csv_fields
+                                     if k not in ("run_id",)} | {"run_id": RUN_ID})
                     csv_fh.flush()
                     _done += 1
                     if r["status"] == "ok":

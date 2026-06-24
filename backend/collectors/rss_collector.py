@@ -1,14 +1,25 @@
 """
 TradeMind AI — RSS Market News Collector
 
-Scrapes 3 Indian financial RSS feeds for market-wide news.
-Articles stored with symbol=NULL → feed `mkt_sentiment` ML feature.
-Stock-specific articles tagged by matching company names in headlines.
+Scrapes 6 Indian financial RSS feeds. Every article is classified:
+  • Stock-specific: NSE symbol (e.g. "HDFCBANK.NS") via two-stage matching:
+      1. ALL-CAPS word → known NSE ticker  (e.g. "HDFCBANK rally")
+      2. Company name substring → longest match wins
+  • Market-wide: one of five category tags:
+      MARKET:INDEX   — Nifty / Sensex / broad market moves
+      MARKET:RBI     — RBI, repo rate, monetary policy, rupee
+      MARKET:MACRO   — GDP, budget, FII/DII flows, trade, GST
+      MARKET:GLOBAL  — US Fed, crude oil, global markets, dollar
+      MARKET:SEBI    — SEBI regulations, IPO rules, disclosures
+      MARKET:GENERAL — catch-all for unclassified market news
 
 Sources:
   - Economic Times Markets
   - Moneycontrol Latest News
   - Business Standard Markets
+  - Livemint Markets
+  - NDTV Profit
+  - Hindu Business Line
 
 Usage:
     PYTHONPATH=. python collectors/rss_collector.py
@@ -40,6 +51,9 @@ RSS_FEEDS = [
     ("Economic Times Markets",  "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
     ("Moneycontrol",            "https://www.moneycontrol.com/rss/latestnews.xml"),
     ("Business Standard",       "https://www.business-standard.com/rss/markets-106.rss"),
+    ("Livemint Markets",        "https://www.livemint.com/rss/markets"),
+    ("NDTV Profit",             "https://feeds.feedburner.com/ndtvprofit-latest"),
+    ("Hindu Business Line",     "https://www.thehindubusinessline.com/markets/feeder/default.rss"),
 ]
 
 HEADERS = {
@@ -51,31 +65,158 @@ BATCH_SIZE = 32
 _TOKENS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "angel_tokens.json")
 
 
-def _load_name_map() -> Dict[str, str]:
-    """Build {company_name_lower: SYMBOL.NS} from angel_tokens.json."""
-    name_map = {}
+_GENERIC_TOKENS = frozenset({
+    # Financial/regulatory acronyms that are NOT NSE stock tickers
+    "NSE", "RBI", "SEBI", "FII", "DII", "IPO", "AGM", "EPS",
+    "GDP", "CPI", "WPI", "IMF", "MPC", "GST", "ETF", "AIF", "NCD",
+    "SIP", "NAV", "AUM", "RERA", "NPA",
+    # Note: BSE and PNB are listed stocks on NSE — intentionally NOT blacklisted
+})
+
+
+def _load_name_map() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """
+    Returns:
+        name_to_sym : {full_clean_name_lower: SYMBOL.NS}
+        ticker_to_sym: {NSE_TICKER_UPPER: SYMBOL.NS}
+    """
+    name_to_sym: Dict[str, str] = {}
+    ticker_to_sym: Dict[str, str] = {}
     if not os.path.exists(_TOKENS_FILE):
-        return name_map
+        return name_to_sym, ticker_to_sym
     with open(_TOKENS_FILE) as f:
         tokens = json.load(f)
     for sym, info in tokens.items():
-        name = info.get("name", "")
-        if name:
-            name_map[name.lower()] = f"{sym}.NS"
-            # Also index short versions (e.g. "HDFC" matches "HDFC Bank")
-            words = name.lower().split()
-            if words:
-                name_map[words[0]] = f"{sym}.NS"
-    return name_map
+        nse_sym = f"{sym}.NS"
+        if sym not in _GENERIC_TOKENS:
+            ticker_to_sym[sym.upper()] = nse_sym
+        name = (info.get("name") or "").strip()
+        if not name:
+            continue
+        # Full name (lower)
+        if len(name) >= 5:
+            name_to_sym[name.lower()] = nse_sym
+        # Without trailing legal suffix: "Ltd.", "Limited", "Corp.", etc.
+        clean = re.sub(
+            r'\s*(Ltd\.?|Limited|Corp\.?|Corporation|Inc\.?|Pvt\.?)\s*$',
+            '', name, flags=re.IGNORECASE,
+        ).strip()
+        if len(clean) >= 5 and clean.lower() != name.lower():
+            name_to_sym[clean.lower()] = nse_sym
+        # Without leading "The " (e.g. "The New India Assurance Co." → "New India Assurance Co.")
+        for variant in (name, clean):
+            stripped = re.sub(r'^The\s+', '', variant, flags=re.IGNORECASE).strip()
+            if len(stripped) >= 5 and stripped.lower() not in name_to_sym:
+                name_to_sym[stripped.lower()] = nse_sym
+            # Also strip trailing "Company" / "Corporation" that weren't caught above
+            for sec_pat in (r'\s*Company\s*$', r'\s*Co\.?\s*$', r'\s*Corporation\s*$'):
+                shorter = re.sub(sec_pat, '', stripped, flags=re.IGNORECASE).strip()
+                if len(shorter) >= 5 and shorter.lower() not in name_to_sym:
+                    name_to_sym[shorter.lower()] = nse_sym
+    return name_to_sym, ticker_to_sym
 
 
-def _tag_symbol(headline: str, name_map: Dict[str, str]) -> Optional[str]:
-    """Return symbol if headline mentions a known company, else None."""
+# Company names that appear as substrings inside common non-stock phrases.
+# If the full phrase is present, the embedded company name should NOT match a stock.
+_NON_STOCK_PHRASES: Dict[str, str] = {
+    "reserve bank of india": "bank of india",   # RBI headline ≠ BANKINDIA.NS
+    "world bank":            "bank",
+    "central bank":          "bank",
+    "national stock exchange": "national",
+    "bombay stock exchange":   "bombay",
+}
+
+
+def _tag_symbol(
+    headline: str,
+    name_to_sym: Dict[str, str],
+    ticker_to_sym: Dict[str, str],
+) -> Optional[str]:
+    """
+    Return NSE symbol if headline mentions a known stock, else None.
+
+    Priority:
+      1. Word-boundary match on NSE ticker (e.g. "HDFCBANK rally" → HDFCBANK.NS)
+      2. Longest substring match on cleaned company name (false-positive phrases excluded)
+    """
+    # 1. Ticker: extract ALL-CAPS words and look up against known tickers
+    for word in re.findall(r'\b[A-Z]{2,20}\b', headline):
+        if word in ticker_to_sym:
+            return ticker_to_sym[word]
+
+    # 2. Company name: longest match wins
     h = headline.lower()
-    for name, symbol in name_map.items():
-        if len(name) >= 4 and name in h:
-            return symbol
-    return None
+
+    # Build set of company-name substrings that are disqualified in this headline
+    disqualified: set = set()
+    for full_phrase, embedded in _NON_STOCK_PHRASES.items():
+        if full_phrase in h:
+            disqualified.add(embedded)
+
+    best_sym: Optional[str] = None
+    best_len = 0
+    for name, sym in name_to_sym.items():
+        if len(name) > best_len and name in h and name not in disqualified:
+            best_sym = sym
+            best_len = len(name)
+    return best_sym
+
+
+_MARKET_CATEGORIES = [
+    # Checked in priority order — first match wins.
+    # SEBI first: very specific regulatory language
+    ("MARKET:SEBI", [
+        "sebi", "securities board", "market regulator", "insider trading",
+        "listing rules", "disclosure norms", "takeover code", "delisting",
+        "ipo allotment", "grey market",
+    ]),
+    # INDEX second: Nifty/Sensex are unambiguous even when FII/DII appears alongside
+    ("MARKET:INDEX", [
+        "nifty 50", "nifty50", "nifty 500", "nifty500", "sensex",
+        "nifty bank", "nifty it", "nifty midcap", "nifty smallcap",
+        "broader market", "benchmark index", "market rally",
+        "market sell-off", "market crash", "market decline", "market gains",
+        "indices ", "midcap index", "smallcap index",
+        "market breadth", "advance decline",
+    ]),
+    # GLOBAL third: must come before RBI so "Federal Reserve rate cut" → GLOBAL not RBI
+    ("MARKET:GLOBAL", [
+        "federal reserve", "us fed", " fed ", "fomc", "jerome powell",
+        "wall street", "nasdaq", "dow jones", "s&p 500",
+        "global market", "us market", "us economy",
+        "crude oil", "brent crude", "wti crude", "dollar index",
+        "china market", "asian market", "european market",
+        "opec", "oil prices", "us treasury",
+    ]),
+    # RBI: Indian-specific only — generic "rate cut/hike" removed to avoid cross-matching
+    ("MARKET:RBI", [
+        "rbi", "reserve bank of india", "monetary policy committee",
+        "repo rate", "reverse repo", " mpc ", "crr ", "slr ",
+        "rupee ", "indian rupee", "forex reserve", "currency intervention",
+    ]),
+    # MACRO: broad economic — FII/DII flows, budget, trade
+    ("MARKET:MACRO", [
+        " gdp ", "budget ", "fiscal deficit", "trade deficit", "current account",
+        " gst ", "fii ", "dii ", " fpi ", "foreign portfolio",
+        "finance minister", "ministry of finance", "government policy",
+        "economic growth", "industrial output", "iip ", " pmi ",
+        "wholesale price", "consumer price", "core inflation",
+    ]),
+]
+
+
+def _classify_market_news(headline: str) -> str:
+    """
+    Classify a non-stock headline into a market category tag.
+
+    Checks keyword lists in priority order (SEBI → RBI → GLOBAL → MACRO → INDEX).
+    Falls back to MARKET:GENERAL if nothing matches.
+    """
+    h = f" {headline.lower()} "   # pad with spaces so word-boundary checks are simple
+    for category, keywords in _MARKET_CATEGORIES:
+        if any(kw in h for kw in keywords):
+            return category
+    return "MARKET:GENERAL"
 
 
 def _fetch_rss(url: str, source: str) -> List[Dict]:
@@ -136,7 +277,7 @@ def _url_exists(conn, url: str) -> bool:
 
 
 def collect_all_rss() -> dict:
-    name_map = _load_name_map()
+    name_to_sym, ticker_to_sym = _load_name_map()
     all_articles = []
 
     for source, url in RSS_FEEDS:
@@ -159,7 +300,8 @@ def collect_all_rss() -> dict:
 
         rows = []
         for art, score in zip(new_articles, scores):
-            symbol = _tag_symbol(art["title"], name_map)  # None = market-wide
+            symbol = _tag_symbol(art["title"], name_to_sym, ticker_to_sym) \
+                     or _classify_market_news(art["title"])
             rows.append((
                 art["title"][:500],
                 art["source"],

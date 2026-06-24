@@ -3,9 +3,12 @@ import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import { store } from './app/store';
 import './index.css';
 import App from './App';
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
 
 async function prepare() {
   if (import.meta.env.VITE_USE_MOCK === 'true') {
@@ -20,11 +23,13 @@ async function prepare() {
 prepare().then(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <LocalizationProvider dateAdapter={AdapterDayjs}>
-        <Provider store={store}>
-          <App />
-        </Provider>
-      </LocalizationProvider>
+      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <Provider store={store}>
+            <App />
+          </Provider>
+        </LocalizationProvider>
+      </GoogleOAuthProvider>
     </StrictMode>,
   );
 });

@@ -31,26 +31,29 @@ from pathlib import Path
 
 class DailyFileHandler(logging.FileHandler):
     """
-    Writes to logs/YYYY-MM-DD.log.
+    Writes to logs/YYYY-MM-DD/server.log.
+    The date subfolder is shared with Angel One SmartAPI (which puts app.log there).
     On every emit() it checks today's date; when midnight passes it
-    closes the old file and opens a fresh one with the new date.
+    closes the old file and opens a fresh one inside the new date folder.
     """
 
     def __init__(self, log_dir: str = "logs"):
         self.log_dir = log_dir
-        Path(log_dir).mkdir(parents=True, exist_ok=True)
         self._current_date = datetime.now().strftime("%Y-%m-%d")
-        filepath = os.path.join(log_dir, f"{self._current_date}.log")
+        filepath = self._make_path(self._current_date)
         super().__init__(filepath, mode="a", encoding="utf-8", delay=False)
+
+    def _make_path(self, date_str: str) -> str:
+        date_dir = os.path.join(self.log_dir, date_str)
+        Path(date_dir).mkdir(parents=True, exist_ok=True)
+        return os.path.join(date_dir, "server.log")
 
     def emit(self, record: logging.LogRecord) -> None:
         today = datetime.now().strftime("%Y-%m-%d")
         if today != self._current_date:
             self._current_date = today
             self.close()
-            self.baseFilename = os.path.abspath(
-                os.path.join(self.log_dir, f"{today}.log")
-            )
+            self.baseFilename = os.path.abspath(self._make_path(today))
             self.stream = self._open()
         super().emit(record)
 
@@ -103,7 +106,7 @@ def setup_logging(log_dir: str = "logs", level: str = "INFO") -> None:
 
     today = datetime.now().strftime("%Y-%m-%d")
     logging.getLogger(__name__).info(
-        "Logging initialised — writing to %s/%s.log", log_dir, today
+        "Logging initialised — writing to %s/%s/server.log", log_dir, today
     )
 
 

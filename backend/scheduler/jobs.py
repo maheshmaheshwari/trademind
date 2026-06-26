@@ -225,7 +225,7 @@ def collect_eod_data_job():
     # ── Step 1: EOD prices ───────────────────────────────────────────────────
     logger.info("⏰ [1/3] EOD price collection starting...")
     try:
-        from update_stocks_angel import main as run_eod
+        from scripts.update_stocks_angel import main as run_eod
         run_eod(days=2)
         logger.info("✅ [1/3] EOD prices done")
     except BaseException as e:
@@ -245,7 +245,7 @@ def collect_eod_data_job():
     # ── Step 3: Trade signal generation ──────────────────────────────────────
     logger.info("⏰ [3/3] Trade signal generation starting...")
     try:
-        from generate_trades import generate_signals
+        from scripts.generate_trades import generate_signals
         generate_signals()
         logger.info("✅ [3/3] Trade signals done — EOD pipeline complete")
     except BaseException as e:
@@ -526,7 +526,7 @@ def generate_trade_signals_job(force: bool = False):
 
     logger.info("⏰ Running trade signal generation...")
     try:
-        from generate_trades import generate_signals
+        from scripts.generate_trades import generate_signals
         result = generate_signals()
         logger.info(f"Trade signals generated: {result}")
     except Exception as e:
@@ -746,7 +746,7 @@ def weekly_retrain_job():
     """
     logger.info("⏰ Starting Friday night model retrain pipeline...")
     try:
-        from weekly_retrain_pipeline import run_pipeline
+        from scripts.weekly_retrain_pipeline import run_pipeline
         run_pipeline(workers=1, resume=False, skip_wait=True)
         logger.info("✅ Weekly retrain pipeline complete — signals ready for Monday")
     except Exception as e:

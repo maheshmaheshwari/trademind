@@ -1,0 +1,50 @@
+{
+  "_mirrors": "api/routes/signals.py GET /api/signals/all \u2014 live-sampled and trimmed to 2 rows",
+  "count": 1456,
+  "generated_at": "2026-06-23 13:05:40",
+  "total_stocks": 471,
+  "signals": [
+    {
+      "symbol": "BAJAJFINSV.NS",
+      "name": "Bajaj Finserv Ltd.",
+      "sector": "Financial Services",
+      "signal": "BUY",
+      "raw_signal": "STRONG BUY",
+      "confidence": 100,
+      "horizon": "6M",
+      "horizon_long": "6 Months",
+      "expReturn": 10.0,
+      "buy_price": 1783.0,
+      "target_price": 1961.3,
+      "stop_loss": 1707.55,
+      "risk_reward": 2.36,
+      "sentiment": 0.0,
+      "accuracy": 88.1,
+      "precision": 75.0,
+      "model_name": "GradBoost_6M",
+      "updatedMin": 1139,
+      "generated_at": "2026-06-23 13:05:40"
+    },
+    {
+      "symbol": "BEML.NS",
+      "name": "BEML Ltd.",
+      "sector": "Capital Goods",
+      "signal": "BUY",
+      "raw_signal": "STRONG BUY",
+      "confidence": 100,
+      "horizon": "6M",
+      "horizon_long": "6 Months",
+      "expReturn": 10.0,
+      "buy_price": 1764.0,
+      "target_price": 1940.4,
+      "stop_loss": 1644.77,
+      "risk_reward": 1.48,
+      "sentiment": 0.0,
+      "accuracy": 88.1,
+      "precision": 91.5,
+      "model_name": "LightGBM_6M",
+      "updatedMin": 1139,
+      "generated_at": "2026-06-23 13:05:40"
+    }
+  ]
+}

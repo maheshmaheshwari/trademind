@@ -111,7 +111,7 @@ export default function WatchlistPage() {
   const [addQ,    setAddQ]    = useState('');
   const { sort, toggle } = useSort('confidence', 'desc');
 
-  const { data: wlRes,    isLoading } = useGetWatchlistQuery(user!.id, { skip: !user });
+  const { data: wlRes,    isLoading, isError } = useGetWatchlistQuery(user?.id ?? 0, { skip: !user });
   const deferredAddQ = useDeferredValue(addQ);
   const { data: stockRes, isLoading: searchLoading } = useGetStocksQuery({ search: deferredAddQ, size: 6 }, { skip: !deferredAddQ || deferredAddQ.length < 2 });
   const [removeFromWatchlist] = useRemoveFromWatchlistMutation();
@@ -185,8 +185,16 @@ export default function WatchlistPage() {
         </>)}
       </div>
 
+      {/* ── Error state (audit Low item — was indistinguishable from "no data") ── */}
+      {!isLoading && isError && (
+        <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
+          <span className="text-[var(--red)] text-sm font-semibold">Couldn't load your watchlist</span>
+          <span className="text-[var(--text-3)] text-[13px]">Check your connection and try again.</span>
+        </div>
+      )}
+
       {/* ── Empty state ── */}
-      {!isLoading && items.length === 0 && (
+      {!isLoading && !isError && items.length === 0 && (
         <div className="flex flex-col items-center justify-center py-24 gap-4">
           <div className="w-16 h-16 rounded-full bg-[var(--surface-2)] grid place-items-center text-[var(--text-3)]">
             <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>

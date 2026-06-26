@@ -325,7 +325,7 @@ export default function DashboardPage() {
                   <span className="text-[11px] text-ink-3">Declines</span>
                 </div>
                 <div className="flex flex-col items-center gap-[1px]">
-                  <span className="font-mono font-bold text-gold">{(breadth.advances / breadth.declines).toFixed(2)}</span>
+                  <span className="font-mono font-bold text-gold">{((breadth?.advances ?? 0) / (breadth?.declines || 1)).toFixed(2)}</span>
                   <span className="text-[11px] text-ink-3">A/D Ratio</span>
                 </div>
               </div>

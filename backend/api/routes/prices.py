@@ -52,4 +52,4 @@ async def get_price_history(
         raise
     except Exception as e:
         logger.error(f"Error fetching prices for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching prices: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching prices")

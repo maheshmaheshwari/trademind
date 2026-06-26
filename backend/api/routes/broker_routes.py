@@ -14,7 +14,7 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from api.auth import decode_token
@@ -31,9 +31,16 @@ router = APIRouter(prefix="/api/brokers", tags=["Brokers"])
 # ---------------------------------------------------------------------------
 
 def _get_fernet():
-    """Return a Fernet instance keyed by BROKER_ENCRYPTION_KEY (separate from JWT_SECRET)."""
+    """Return a Fernet instance keyed by BROKER_ENCRYPTION_KEY.
+
+    No fallback to JWT_SECRET — a leaked JWT_SECRET must not also decrypt
+    every user's stored broker access token. Fail fast if unset, same as
+    api/auth.py does for JWT_SECRET.
+    """
     from cryptography.fernet import Fernet
-    broker_key = os.getenv("BROKER_ENCRYPTION_KEY") or os.getenv("JWT_SECRET", "")
+    broker_key = os.getenv("BROKER_ENCRYPTION_KEY")
+    if not broker_key:
+        raise RuntimeError("BROKER_ENCRYPTION_KEY is not set — required to encrypt/decrypt broker credentials")
     key = base64.urlsafe_b64encode(hashlib.sha256(broker_key.encode()).digest())
     return Fernet(key)
 
@@ -60,6 +67,8 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
     payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("scope") != "full":
+        raise HTTPException(status_code=401, detail="Incomplete authentication — please complete MFA")
     user = get_user(payload["user_id"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -108,18 +117,8 @@ def _get_broker_rows(user_id: int) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.get("")
-async def list_brokers(authorization: Optional[str] = Header(None)):
+async def list_brokers(user: dict = Depends(get_current_user)):
     """List all broker connections with their current status."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     db_rows = _get_broker_rows(user["id"])
 
     result = []
@@ -139,18 +138,8 @@ async def list_brokers(authorization: Optional[str] = Header(None)):
 # ---------------------------------------------------------------------------
 
 @router.post("/angel-one/connect")
-async def angel_connect(req: AngelConnectRequest, authorization: Optional[str] = Header(None)):
+async def angel_connect(req: AngelConnectRequest, user: dict = Depends(get_current_user)):
     """Connect Angel One SmartAPI — stores encrypted access token."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     api_key = os.getenv("ANGEL_API_KEY", "")
     if not api_key:
         raise HTTPException(status_code=503, detail="Angel One API key not configured on server")
@@ -164,7 +153,7 @@ async def angel_connect(req: AngelConnectRequest, authorization: Optional[str] =
         raise HTTPException(status_code=503, detail="SmartApi SDK not installed on server")
     except Exception as e:
         logger.error("Angel One SmartAPI error: %s", e)
-        raise HTTPException(status_code=502, detail=f"Angel One API error: {e}")
+        raise HTTPException(status_code=502, detail="Angel One API error — please try again")
 
     if not data.get("status"):
         msg = data.get("message", "Login failed")
@@ -195,18 +184,8 @@ async def angel_connect(req: AngelConnectRequest, authorization: Optional[str] =
 # ---------------------------------------------------------------------------
 
 @router.delete("/angel-one/disconnect")
-async def angel_disconnect(authorization: Optional[str] = Header(None)):
+async def angel_disconnect(user: dict = Depends(get_current_user)):
     """Disconnect Angel One — clears stored credentials."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     conn = get_connection()
     try:
         _execute(conn, """
@@ -226,17 +205,8 @@ async def angel_disconnect(authorization: Optional[str] = Header(None)):
 # ---------------------------------------------------------------------------
 
 @router.get("/zerodha/login")
-async def zerodha_login(authorization: Optional[str] = Header(None)):
+async def zerodha_login(user: dict = Depends(get_current_user)):
     """Zerodha OAuth — coming soon."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
     return {"redirect_url": None, "message": "Zerodha OAuth coming soon"}
 
 
@@ -245,15 +215,6 @@ async def zerodha_login(authorization: Optional[str] = Header(None)):
 # ---------------------------------------------------------------------------
 
 @router.get("/upstox/login")
-async def upstox_login(authorization: Optional[str] = Header(None)):
+async def upstox_login(user: dict = Depends(get_current_user)):
     """Upstox OAuth — coming soon."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.split(" ", 1)[1]
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = get_user(payload["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
     return {"redirect_url": None, "message": "Upstox OAuth coming soon"}

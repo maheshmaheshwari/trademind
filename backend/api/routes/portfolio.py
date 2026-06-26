@@ -6,10 +6,11 @@ AI-driven portfolio creation, sector allocation, and stock picking.
 import json
 import os
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 from database.db import get_trade_signals_formatted, get_connection, release_connection, _execute
+from api.routes.trading import get_current_user
 
 router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])
 
@@ -218,7 +219,7 @@ async def get_all_sectors():
 
 
 @router.post("/create")
-async def create_portfolio(body: PortfolioCreate):
+async def create_portfolio(body: PortfolioCreate, user=Depends(get_current_user)):
     """Create a portfolio with AI-suggested sector allocation."""
     signals = load_signals()
     
@@ -239,8 +240,8 @@ async def create_portfolio(body: PortfolioCreate):
     conn = get_connection()
     try:
         cur = _execute(conn,
-            "INSERT INTO portfolios (name, investment_amount, time_horizon, risk_profile) VALUES (?, ?, ?, ?) RETURNING id",
-            (body.name, body.investment_amount, body.time_horizon, body.risk_profile),
+            "INSERT INTO portfolios (name, investment_amount, time_horizon, risk_profile, user_id) VALUES (?, ?, ?, ?, ?) RETURNING id",
+            (body.name, body.investment_amount, body.time_horizon, body.risk_profile, user["id"]),
         )
         portfolio_id = cur.fetchone()[0]
         conn.commit()
@@ -285,11 +286,11 @@ async def create_portfolio(body: PortfolioCreate):
 
 
 @router.get("/{portfolio_id}")
-async def get_portfolio(portfolio_id: int):
+async def get_portfolio(portfolio_id: int, user=Depends(get_current_user)):
     """Get portfolio details with sectors and stocks."""
     conn = get_connection()
     try:
-        row = _execute(conn, "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+        row = _execute(conn, "SELECT * FROM portfolios WHERE id = ? AND user_id = ?", (portfolio_id, user["id"])).fetchone()
         if not row:
             raise HTTPException(404, "Portfolio not found")
 
@@ -323,11 +324,11 @@ async def get_portfolio(portfolio_id: int):
 
 
 @router.get("")
-async def list_portfolios():
-    """List all portfolios."""
+async def list_portfolios(user=Depends(get_current_user)):
+    """List the current user's portfolios."""
     conn = get_connection()
     try:
-        rows = _execute(conn, "SELECT id, name, investment_amount, time_horizon, risk_profile, created_at FROM portfolios ORDER BY created_at DESC").fetchall()
+        rows = _execute(conn, "SELECT id, name, investment_amount, time_horizon, risk_profile, created_at FROM portfolios WHERE user_id = ? ORDER BY created_at DESC", (user["id"],)).fetchall()
         cols = ["id", "name", "investment_amount", "time_horizon", "risk_profile", "created_at"]
         portfolios = [dict(zip(cols, r)) for r in rows]
         return {"data": portfolios, "total": len(portfolios)}
@@ -336,12 +337,12 @@ async def list_portfolios():
 
 
 @router.put("/{portfolio_id}/sectors")
-async def update_sectors(portfolio_id: int, body: SectorUpdate):
+async def update_sectors(portfolio_id: int, body: SectorUpdate, user=Depends(get_current_user)):
     """Update sector allocations (user customization)."""
     conn = get_connection()
     try:
-        # Verify portfolio exists
-        row = _execute(conn, "SELECT id FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+        # Verify portfolio exists and belongs to the caller
+        row = _execute(conn, "SELECT id FROM portfolios WHERE id = ? AND user_id = ?", (portfolio_id, user["id"])).fetchone()
         if not row:
             raise HTTPException(404, "Portfolio not found")
 
@@ -367,11 +368,11 @@ async def update_sectors(portfolio_id: int, body: SectorUpdate):
 
 
 @router.post("/{portfolio_id}/rebalance")
-async def rebalance_portfolio(portfolio_id: int):
+async def rebalance_portfolio(portfolio_id: int, user=Depends(get_current_user)):
     """Re-run AI allocation with current signals."""
     conn = get_connection()
     try:
-        row = _execute(conn, "SELECT * FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+        row = _execute(conn, "SELECT * FROM portfolios WHERE id = ? AND user_id = ?", (portfolio_id, user["id"])).fetchone()
         if not row:
             raise HTTPException(404, "Portfolio not found")
 
@@ -423,13 +424,16 @@ async def rebalance_portfolio(portfolio_id: int):
 
 
 @router.delete("/{portfolio_id}")
-async def delete_portfolio(portfolio_id: int):
+async def delete_portfolio(portfolio_id: int, user=Depends(get_current_user)):
     """Delete a portfolio."""
     conn = get_connection()
     try:
+        owned = _execute(conn, "SELECT id FROM portfolios WHERE id = ? AND user_id = ?", (portfolio_id, user["id"])).fetchone()
+        if not owned:
+            raise HTTPException(404, "Portfolio not found")
         _execute(conn, "DELETE FROM portfolio_stocks WHERE portfolio_id = ?", (portfolio_id,))
         _execute(conn, "DELETE FROM portfolio_sectors WHERE portfolio_id = ?", (portfolio_id,))
-        _execute(conn, "DELETE FROM portfolios WHERE id = ?", (portfolio_id,))
+        _execute(conn, "DELETE FROM portfolios WHERE id = ? AND user_id = ?", (portfolio_id, user["id"]))
         conn.commit()
         return {"data": {"message": "Portfolio deleted", "portfolio_id": portfolio_id}}
     finally:

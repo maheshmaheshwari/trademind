@@ -9,39 +9,51 @@ export default {
 
   theme: {
     extend: {
+      // Every color below references the CSS custom properties defined per-theme
+      // in src/index.css ([data-theme="dark"] / [data-theme="light"]). These were
+      // previously hardcoded to literal dark-mode hex values, completely
+      // disconnected from the theme system — any Tailwind-generated utility that
+      // wasn't ALSO manually duplicated in index.css (anything using a modifier
+      // like hover: or an opacity suffix, e.g. bg-surface/70) stayed stuck in
+      // dark colors even in light mode. This is what caused the light-mode navbar
+      // background and the black row-hover color on /orders.
       colors: {
-        bg:      '#0A0E1A',
+        bg:      'var(--bg)',
+        // surface.DEFAULT and accent.DEFAULT use the rgb(var(...) / <alpha-value>)
+        // pattern (not a plain var() string) specifically so Tailwind's opacity
+        // modifier (e.g. bg-surface/70, bg-accent/10) keeps working correctly per
+        // theme — a plain var() reference can't be modified with /<N> by Tailwind.
         surface: {
-          DEFAULT: '#111827',
-          2:       '#161F33',
-          3:       '#1C2740',
-          hover:   '#1A2438',
+          DEFAULT: 'rgb(var(--surface-rgb) / <alpha-value>)',
+          2:       'var(--surface-2)',
+          3:       'var(--surface-3)',
+          hover:   'var(--surface-hover)',
         },
         line: {
-          DEFAULT: 'rgba(255,255,255,0.07)',
-          strong:  'rgba(255,255,255,0.13)',
+          DEFAULT: 'var(--border)',
+          strong:  'var(--border-strong)',
         },
         ink: {
-          DEFAULT: '#EEF2F9',
-          2:       '#AEB9CE',
-          3:       '#6B7890',
+          DEFAULT: 'var(--text)',
+          2:       'var(--text-2)',
+          3:       'var(--text-3)',
         },
         accent: {
-          DEFAULT: '#3B82F6',
-          soft:    'rgba(59,130,246,0.14)',
-          2:       '#60A5FA',
+          DEFAULT: 'rgb(var(--accent-rgb) / <alpha-value>)',
+          soft:    'var(--accent-soft)',
+          2:       'var(--accent-2)',
         },
         gain: {
-          DEFAULT: '#10B981',
-          soft:    'rgba(16,185,129,0.14)',
+          DEFAULT: 'var(--green)',
+          soft:    'var(--green-soft)',
         },
         loss: {
-          DEFAULT: '#EF4444',
-          soft:    'rgba(239,68,68,0.14)',
+          DEFAULT: 'var(--red)',
+          soft:    'var(--red-soft)',
         },
         gold: {
-          DEFAULT: '#F59E0B',
-          soft:    'rgba(245,158,11,0.16)',
+          DEFAULT: 'var(--gold)',
+          soft:    'var(--gold-soft)',
         },
       },
 

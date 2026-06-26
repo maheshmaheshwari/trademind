@@ -1,6 +1,8 @@
 # Environment
 .env
+.env.test
 !.env.example
+!.env.test.example
 
 # Database
 *.db
@@ -39,8 +41,8 @@ Thumbs.db
 data/backups/*.csv
 
 # ML Models (downloaded at runtime or trained locally)
-models/
 final_models/
+model_archives/
 *.pkl
 *.db-shm
 

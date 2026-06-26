@@ -1,0 +1,35 @@
+{
+  "_mirrors": "api/routes/sentiment.py GET /api/sentiment/market \u2014 live-sampled, news trimmed to 2",
+  "score": 50.0,
+  "label": "Neutral",
+  "article_count": 20,
+  "breakdown": {
+    "positive": 0,
+    "negative": 0,
+    "neutral": 20
+  },
+  "news": [
+    {
+      "id": 224681,
+      "headline": "Sensex surges over 500 pts, Nifty above 23,900; Trent shares surge 4%",
+      "source": "Economic Times",
+      "published_at": "2026-06-24T13:02:08+00:00",
+      "symbol": null,
+      "sentiment": "0.9267",
+      "confidence": 0.9266591668128967,
+      "url": "https://economictimes.indiatimes.com/markets/stocks/news/sensex-jumps-over-250-pts-nifty-above-23900-trent-shares-surge-4/articleshow/131954345.cms",
+      "created_at": "2026-06-24T07:32:08.995353+00:00"
+    },
+    {
+      "id": 224680,
+      "headline": "FII-powered Suzlon Energy shares sit 15% below 52-week high. Will 2.0 roadmap deliver for 56 lakh investors?",
+      "source": "Economic Times",
+      "published_at": "2026-06-24T13:02:07+00:00",
+      "symbol": null,
+      "sentiment": "0.5064",
+      "confidence": 0.50641930103302,
+      "url": "https://economictimes.indiatimes.com/markets/stocks/news/fii-powered-suzlon-energy-shares-sit-15-below-52-week-high-will-2-0-roadmap-deliver-for-56-lakh-investors/articleshow/131954692.cms",
+      "created_at": "2026-06-24T07:32:08.064572+00:00"
+    }
+  ]
+}

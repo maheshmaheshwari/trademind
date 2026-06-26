@@ -91,4 +91,4 @@ async def get_indicators(symbol: str):
         raise
     except Exception as e:
         logger.error(f"Error fetching indicators for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching indicators")

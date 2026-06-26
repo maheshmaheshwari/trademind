@@ -26,7 +26,7 @@ export default function PortfolioPage() {
   const [modal,  setModal]  = useState(false);
   const navigate = useNavigate();
 
-  const { data: portData, isLoading: loading } = useGetPortfolioSummaryQuery(user!.id, { skip: !user });
+  const { data: portData, isLoading: loading, isError } = useGetPortfolioSummaryQuery(user?.id ?? 0, { skip: !user });
   const raw = portData as any;
 
   const holdings: Holding[] = raw?.positions ? ([...raw.positions]).sort((a: Holding, b: Holding) => {
@@ -55,6 +55,13 @@ export default function PortfolioPage() {
 
   return (
     <div className="flex flex-col dgap animate-page-in">
+
+      {/* Audit Low item — was indistinguishable from "no data" */}
+      {isError && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-[11px] bg-[var(--red-soft)] text-[var(--red)] text-[13px] font-semibold">
+          Couldn't load your portfolio. Check your connection and try again.
+        </div>
+      )}
 
       {/* ── Header ── */}
       <div className="flex items-end justify-between gap-4 flex-wrap">

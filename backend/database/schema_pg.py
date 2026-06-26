@@ -202,6 +202,17 @@ CREATE TABLE IF NOT EXISTS watchlist (
 );
 """
 
+SQL_DELIVERY_DATA = """
+CREATE TABLE IF NOT EXISTS delivery_data (
+    symbol       TEXT NOT NULL,
+    date         DATE NOT NULL,
+    delivery_pct DOUBLE PRECISION,
+    total_volume BIGINT,
+    PRIMARY KEY (symbol, date)
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_symbol ON delivery_data (symbol, date DESC);
+"""
+
 SQL_NOTIFICATIONS = """
 CREATE TABLE IF NOT EXISTS notifications (
     id         BIGSERIAL PRIMARY KEY,
@@ -349,6 +360,15 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS default_account TEXT DEFAULT 'PAPER';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR';
+"""
+
+# Security fix (audit C1): portfolios had no ownership column at all, so
+# every /api/portfolio/* route was a full-CRUD IDOR — any caller could
+# read/rebalance/delete any portfolio by guessing an integer id. Nullable
+# because existing rows predate the ownership concept.
+SQL_PORTFOLIOS_ALTER = """
+ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id);
+CREATE INDEX IF NOT EXISTS idx_portfolios_user_id ON portfolios (user_id);
 """
 
 # Migration: widen trade_signals UNIQUE from (symbol, date) to (symbol, date, horizon)
@@ -584,6 +604,11 @@ SQL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_prices_symbol_date ON prices (symbol, date DESC);",
     "CREATE INDEX IF NOT EXISTS idx_prices_symbol      ON prices (symbol);",
     "CREATE INDEX IF NOT EXISTS idx_prices_interval    ON prices (interval);",
+    # Required by insert_price()/insert_prices_batch()'s
+    # "ON CONFLICT (symbol, date, interval) WHERE time IS NULL" upsert —
+    # without this exact partial unique index, daily-row upserts fail with
+    # "no unique or exclusion constraint matching the ON CONFLICT specification".
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_prices_daily_unique ON prices (symbol, date, interval) WHERE (time IS NULL);",
     "CREATE INDEX IF NOT EXISTS idx_ti_symbol_date     ON technical_indicators (symbol, date DESC);",
     "CREATE INDEX IF NOT EXISTS idx_ti_symbol          ON technical_indicators (symbol);",
     "CREATE INDEX IF NOT EXISTS idx_news_symbol_pub    ON news_sentiment (symbol, published_at DESC);",
@@ -619,14 +644,14 @@ def init_timescale(conn) -> None:
     # Regular tables first (no time-series partitioning)
     for sql in [
         SQL_USERS, SQL_PORTFOLIOS, SQL_PORTFOLIO_SECTORS, SQL_PORTFOLIO_STOCKS,
-        SQL_RISK_SETTINGS, SQL_TRADE_SIGNALS,
+        SQL_TRADE_SIGNALS, SQL_RISK_SETTINGS,
         SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS,
         SQL_AUTHORIZED_TRADES, SQL_AUTOPILOT_SETTINGS, SQL_MARKET_OVERVIEW,
         SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG,
         SQL_PASSWORD_RESET_OTPS, SQL_USER_SESSIONS,
         SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
         SQL_AV_COVERAGE_TRACKER,
-        SQL_CORPORATE_ACTIONS,
+        SQL_CORPORATE_ACTIONS, SQL_DELIVERY_DATA,
     ]:
         cur.execute(sql)
 
@@ -639,6 +664,16 @@ def init_timescale(conn) -> None:
             except Exception as e:
                 conn.rollback()
                 logger.warning(f"ALTER TABLE users: {e}")
+
+    # Add ownership column to portfolios (idempotent ALTER TABLE) — see C1 fix
+    for stmt in SQL_PORTFOLIOS_ALTER.strip().split("\n"):
+        stmt = stmt.strip()
+        if stmt:
+            try:
+                cur.execute(stmt)
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"ALTER TABLE portfolios: {e}")
 
     # Widen trade_signals UNIQUE constraint to include model_horizon (per-horizon signals)
     for stmt in SQL_TRADE_SIGNALS_MIGRATE:

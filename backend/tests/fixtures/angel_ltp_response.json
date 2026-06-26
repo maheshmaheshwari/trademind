@@ -1,0 +1,12 @@
+{
+  "_mirrors": "collectors/ltp_fetcher.py:fetch_ltp_batch() lines 92-104 — smart_api.ltpData() return shape",
+  "status": true,
+  "message": "SUCCESS",
+  "errorcode": "",
+  "data": {
+    "exchange": "NSE",
+    "tradingsymbol": "RELIANCE-EQ",
+    "symboltoken": "2885",
+    "ltp": 1458.3
+  }
+}

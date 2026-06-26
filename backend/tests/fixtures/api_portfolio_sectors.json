@@ -1,0 +1,237 @@
+{
+  "_mirrors": "api/routes/portfolio.py GET /api/portfolio/sectors \u2014 live-sampled",
+  "data": [
+    {
+      "sector": "Financial Services",
+      "total_stocks": 95,
+      "signals": {
+        "STRONG BUY": 28,
+        "BUY": 48,
+        "HOLD": 87,
+        "SELL": 42,
+        "STRONG SELL": 86
+      }
+    },
+    {
+      "sector": "Capital Goods",
+      "total_stocks": 64,
+      "signals": {
+        "STRONG BUY": 15,
+        "BUY": 38,
+        "HOLD": 67,
+        "SELL": 27,
+        "STRONG SELL": 77
+      }
+    },
+    {
+      "sector": "Healthcare",
+      "total_stocks": 52,
+      "signals": {
+        "STRONG BUY": 12,
+        "BUY": 14,
+        "HOLD": 43,
+        "SELL": 27,
+        "STRONG SELL": 51
+      }
+    },
+    {
+      "sector": "Automobile and Auto Components",
+      "total_stocks": 35,
+      "signals": {
+        "STRONG BUY": 5,
+        "BUY": 16,
+        "HOLD": 39,
+        "SELL": 23,
+        "STRONG SELL": 35
+      }
+    },
+    {
+      "sector": "Fast Moving Consumer Goods",
+      "total_stocks": 30,
+      "signals": {
+        "STRONG BUY": 7,
+        "BUY": 7,
+        "HOLD": 14,
+        "SELL": 17,
+        "STRONG SELL": 29
+      }
+    },
+    {
+      "sector": "Information Technology",
+      "total_stocks": 28,
+      "signals": {
+        "STRONG BUY": 7,
+        "BUY": 11,
+        "HOLD": 9,
+        "SELL": 5,
+        "STRONG SELL": 36
+      }
+    },
+    {
+      "sector": "Chemicals",
+      "total_stocks": 26,
+      "signals": {
+        "STRONG BUY": 6,
+        "BUY": 3,
+        "HOLD": 12,
+        "SELL": 20,
+        "STRONG SELL": 45
+      }
+    },
+    {
+      "sector": "Consumer Services",
+      "total_stocks": 26,
+      "signals": {
+        "STRONG BUY": 2,
+        "BUY": 3,
+        "HOLD": 10,
+        "SELL": 6,
+        "STRONG SELL": 24
+      }
+    },
+    {
+      "sector": "Consumer Durables",
+      "total_stocks": 19,
+      "signals": {
+        "STRONG BUY": 2,
+        "BUY": 3,
+        "HOLD": 13,
+        "SELL": 5,
+        "STRONG SELL": 29
+      }
+    },
+    {
+      "sector": "Oil Gas & Consumable Fuels",
+      "total_stocks": 18,
+      "signals": {
+        "STRONG BUY": 1,
+        "BUY": 6,
+        "HOLD": 16,
+        "SELL": 9,
+        "STRONG SELL": 26
+      }
+    },
+    {
+      "sector": "Power",
+      "total_stocks": 17,
+      "signals": {
+        "STRONG BUY": 2,
+        "BUY": 3,
+        "HOLD": 7,
+        "SELL": 13,
+        "STRONG SELL": 11
+      }
+    },
+    {
+      "sector": "Metals & Mining",
+      "total_stocks": 17,
+      "signals": {
+        "STRONG BUY": 0,
+        "BUY": 8,
+        "HOLD": 18,
+        "SELL": 12,
+        "STRONG SELL": 17
+      }
+    },
+    {
+      "sector": "Services",
+      "total_stocks": 14,
+      "signals": {
+        "STRONG BUY": 1,
+        "BUY": 9,
+        "HOLD": 13,
+        "SELL": 7,
+        "STRONG SELL": 12
+      }
+    },
+    {
+      "sector": "Construction",
+      "total_stocks": 12,
+      "signals": {
+        "STRONG BUY": 5,
+        "BUY": 5,
+        "HOLD": 10,
+        "SELL": 7,
+        "STRONG SELL": 10
+      }
+    },
+    {
+      "sector": "Construction Materials",
+      "total_stocks": 11,
+      "signals": {
+        "STRONG BUY": 2,
+        "BUY": 2,
+        "HOLD": 7,
+        "SELL": 9,
+        "STRONG SELL": 5
+      }
+    },
+    {
+      "sector": "Realty",
+      "total_stocks": 10,
+      "signals": {
+        "STRONG BUY": 2,
+        "BUY": 4,
+        "HOLD": 6,
+        "SELL": 5,
+        "STRONG SELL": 10
+      }
+    },
+    {
+      "sector": "Telecommunication",
+      "total_stocks": 10,
+      "signals": {
+        "STRONG BUY": 0,
+        "BUY": 2,
+        "HOLD": 8,
+        "SELL": 7,
+        "STRONG SELL": 18
+      }
+    },
+    {
+      "sector": "Textiles",
+      "total_stocks": 6,
+      "signals": {
+        "STRONG BUY": 0,
+        "BUY": 1,
+        "HOLD": 1,
+        "SELL": 3,
+        "STRONG SELL": 9
+      }
+    },
+    {
+      "sector": "Media Entertainment & Publication",
+      "total_stocks": 4,
+      "signals": {
+        "STRONG BUY": 1,
+        "BUY": 1,
+        "HOLD": 1,
+        "SELL": 1,
+        "STRONG SELL": 8
+      }
+    },
+    {
+      "sector": "Diversified",
+      "total_stocks": 3,
+      "signals": {
+        "STRONG BUY": 2,
+        "BUY": 1,
+        "HOLD": 5,
+        "SELL": 0,
+        "STRONG SELL": 1
+      }
+    },
+    {
+      "sector": "Forest Materials",
+      "total_stocks": 1,
+      "signals": {
+        "STRONG BUY": 0,
+        "BUY": 0,
+        "HOLD": 1,
+        "SELL": 0,
+        "STRONG SELL": 0
+      }
+    }
+  ],
+  "total_sectors": 21
+}

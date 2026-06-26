@@ -25,10 +25,11 @@ from typing import Optional
 
 import pyotp
 import requests as http_requests
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from api.auth import decode_token, create_token, hash_password, verify_password
+from api.rate_limit import limiter
 from database.db import _execute, _row_to_dict, _rows_to_dicts, get_connection, release_connection
 from trading.trading_engine import get_user
 
@@ -306,8 +307,11 @@ async def set_password(req: SetPasswordRequest, user: dict = Depends(get_current
 # ---------------------------------------------------------------------------
 
 @router.post("/auth/password/reset-request")
-async def password_reset_request(req: ResetRequestBody):
-    """Generate a 6-digit OTP and store its hash for password reset."""
+@limiter.limit("5/hour")
+async def password_reset_request(req: ResetRequestBody, request: Request):
+    """Generate a 6-digit OTP and store its hash for password reset.
+
+    Rate-limited (audit M2) — was previously unthrottled (row-growth/spam vector)."""
     otp = "".join(secrets.choice("0123456789") for _ in range(6))
     otp_hash = hash_password(otp)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
@@ -332,8 +336,12 @@ async def password_reset_request(req: ResetRequestBody):
 # ---------------------------------------------------------------------------
 
 @router.post("/auth/password/reset-confirm")
-async def password_reset_confirm(req: ResetConfirmBody):
-    """Verify the OTP and set a new password."""
+@limiter.limit("10/hour")
+async def password_reset_confirm(req: ResetConfirmBody, request: Request):
+    """Verify the OTP and set a new password.
+
+    Rate-limited (audit H2) — a 6-digit OTP (1M space) was brute-forceable
+    within its 15-minute validity window with no limit on confirm attempts."""
     if len(req.new_password) < 8:
         raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
 

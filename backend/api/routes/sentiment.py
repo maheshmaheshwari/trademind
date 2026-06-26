@@ -52,7 +52,7 @@ async def market_sentiment():
 
     except Exception as e:
         logger.error(f"Error fetching market sentiment: {e}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching market sentiment")
 
 
 @router.get("/sentiment/health")
@@ -160,7 +160,7 @@ async def sentiment_health():
 
     except Exception as e:
         logger.error(f"sentiment_health error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Error fetching sentiment health")
 
 
 @router.get("/sentiment/{symbol}")
@@ -200,4 +200,4 @@ async def stock_sentiment(symbol: str):
 
     except Exception as e:
         logger.error(f"Error fetching sentiment for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching sentiment")

@@ -62,3 +62,10 @@ tqdm==4.67.1
 # Development
 black==24.10.0
 isort==5.13.2
+
+# Testing
+pytest==8.3.4
+httpx==0.28.1
+
+# Rate limiting
+slowapi==0.1.10

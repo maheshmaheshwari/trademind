@@ -47,7 +47,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
+from api.rate_limit import limiter
 from api.routes import prices, indicators, sentiment, signals
 from database.db import init_database
 
@@ -73,17 +77,38 @@ app = FastAPI(
 # ==========================================
 # CORS Middleware
 # ==========================================
+# Allowed origins are env-driven (CORS_ALLOWED_ORIGINS, comma-separated) so
+# production domains can be added without code changes, defaulting to the
+# local dev origins. allow_credentials=True means "*" must never appear
+# here — the browser CORS spec forbids combining wildcard origin with
+# credentialed requests, so we fail fast rather than silently no-op if
+# someone sets CORS_ALLOWED_ORIGINS=*.
+_cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
+_CORS_ALLOWED_ORIGINS = (
+    [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+    if _cors_origins_env
+    else ["http://localhost:5173", "http://localhost:5174", "http://127.0.0.1:5173"]
+)
+if "*" in _CORS_ALLOWED_ORIGINS:
+    raise RuntimeError(
+        "CORS_ALLOWED_ORIGINS must not be '*' while allow_credentials=True "
+        "— list explicit origins instead."
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=_CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==========================================
+# Rate limiting (audit findings H2, H3, M2, M15)
+# ==========================================
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # ==========================================
 # Request / Response logging middleware

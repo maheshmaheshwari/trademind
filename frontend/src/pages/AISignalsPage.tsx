@@ -168,28 +168,28 @@ export default function AISignalsPage() {
                   <Td><SymbolCell symbol={s?.symbol} name={s?.name} sector={s?.sector} showSector={false} /></Td>
                   <Td>
                     <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 border border-line"
-                      style={{ color: SECTOR_COLORS[s.sector] ?? 'var(--text-2)' }}>{s.sector}</span>
+                      style={{ color: SECTOR_COLORS[s?.sector ?? ''] ?? 'var(--text-2)' }}>{s?.sector}</span>
                   </Td>
-                  <Td><SignalBadge signal={s.signal} /></Td>
-                  <Td><div className="min-w-[130px]"><Conf value={s.confidence} /></div></Td>
+                  <Td><SignalBadge signal={s?.signal} /></Td>
+                  <Td><div className="min-w-[130px]"><Conf value={s?.confidence} /></div></Td>
                   <Td>
-                    <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s.horizon}</span>
+                    <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s?.horizon}</span>
                   </Td>
                   <Td align="right">
-                    {s.expReturn != null ? (
+                    {s?.expReturn != null ? (
                       <span className="font-mono font-semibold tabular-nums" style={{ color: s.expReturn >= 0 ? 'var(--green)' : 'var(--red)' }}>
                         {(s.expReturn >= 0 ? '+' : '') + Number(s.expReturn).toFixed(2) + '%'}
                       </span>
                     ) : <span className="text-ink-3">—</span>}
                   </Td>
                   <Td align="right">
-                    {s.sentiment != null ? (
+                    {s?.sentiment != null ? (
                       <span className="font-mono tabular-nums" style={{ color: s.sentiment >= 0 ? 'var(--green)' : 'var(--red)' }}>
                         {(s.sentiment >= 0 ? '+' : '') + Number(s.sentiment).toFixed(2)}
                       </span>
                     ) : <span className="text-ink-3">—</span>}
                   </Td>
-                  <Td align="right"><span className="text-[12px] text-ink-3 font-mono">{fmtAgo(s.updatedMin ?? 0)}</span></Td>
+                  <Td align="right"><span className="text-[12px] text-ink-3 font-mono">{fmtAgo(s?.updatedMin ?? 0)}</span></Td>
                 </tr>
               ))}
             </tbody>

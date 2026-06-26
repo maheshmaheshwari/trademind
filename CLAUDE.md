@@ -5,7 +5,7 @@
 AI-powered trading platform for Nifty 500 stocks (Indian market).
 - **Backend**: FastAPI + Python, ML models (XGBoost / LightGBM / RandomForest), TimescaleDB
 - **Frontend**: React + TypeScript + Vite + MUI + TailwindCSS
-- **Database**: TimescaleDB (PostgreSQL) in Docker on port 5433
+- **Database**: TimescaleDB (PostgreSQL), hosted on **Timescale Cloud** (managed service — not local Docker)
 - **ML**: 480 per-stock binary classification models, 6 prediction horizons (1W–6M)
 - **Primary data source**: Angel One SmartAPI — ALL price/OHLCV data comes from Angel One, not Yahoo Finance or any other provider
 
@@ -35,10 +35,13 @@ trademind/
 │   │   └── schema_pg.py       — TimescaleDB schema (hypertables, compression, cagg)
 │   ├── scheduler/jobs.py      — APScheduler (EOD + hourly + weekly jobs)
 │   ├── trading/               — GTT manager, price monitor, risk manager, engine
-│   ├── final_models/          — 480 production .pkl models (~247MB)
-│   ├── models/                — Training snapshots (v2/v3 per stock)
+│   ├── scripts/                — Manual/CLI pipeline scripts (generate_trades.py, update_stocks_angel.py, retrain_*.py, run_*.sh, etc.) — imported by scheduler/jobs.py as `scripts.<name>`
+│   ├── final_models/          — 480 production .pkl models (~247MB) — live, loaded by the API
+│   ├── model_archives/
+│   │   ├── training_snapshots/ — Per-symbol training output (v2/v3) written by model_training.py, read by scripts/retrain_failed_models.py
+│   │   └── previous_models/    — Pre-retrain backups, written by scripts/retrain_walk_forward.py
 │   ├── data/                  — trade_signals_latest.json, angel_tokens.json
-│   ├── generate_trades.py     — Regenerate all trade signals from models
+│   ├── tests/                  — pytest suite, runs against the TEST Timescale Cloud instance only
 │   ├── migrate_sqlite_to_pg.py — One-shot SQLite → TimescaleDB migration
 │   ├── nifty500.db            — SQLite fallback (226MB, kept for reference)
 │   ├── requirements.txt
@@ -54,20 +57,25 @@ trademind/
 │   └── vite.config.ts
 ├── docs/
 │   ├── 01_database.md         — TimescaleDB architecture
-│   └── 04_migration.md        — Data migration guide
+│   ├── 04_migration.md        — Data migration guide
+│   ├── RUNNING.md             — How to start frontend + backend
+│   └── SETUP.md               — Full setup guide
 ├── CLAUDE.md                  — This file
-└── RUNNING.md                 — How to start frontend + backend
+└── README.md
 ```
 
 ---
 
 ## Database
 
-**Engine**: TimescaleDB (PostgreSQL) in Docker — **port 5433** (not 5432).
+**Engine**: TimescaleDB (PostgreSQL), hosted on **Timescale Cloud** (a managed instance — there is no local Docker container for this anymore). Connection details (host/port/credentials) live in `backend/.env` only — never hardcode them, and never commit real values outside `.env`.
 
 ```
-PGHOST=localhost  PGPORT=5433  PGDATABASE=trademind
-PGUSER=trademind  PGPASSWORD=trademind
+PGHOST=<your-instance>.tsdb.cloud.timescale.com
+PGPORT=<cloud-assigned-port>   # not 5433 — that was the old local-Docker port
+PGDATABASE=tsdb
+PGUSER=tsdbadmin
+PGPASSWORD=<see backend/.env>
 ```
 
 All DB access goes through `backend/database/db.py`. It auto-detects PG vs SQLite:
@@ -121,11 +129,11 @@ python -c "import sys; sys.path.insert(0,'.'); from analysis.model_training impo
 ## Key Environment Variables (backend/.env)
 
 ```
-PGHOST=localhost
-PGPORT=5433
-PGDATABASE=trademind
-PGUSER=trademind
-PGPASSWORD=trademind
+PGHOST=<your-instance>.tsdb.cloud.timescale.com   # Timescale Cloud, not local Docker
+PGPORT=<cloud-assigned-port>
+PGDATABASE=tsdb
+PGUSER=tsdbadmin
+PGPASSWORD=...
 
 ANGEL_API_KEY=...
 ANGEL_CLIENT_ID=...
@@ -186,6 +194,39 @@ Already applied to: DashboardPage, MarketPage, WatchlistPage, TradesPage, Autopi
 
 ---
 
+## Testing & Test Database
+
+There are **two** Timescale Cloud instances: production (`backend/.env`) and a dedicated **test** instance (`backend/.env.test`, gitignored — template in `backend/.env.test.example`). Never test against prod directly; this is what caused a real incident (an accidental script import wrote yfinance data into prod).
+
+**The switch**: `database/db.py` calls `load_dotenv()` for `.env` as always, then — only if `APP_ENV=test` is set — reloads `.env.test` with `override=True`, so test credentials win regardless of import order. This means `APP_ENV=test` must be set **before any `database.db` import**, including in ad-hoc shell commands:
+
+```bash
+cd backend && source venv/bin/activate
+APP_ENV=test python -c "from database.db import get_connection; print(get_connection().dsn)"  # sanity-check the host before doing anything else
+```
+
+### Required workflow for `database/schema_pg.py` changes
+
+1. Edit `schema_pg.py`.
+2. Apply to the **test** instance first: `APP_ENV=test python -c "from database.db import init_database; init_database()"`.
+3. Run the suite: `APP_ENV=test pytest -v` (from `backend/`).
+4. Only once green, apply the same (idempotent — `CREATE TABLE/INDEX IF NOT EXISTS`) change to prod: `python -c "from database.db import init_database; init_database()"` (no `APP_ENV`).
+5. Treat any write to prod as requiring explicit confirmation each time, even idempotent ones — don't assume an earlier approval covers a later, different change.
+
+`schema_pg.py` is the single source of truth for the schema — if a table/index exists on prod but isn't in this file (this has happened: `delivery_data` and the `idx_prices_daily_unique` partial index were both created out-of-band on prod and missing here until found via test-DB testing), a fresh environment built from this file will be broken. The test DB is what catches this category of bug — a brand-new instance has nothing built out-of-band to mask gaps.
+
+### pytest suite (`backend/tests/`)
+
+- `conftest.py` sets `APP_ENV=test` at import time, bootstraps the schema once per session, truncates `prices`/`technical_indicators`/`trade_signals`/`news_sentiment` before every test, and provides an `api_client` fixture (`TestClient(app)`, deliberately not used as a context manager so `api/server.py`'s `startup_event` — and the real APScheduler — never runs).
+- `tests/fixtures/*.json` mirror real external API response shapes (Angel One `getCandleData`/`ltpData`, yfinance `Ticker.news`) and real live API-layer responses (`/api/signals/all`, `/api/stocks`, etc.) — each fixture's `_mirrors` key states exactly which file/function's contract it represents, so it's traceable when that code changes.
+- `tests/test_api_routes.py` — seeds the test DB the same way production data actually arrives (the same insert helpers/SQL the app uses), then hits the real route through `api_client` and asserts on the response. A few routes are file-backed instead of DB-backed (`/api/signals/all`, `/api/backtest/summary`) — those tests monkeypatch the route module's path constant to a fixture file so they never touch the real `backend/data/*.json` used by the live app.
+- `tests/test_scheduler_jobs.py` — DB-only jobs (`calculate_indicators_job`, `cleanup_old_data_job`, `verify_data_integrity_job`) run directly against seeded test-DB data.
+- `tests/test_external_api_contracts.py` — feeds the Angel One/yfinance fixtures into the actual parsing functions (`scripts/update_stocks_angel.py:fetch_candles`, `collectors/yfinance_news_collector.py:collect_stock`, etc.) with a fake API object standing in for `SmartConnect`/`yf.Ticker`, and checks the resulting DB rows — this is what would catch an Angel One/yfinance response-shape change before it breaks a live job.
+
+Run everything: `cd backend && APP_ENV=test pytest -v`.
+
+---
+
 ## Starting the Backend
 
 Two modes — use **dev** during development, **prod** for stable runs.
@@ -230,23 +271,20 @@ python -c "from database.db import init_database; init_database()"
 python -c "from database.db import get_db_stats; [print(f'{t}: {n:,}') for t,n in get_db_stats().items()]"
 
 # Regenerate trade signals
-python generate_trades.py
+python scripts/generate_trades.py
 
-# Direct DB access
-docker exec -it trademind-db psql -U trademind -d trademind
+# Direct DB access (Timescale Cloud — credentials in backend/.env)
+psql "postgres://$PGUSER:$PGPASSWORD@$PGHOST:$PGPORT/$PGDATABASE?sslmode=require"
 ```
 
 ---
 
-## Docker (TimescaleDB)
+## Database Hosting (Timescale Cloud)
+
+The database is a managed **Timescale Cloud** instance — there is no local Docker container to start/stop. Connect directly with `psql` using the credentials in `backend/.env`:
 
 ```bash
-# Start container (auto-restarts)
-docker start trademind-db
-
-# Or first-time setup
-docker run -d --name trademind-db --restart unless-stopped \
-  -e POSTGRES_PASSWORD=trademind -e POSTGRES_DB=trademind -e POSTGRES_USER=trademind \
-  -p 5433:5432 -v ~/trademind-pgdata:/var/lib/postgresql/data \
-  timescale/timescaledb:latest-pg16
+psql "postgres://$PGUSER:$PGPASSWORD@$PGHOST:$PGPORT/$PGDATABASE?sslmode=require"
 ```
+
+Provisioning, scaling, and backups are managed through the Timescale Cloud console, not via `docker run`.

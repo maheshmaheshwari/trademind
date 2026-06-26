@@ -1,0 +1,15 @@
+{
+  "_mirrors": "collectors/yfinance_news_collector.py:collect_stock() lines 100-106 — yf.Ticker(symbol).news return shape",
+  "news": [
+    {
+      "title": "RELIANCE shares rally on strong Q1 earnings beat",
+      "link": "https://finance.yahoo.com/news/reliance-q1-earnings-beat-example",
+      "providerPublishTime": 1782259200,
+      "content": {
+        "title": "RELIANCE shares rally on strong Q1 earnings beat",
+        "canonicalUrl": {"url": "https://finance.yahoo.com/news/reliance-q1-earnings-beat-example"},
+        "pubDate": "2026-06-23T09:15:00Z"
+      }
+    }
+  ]
+}

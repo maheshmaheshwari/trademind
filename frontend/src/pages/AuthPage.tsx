@@ -5,6 +5,7 @@ import { useLoginMutation, useLoginMfaMutation, useRegisterMutation, useRequestP
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../ThemeContext';
 import { useToast } from '../components/ui';
+import { setToken } from '../api';
 
 function MiniSpark({ pts, color, w = 70, h = 26 }: { pts: number[]; color: string; w?: number; h?: number }) {
   const mn = Math.min(...pts), mx = Math.max(...pts), rng = mx - mn || 1;
@@ -114,7 +115,7 @@ export default function AuthPage() {
     onSuccess: async (tokenResponse) => {
       try {
         const res = await googleAuthMutation({ access_token: tokenResponse.access_token }).unwrap();
-        localStorage.setItem('trademind_token', res.token);
+        setToken(res.token, true);
         login(res.user);
         navigate('/dashboard');
       } catch (err: any) {
@@ -161,10 +162,7 @@ export default function AuthPage() {
     if (mode === 'register' && !name.trim()) { setErr('Please enter your full name'); return; }
     setErr('');
     try {
-      const storeToken = (t: string) => {
-        if (remember) localStorage.setItem('trademind_token', t);
-        else sessionStorage.setItem('trademind_token', t);
-      };
+      const storeToken = (t: string) => setToken(t, remember);
       if (mode === 'register') {
         const data = await registerMutation({ username: username.trim(), password: pw, display_name: name.trim() }).unwrap();
         storeToken((data as any).token);
@@ -195,8 +193,7 @@ export default function AuthPage() {
     setMfaErr('');
     try {
       const data = await loginMfaMut({ mfa_token: mfaToken, totp_code: mfaCode.trim() }).unwrap();
-      if (remember) localStorage.setItem('trademind_token', data.token);
-      else sessionStorage.setItem('trademind_token', data.token);
+      setToken(data.token, remember);
       login(data.user);
       navigate('/dashboard');
     } catch {

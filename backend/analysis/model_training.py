@@ -1408,8 +1408,8 @@ def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date:
         }
 
     # ── Save ──────────────────────────────────────────────────────────────────
-    os.makedirs("models", exist_ok=True)
-    path = f"models/best_{symbol}_v3.pkl"
+    os.makedirs("model_archives/training_snapshots", exist_ok=True)
+    path = f"model_archives/training_snapshots/best_{symbol}_v3.pkl"
     artifact = {
         # Per-horizon bests (Option A: one model per horizon per stock)
         'horizons':      horizon_bests,

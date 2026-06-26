@@ -19,6 +19,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# APP_ENV=test routes every PG* var at a separate Timescale Cloud test instance,
+# overriding whatever .env already set — regardless of import order, this module
+# owns the final connection params. See CLAUDE.md "Testing & Test Database".
+if os.getenv("APP_ENV") == "test":
+    load_dotenv(".env.test", override=True)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -29,8 +35,12 @@ PGHOST     = os.getenv("PGHOST", "localhost")
 PGPORT     = int(os.getenv("PGPORT", "5433"))
 PGDATABASE = os.getenv("PGDATABASE", "trademind")
 PGUSER     = os.getenv("PGUSER", "trademind")
-PGPASSWORD = os.getenv("PGPASSWORD", "trademind")
-PGSSLMODE  = os.getenv("PGSSLMODE", "prefer")  # set PGSSLMODE=require in production; disable for local Docker
+PGPASSWORD = os.getenv("PGPASSWORD", "trademind")  # set in .env; override with .env.test for test DB
+# Defaults to "prefer" for local-dev flexibility (e.g. a local Postgres with
+# no SSL configured). Both backend/.env (prod) and backend/.env.test set
+# PGSSLMODE=require explicitly, so the real Timescale Cloud instances always
+# negotiate TLS regardless of this default.
+PGSSLMODE  = os.getenv("PGSSLMODE", "prefer")
 
 
 # ---------------------------------------------------------------------------
@@ -708,14 +718,19 @@ def get_user_analytics(user_id: int) -> Dict:
         by_horizon = _rows_to_dicts(cur)
 
         # ── P&L by confidence band ────────────────────────────────────────
+        # Literal % in these string labels must be escaped as %% — psycopg2's
+        # parameter substitution treats a lone % as the start of a %s/%(name)s
+        # placeholder, which previously broke this query with a spurious
+        # "IndexError: tuple index out of range" (only 1 bound param, but the
+        # unescaped %9/%8/%7/%6/%< sequences looked like more placeholders).
         cur = _execute(conn, """
             SELECT
                 CASE
-                    WHEN confidence >= 90 THEN '90-100%'
-                    WHEN confidence >= 80 THEN '80-90%'
-                    WHEN confidence >= 70 THEN '70-80%'
-                    WHEN confidence >= 60 THEN '60-70%'
-                    ELSE '<60%'
+                    WHEN confidence >= 90 THEN '90-100%%'
+                    WHEN confidence >= 80 THEN '80-90%%'
+                    WHEN confidence >= 70 THEN '70-80%%'
+                    WHEN confidence >= 60 THEN '60-70%%'
+                    ELSE '<60%%'
                 END AS confidence_band,
                 COUNT(*)                                AS trade_count,
                 SUM(COALESCE(pnl, 0))                  AS total_pnl,

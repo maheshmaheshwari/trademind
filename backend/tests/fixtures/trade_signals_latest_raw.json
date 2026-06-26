@@ -1,0 +1,29 @@
+{
+  "_mirrors": "data/trade_signals_latest.json — raw shape consumed by api/routes/signals.py GET /signals/all (actionable_trades/avoid_list/hold_list, each item nested model/trade/sentiment)",
+  "generated_at": "2026-06-24 09:00:00",
+  "total_models": 480,
+  "total_signals": 1,
+  "total_stocks": 1,
+  "summary": {"buy": 1, "sell": 0, "hold": 0},
+  "actionable_trades": [
+    {
+      "symbol": "TESTSTOCK.NS",
+      "name": "Test Stock Ltd.",
+      "signal": "STRONG BUY",
+      "confidence": 91.5,
+      "generated_at": "2026-06-24 09:00:00",
+      "model": {"name": "XGBoost_1M", "horizon": "1 Month", "accuracy": 82.0, "precision": 74.0},
+      "trade": {
+        "expected_return_pct": 5.0,
+        "buy_price": 100.0,
+        "target_price": 105.0,
+        "stop_loss": 95.0,
+        "risk_reward": 2.1
+      },
+      "sentiment": {"sent_stock": 0.12}
+    }
+  ],
+  "avoid_list": [],
+  "hold_list": [],
+  "errors": []
+}

@@ -88,7 +88,7 @@ export default function RiskSettingsPage() {
   const [mode,         setMode]         = useState<'paper' | 'live'>('paper');
   const [accent,       setAccent]       = useState('#3B82F6');
 
-  const { data: settings, isLoading: loading } = useGetRiskSettingsQuery(user!.id, { skip: !user });
+  const { data: settings, isLoading: loading } = useGetRiskSettingsQuery(user?.id ?? 0, { skip: !user });
   const [updateRiskSettings, { isLoading: saving }] = useUpdateRiskSettingsMutation();
 
   useEffect(() => {
@@ -120,12 +120,19 @@ export default function RiskSettingsPage() {
 
   async function handleSave() {
     if (!user) return;
+    // Audit M19 — these limits exist to protect the account; a zero/negative
+    // value would silently disable the protection they're meant to provide.
+    const dailyLoss = +maxDailyLoss, sl = +stopLossPct, target = +targetPct, posSz = +maxPosSz;
+    if (!(dailyLoss > 0)) { toast({ type: 'error', title: 'Invalid input', msg: 'Max Daily Loss must be greater than 0' }); return; }
+    if (!(sl > 0 && sl <= 100)) { toast({ type: 'error', title: 'Invalid input', msg: 'Stop Loss % must be between 0 and 100' }); return; }
+    if (!(target > 0 && target <= 100)) { toast({ type: 'error', title: 'Invalid input', msg: 'Target % must be between 0 and 100' }); return; }
+    if (!(posSz > 0)) { toast({ type: 'error', title: 'Invalid input', msg: 'Max Position Size must be greater than 0' }); return; }
     try {
       await updateRiskSettings({ userId: user.id, settings: {
-        max_daily_loss:    +maxDailyLoss,
-        stop_loss_pct:     +stopLossPct,
-        target_pct:        +targetPct,
-        max_position_size: +maxPosSz,
+        max_daily_loss:    dailyLoss,
+        stop_loss_pct:     sl,
+        target_pct:        target,
+        max_position_size: posSz,
         auto_stop_loss:    autoSL ? 1 : 0,
         auto_target:       autoTarget ? 1 : 0,
         mode,

@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_BASE_URL || 'http://localhost:8000';
 
 // ==========================================
 // Server-Side Table Params
@@ -279,6 +279,20 @@ export async function getStockIndicators(symbol: string) {
 export function clearToken() {
   localStorage.removeItem('trademind_token');
   sessionStorage.removeItem('trademind_token');
+}
+
+// Shared write path for the auth token (audit Low item — AuthPage.tsx
+// previously wrote to localStorage/sessionStorage directly in three places,
+// risking drift between them). `remember=true` persists across browser
+// restarts (localStorage); `remember=false` clears on tab close (sessionStorage).
+export function setToken(token: string, remember: boolean) {
+  if (remember) {
+    localStorage.setItem('trademind_token', token);
+    sessionStorage.removeItem('trademind_token');
+  } else {
+    sessionStorage.setItem('trademind_token', token);
+    localStorage.removeItem('trademind_token');
+  }
 }
 
 // ==========================================

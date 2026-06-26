@@ -308,14 +308,26 @@ def sync_gtt_statuses() -> List[Dict]:
                 """, (gtt["bracket_id"], other_purpose)).fetchone()
 
                 if other_order and other_order[1]:
-                    cancel_gtt(int(other_order[1]))
+                    # DB write + commit first (audit H10): if the broker-side
+                    # cancel below fails, our DB at least reflects the intent
+                    # and the next sync cycle's gttDetails() check will catch
+                    # a still-live broker rule and retry — the reverse order
+                    # (broker cancel first) risked the broker successfully
+                    # cancelling while the DB write/commit then failed,
+                    # leaving local state silently wrong with no flag at all.
                     _execute(conn, """
                         UPDATE orders SET gtt_status = 'CANCELLED', status = 'CANCELLED',
                             updated_at = ?
                         WHERE id = ?
                     """, (now, other_order[0]))
-
-                conn.commit()
+                    conn.commit()
+                    if not cancel_gtt(int(other_order[1])):
+                        logger.error(
+                            f"⚠️ Broker-side cancel of GTT {other_order[1]} failed after DB marked it "
+                            f"CANCELLED — possible orphaned live GTT, needs manual reconciliation"
+                        )
+                else:
+                    conn.commit()
 
                 # Square off the position in our trading engine
                 try:
@@ -324,7 +336,22 @@ def sync_gtt_statuses() -> List[Dict]:
                     result["gtt_rule_id"] = rule_id
                     triggered.append(result)
                 except Exception as e:
-                    logger.error(f"Error squaring off after GTT trigger: {e}")
+                    # Audit M10: order status above is already 'EXECUTED' (the
+                    # broker GTT did fire), but square_off failed — without this
+                    # flag, order history says EXECUTED while the position stays
+                    # open and the balance is never credited, with no signal
+                    # anywhere that reconciliation is needed. This is a best-effort
+                    # flag, not an automatic retry — the next sync cycle won't
+                    # re-attempt this on its own since the order is no longer PENDING.
+                    logger.error(f"Error squaring off after GTT trigger for {gtt['symbol']}: {e} — flagging for manual reconciliation")
+                    try:
+                        _execute(conn, """
+                            UPDATE orders SET gtt_status = 'SQUAREOFF_FAILED', updated_at = ?
+                            WHERE id = ?
+                        """, (now, gtt["id"]))
+                        conn.commit()
+                    except Exception as flag_err:
+                        logger.error(f"Failed to flag order {gtt['id']} as SQUAREOFF_FAILED: {flag_err}")
 
             elif rule_status == "CANCELLED":
                 _execute(conn, """
@@ -367,10 +394,10 @@ def place_bracket_gtts(
 
     if not success:
         # Rollback: cancel any GTT that was created
-        if sl_id:
-            cancel_gtt(sl_id)
-        if target_id:
-            cancel_gtt(target_id)
+        if sl_id and not cancel_gtt(sl_id):
+            logger.error(f"⚠️ Rollback-cancel of SL GTT {sl_id} for {symbol} failed — orphaned live GTT, needs manual cleanup")
+        if target_id and not cancel_gtt(target_id):
+            logger.error(f"⚠️ Rollback-cancel of target GTT {target_id} for {symbol} failed — orphaned live GTT, needs manual cleanup")
         logger.error(f"❌ Failed to place bracket GTTs for {symbol} — rolled back")
 
     return {

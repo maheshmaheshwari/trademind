@@ -1,0 +1,640 @@
+{
+  "_mirrors": "api/routes/backtest.py GET /api/backtest/summary \u2014 live-sampled, history trimmed to 3",
+  "model_stats": {
+    "total_models": 1232,
+    "successful_models": 461,
+    "avg_accuracy": 78.1,
+    "avg_precision": 78.8,
+    "high_quality_models": 336,
+    "by_horizon": [
+      {
+        "horizon": "1 Week",
+        "avg_accuracy": 72.9,
+        "avg_precision": 74.7,
+        "count": 41
+      },
+      {
+        "horizon": "2 Weeks",
+        "avg_accuracy": 76.4,
+        "avg_precision": 77.9,
+        "count": 55
+      },
+      {
+        "horizon": "1 Month",
+        "avg_accuracy": 75.8,
+        "avg_precision": 76.6,
+        "count": 55
+      },
+      {
+        "horizon": "2 Months",
+        "avg_accuracy": 77.6,
+        "avg_precision": 79.2,
+        "count": 83
+      },
+      {
+        "horizon": "3 Months",
+        "avg_accuracy": 80.4,
+        "avg_precision": 77.7,
+        "count": 95
+      },
+      {
+        "horizon": "6 Months",
+        "avg_accuracy": 80.0,
+        "avg_precision": 81.8,
+        "count": 132
+      }
+    ],
+    "by_model_type": [
+      {
+        "model": "StackEnsemble",
+        "count": 117
+      },
+      {
+        "model": "RandForest",
+        "count": 95
+      },
+      {
+        "model": "Ensemble",
+        "count": 72
+      },
+      {
+        "model": "XGB_HiReg",
+        "count": 56
+      },
+      {
+        "model": "XGBoost",
+        "count": 53
+      },
+      {
+        "model": "LGB_HiReg",
+        "count": 27
+      },
+      {
+        "model": "CatBoost",
+        "count": 11
+      },
+      {
+        "model": "LightGBM",
+        "count": 11
+      },
+      {
+        "model": "GradBoost",
+        "count": 11
+      },
+      {
+        "model": "TabNet",
+        "count": 8
+      }
+    ]
+  },
+  "signal_stats": {
+    "generated_at": "2026-06-23 13:05:40",
+    "total_signals": 1456,
+    "distribution": {
+      "STRONG_BUY": 100,
+      "BUY": 185,
+      "HOLD": 387,
+      "SELL": 245,
+      "STRONG_SELL": 539
+    },
+    "avg_confidence": 84.2,
+    "avg_expected_return": 6.9,
+    "by_signal_type": [
+      {
+        "signal": "STRONG BUY",
+        "count": 100,
+        "avg_confidence": 91.8,
+        "avg_expected_return": 8.0
+      },
+      {
+        "signal": "BUY",
+        "count": 185,
+        "avg_confidence": 80.0,
+        "avg_expected_return": 6.3
+      },
+      {
+        "signal": "HOLD",
+        "count": 0,
+        "avg_confidence": 0,
+        "avg_expected_return": 0
+      },
+      {
+        "signal": "SELL",
+        "count": 0,
+        "avg_confidence": 0,
+        "avg_expected_return": 0
+      },
+      {
+        "signal": "STRONG SELL",
+        "count": 0,
+        "avg_confidence": 0,
+        "avg_expected_return": 0
+      }
+    ],
+    "top_signals": [
+      {
+        "symbol": "BAJAJFINSV.NS",
+        "name": "Bajaj Finserv Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 1783.0,
+          "target_price": 1961.3,
+          "stop_loss": 1707.55,
+          "risk_reward": 2.36,
+          "expected_return_pct": 10.0
+        },
+        "position": {
+          "avg_daily_volume": 987637,
+          "daily_turnover_cr": 176.1,
+          "liquidity": "VERY_HIGH",
+          "max_safe_qty": 25678,
+          "suggested_qty_per_user": 23020,
+          "suggested_investment_per_user": 41044660.0,
+          "min_qty": 2,
+          "recommended_volume": 25678,
+          "active_users": 1,
+          "volatility_pct": 1.6,
+          "delivery_pct": 70.7,
+          "price_impact_pct": 0.244,
+          "consumed_volume": 0,
+          "remaining_volume": 23020,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 1783.0,
+          "atr_14": 37.73,
+          "atr_pct": 2.12
+        },
+        "model": {
+          "name": "GradBoost_6M",
+          "horizon": "6 Months",
+          "accuracy": 88.1,
+          "precision": 75.0
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      },
+      {
+        "symbol": "BEML.NS",
+        "name": "BEML Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 1764.0,
+          "target_price": 1940.4,
+          "stop_loss": 1644.77,
+          "risk_reward": 1.48,
+          "expected_return_pct": 10.0
+        },
+        "position": {
+          "avg_daily_volume": 253539,
+          "daily_turnover_cr": 44.72,
+          "liquidity": "HIGH",
+          "max_safe_qty": 3803,
+          "suggested_qty_per_user": 4688,
+          "suggested_investment_per_user": 8269632.0,
+          "min_qty": 2,
+          "recommended_volume": 3803,
+          "active_users": 1,
+          "volatility_pct": 1.86,
+          "delivery_pct": 35.2,
+          "price_impact_pct": 0.253,
+          "consumed_volume": 0,
+          "remaining_volume": 4688,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 1764.0,
+          "atr_14": 59.61,
+          "atr_pct": 3.38
+        },
+        "model": {
+          "name": "LightGBM_6M",
+          "horizon": "6 Months",
+          "accuracy": 88.1,
+          "precision": 91.5
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      },
+      {
+        "symbol": "BLUESTARCO.NS",
+        "name": "Blue Star Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 1667.0,
+          "target_price": 1833.7,
+          "stop_loss": 1560.0,
+          "risk_reward": 1.56,
+          "expected_return_pct": 10.0
+        },
+        "position": {
+          "avg_daily_volume": 507314,
+          "daily_turnover_cr": 84.57,
+          "liquidity": "VERY_HIGH",
+          "max_safe_qty": 7609,
+          "suggested_qty_per_user": 8926,
+          "suggested_investment_per_user": 14879642.0,
+          "min_qty": 2,
+          "recommended_volume": 7609,
+          "active_users": 1,
+          "volatility_pct": 2.02,
+          "delivery_pct": 37.9,
+          "price_impact_pct": 0.267,
+          "consumed_volume": 0,
+          "remaining_volume": 8926,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 1667.0,
+          "atr_14": 53.5,
+          "atr_pct": 3.21
+        },
+        "model": {
+          "name": "XGB_HiReg_6M",
+          "horizon": "6 Months",
+          "accuracy": 91.8,
+          "precision": 82.6
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      },
+      {
+        "symbol": "CDSL.NS",
+        "name": "Central Depository Services (India) Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 1368.6,
+          "target_price": 1505.46,
+          "stop_loss": 1296.77,
+          "risk_reward": 1.91,
+          "expected_return_pct": 10.0
+        },
+        "position": {
+          "avg_daily_volume": 1990495,
+          "daily_turnover_cr": 272.42,
+          "liquidity": "VERY_HIGH",
+          "max_safe_qty": 29857,
+          "suggested_qty_per_user": 18420,
+          "suggested_investment_per_user": 25209612.0,
+          "min_qty": 3,
+          "recommended_volume": 29857,
+          "active_users": 1,
+          "volatility_pct": 1.74,
+          "delivery_pct": 40.5,
+          "price_impact_pct": 0.168,
+          "consumed_volume": 0,
+          "remaining_volume": 18420,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 1368.6,
+          "atr_14": 35.91,
+          "atr_pct": 2.62
+        },
+        "model": {
+          "name": "CatBoost_6M",
+          "horizon": "6 Months",
+          "accuracy": 81.5,
+          "precision": 91.7
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      },
+      {
+        "symbol": "CHOICEIN.NS",
+        "name": "Choice International Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 727.35,
+          "target_price": 778.26,
+          "stop_loss": 691.43,
+          "risk_reward": 1.42,
+          "expected_return_pct": 7.0
+        },
+        "position": {
+          "avg_daily_volume": 699490,
+          "daily_turnover_cr": 50.88,
+          "liquidity": "VERY_HIGH",
+          "max_safe_qty": 6994,
+          "suggested_qty_per_user": 6619,
+          "suggested_investment_per_user": 4814329.65,
+          "min_qty": 6,
+          "recommended_volume": 6994,
+          "active_users": 1,
+          "volatility_pct": 1.82,
+          "delivery_pct": 13.3,
+          "price_impact_pct": 0.177,
+          "consumed_volume": 0,
+          "remaining_volume": 6619,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 727.35,
+          "atr_14": 17.96,
+          "atr_pct": 2.47
+        },
+        "model": {
+          "name": "CatBoost_3M",
+          "horizon": "3 Months",
+          "accuracy": 86.8,
+          "precision": 91.1
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      },
+      {
+        "symbol": "COCHINSHIP.NS",
+        "name": "Cochin Shipyard Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 1476.4,
+          "target_price": 1579.75,
+          "stop_loss": 1369.02,
+          "risk_reward": 0.96,
+          "expected_return_pct": 7.0
+        },
+        "position": {
+          "avg_daily_volume": 1190572,
+          "daily_turnover_cr": 175.78,
+          "liquidity": "VERY_HIGH",
+          "max_safe_qty": 11905,
+          "suggested_qty_per_user": 10493,
+          "suggested_investment_per_user": 15491865.2,
+          "min_qty": 3,
+          "recommended_volume": 11905,
+          "active_users": 1,
+          "volatility_pct": 2.2,
+          "delivery_pct": 20.1,
+          "price_impact_pct": 0.207,
+          "consumed_volume": 0,
+          "remaining_volume": 10493,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 1476.4,
+          "atr_14": 53.69,
+          "atr_pct": 3.64
+        },
+        "model": {
+          "name": "LGB_HiReg_3M",
+          "horizon": "3 Months",
+          "accuracy": 83.2,
+          "precision": 100.0
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      },
+      {
+        "symbol": "COFORGE.NS",
+        "name": "Coforge Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 1483.9,
+          "target_price": 1632.29,
+          "stop_loss": 1372.44,
+          "risk_reward": 1.33,
+          "expected_return_pct": 10.0
+        },
+        "position": {
+          "avg_daily_volume": 3596969,
+          "daily_turnover_cr": 533.75,
+          "liquidity": "VERY_HIGH",
+          "max_safe_qty": 53954,
+          "suggested_qty_per_user": 66322,
+          "suggested_investment_per_user": 98415215.8,
+          "min_qty": 3,
+          "recommended_volume": 53954,
+          "active_users": 1,
+          "volatility_pct": 2.48,
+          "delivery_pct": 37.2,
+          "price_impact_pct": 0.337,
+          "consumed_volume": 0,
+          "remaining_volume": 66322,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 1483.9,
+          "atr_14": 55.73,
+          "atr_pct": 3.76
+        },
+        "model": {
+          "name": "RandForest_6M",
+          "horizon": "6 Months",
+          "accuracy": 81.5,
+          "precision": 77.8
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      },
+      {
+        "symbol": "CRISIL.NS",
+        "name": "CRISIL Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 4214.0,
+          "target_price": 4635.4,
+          "stop_loss": 3994.28,
+          "risk_reward": 1.92,
+          "expected_return_pct": 10.0
+        },
+        "position": {
+          "avg_daily_volume": 45483,
+          "daily_turnover_cr": 19.17,
+          "liquidity": "HIGH",
+          "max_safe_qty": 909,
+          "suggested_qty_per_user": 1097,
+          "suggested_investment_per_user": 4622758.0,
+          "min_qty": 1,
+          "recommended_volume": 909,
+          "active_users": 1,
+          "volatility_pct": 1.61,
+          "delivery_pct": 51.6,
+          "price_impact_pct": 0.25,
+          "consumed_volume": 0,
+          "remaining_volume": 1097,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 4214.0,
+          "atr_14": 109.86,
+          "atr_pct": 2.61
+        },
+        "model": {
+          "name": "LGB_HiReg_6M",
+          "horizon": "6 Months",
+          "accuracy": 93.8,
+          "precision": 77.1
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      },
+      {
+        "symbol": "DCMSHRIRAM.NS",
+        "name": "DCM Shriram Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 1046.0,
+          "target_price": 1119.22,
+          "stop_loss": 978.09,
+          "risk_reward": 1.08,
+          "expected_return_pct": 7.0
+        },
+        "position": {
+          "avg_daily_volume": 47119,
+          "daily_turnover_cr": 4.93,
+          "liquidity": "MEDIUM",
+          "max_safe_qty": 942,
+          "suggested_qty_per_user": 1160,
+          "suggested_investment_per_user": 1213360.0,
+          "min_qty": 4,
+          "recommended_volume": 942,
+          "active_users": 1,
+          "volatility_pct": 1.53,
+          "delivery_pct": 53.2,
+          "price_impact_pct": 0.24,
+          "consumed_volume": 0,
+          "remaining_volume": 1160,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 1046.0,
+          "atr_14": 33.96,
+          "atr_pct": 3.25
+        },
+        "model": {
+          "name": "RandForest_3M",
+          "horizon": "3 Months",
+          "accuracy": 85.1,
+          "precision": 71.8
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      },
+      {
+        "symbol": "DRREDDY.NS",
+        "name": "Dr. Reddy's Laboratories Ltd.",
+        "signal": "STRONG BUY",
+        "confidence": 100.0,
+        "trade": {
+          "type": "LONG",
+          "buy_price": 1290.7,
+          "target_price": 1419.77,
+          "stop_loss": 1240.06,
+          "risk_reward": 2.55,
+          "expected_return_pct": 10.0
+        },
+        "position": {
+          "avg_daily_volume": 1626258,
+          "daily_turnover_cr": 209.9,
+          "liquidity": "VERY_HIGH",
+          "max_safe_qty": 24393,
+          "suggested_qty_per_user": 30146,
+          "suggested_investment_per_user": 38909442.2,
+          "min_qty": 3,
+          "recommended_volume": 24393,
+          "active_users": 1,
+          "volatility_pct": 0.82,
+          "delivery_pct": 43.7,
+          "price_impact_pct": 0.112,
+          "consumed_volume": 0,
+          "remaining_volume": 30146,
+          "volume_utilisation_pct": 0.0
+        },
+        "price": {
+          "current": 1290.7,
+          "atr_14": 25.32,
+          "atr_pct": 1.96
+        },
+        "model": {
+          "name": "LGB_HiReg_6M",
+          "horizon": "6 Months",
+          "accuracy": 92.2,
+          "precision": 76.2
+        },
+        "sentiment": {
+          "sent_stock": 0.0,
+          "mkt_sentiment": 0.0
+        },
+        "top_drivers": [],
+        "generated_at": "2026-06-23 13:05:40"
+      }
+    ]
+  },
+  "history": [
+    {
+      "date": "2026-02-25",
+      "total_signals": 191,
+      "buy_signals": 36,
+      "sell_signals": 75,
+      "avg_expected_return": 4.3
+    },
+    {
+      "date": "2026-02-26",
+      "total_signals": 493,
+      "buy_signals": 112,
+      "sell_signals": 159,
+      "avg_expected_return": 5.0
+    },
+    {
+      "date": "2026-02-27",
+      "total_signals": 493,
+      "buy_signals": 121,
+      "sell_signals": 148,
+      "avg_expected_return": 4.9
+    }
+  ]
+}

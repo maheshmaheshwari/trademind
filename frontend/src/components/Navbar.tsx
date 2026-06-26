@@ -158,16 +158,16 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
               </div>
               <div className="notif-list">
                 {((notifData as any)?.data ?? []).slice(0, 6).map((n: any) => (
-                  <div key={n.id} className={`notif-item ${!n.is_read ? 'unread' : ''}`}>
-                    <span className="notif-ic" style={{ background: (n.color || '#3B82F6') + '22', color: n.color || '#3B82F6' }}>
-                      {n.icon || '🔔'}
+                  <div key={n?.id} className={`notif-item ${!n?.is_read ? 'unread' : ''}`}>
+                    <span className="notif-ic" style={{ background: (n?.color || '#3B82F6') + '22', color: n?.color || '#3B82F6' }}>
+                      {n?.icon || '🔔'}
                     </span>
                     <div className="flex flex-col gap-[2px] flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[13px] font-semibold text-ink truncate">{n.title}</span>
-                        <span className="text-[11px] text-ink-3 flex-shrink-0">{n.created_at ? relativeTime(n.created_at) : ''}</span>
+                        <span className="text-[13px] font-semibold text-ink truncate">{n?.title}</span>
+                        <span className="text-[11px] text-ink-3 flex-shrink-0">{n?.created_at ? relativeTime(n.created_at) : ''}</span>
                       </div>
-                      <span className="text-[12px] text-ink-2 line-clamp-2">{n.message}</span>
+                      <span className="text-[12px] text-ink-2 line-clamp-2">{n?.message}</span>
                     </div>
                   </div>
                 ))}

@@ -6,9 +6,10 @@ Every user gets ₹10L virtual money. One-click signal execution
 creates BUY + SL + Target bracket orders automatically.
 """
 import json
-from fastapi import APIRouter, HTTPException, Depends, Header
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Depends, Header, Request
+from pydantic import BaseModel, Field
 from typing import Optional
+from api.rate_limit import limiter
 from api.schemas import (
     AuthOut, UserCreateOut, UserOut, ExecuteSignalOut,
     PaginatedPositionsOut, PaginatedOrdersOut,
@@ -20,10 +21,10 @@ from trading.trading_engine import (
     create_user, get_user, get_user_by_username, _safe_user,
     execute_signal, get_positions, get_orders,
     square_off, square_off_all, get_portfolio_summary,
-    PartialCapacityError,
+    PartialCapacityError, RiskCheckFailed,
 )
 from trading.risk_manager import (
-    check_order, get_risk_settings, update_risk_settings,
+    get_risk_settings, update_risk_settings,
 )
 from trading.price_monitor import update_position_prices
 from api.auth import hash_password, verify_password, create_token, create_mfa_token, decode_token
@@ -56,10 +57,10 @@ class ExecuteSignalRequest(BaseModel):
     user_id: int
     symbol: str
     name: Optional[str] = None
-    investment_amount: float
-    buy_price: float
-    target_price: float
-    stop_loss: float
+    investment_amount: float = Field(gt=0)
+    buy_price: float = Field(gt=0)
+    target_price: float = Field(gt=0)
+    stop_loss: float = Field(gt=0)
     signal: Optional[str] = "BUY"
     confidence: Optional[float] = 0
     horizon: Optional[str] = "Unknown"
@@ -71,8 +72,12 @@ class RiskSettingsRequest(BaseModel):
     max_daily_loss: Optional[float] = None
     max_daily_trades: Optional[int] = None
     max_position_pct: Optional[float] = None
+    max_position_size: Optional[float] = None
+    stop_loss_pct: Optional[float] = None
+    target_pct: Optional[float] = None
     auto_stop_loss: Optional[int] = None
     auto_target: Optional[int] = None
+    mode: Optional[str] = None
 
 
 class SquareOffRequest(BaseModel):
@@ -119,13 +124,16 @@ async def api_register(req: RegisterRequest):
 
 
 @router.post("/login")
-async def api_login(req: LoginRequest):
+@limiter.limit("10/minute")
+async def api_login(req: LoginRequest, request: Request):
     """
     Login with username + password.
 
     If the account has TOTP enabled, returns { mfa_required: true, mfa_token }
     instead of the full JWT. The client must then call POST /auth/login/mfa
     with the mfa_token + 6-digit TOTP code to receive the full token.
+
+    Rate-limited (audit H3) — was previously unlimited password-guessing.
     """
     user = get_user_by_username(req.username)
     if not user:
@@ -204,28 +212,11 @@ async def api_execute_signal(req: ExecuteSignalRequest, user=Depends(get_current
     # Always use the authenticated user's ID — ignore any user_id in the request body
     auth_user_id = user["id"]
 
-    # Calculate quantity for risk check
-    quantity = int(req.investment_amount / req.buy_price) if req.buy_price > 0 else 0
-
-    # B4: Run blocking risk check + order execution in thread pool — not blocking event loop
-    approved, reason, checks = await run_in_thread(
-        check_order,
-        user_id=auth_user_id,
-        symbol=req.symbol,
-        investment_amount=req.investment_amount,
-        quantity=quantity,
-        max_safe_qty=req.max_safe_qty,
-        mode=req.mode or "PAPER",
-    )
-
-    if not approved:
-        return {
-            "status": "rejected",
-            "reason": reason,
-            "risk_checks": checks,
-        }
-
-    # Execute the bracket order (blocking DB write — offloaded to thread pool)
+    # Risk checks now run inside execute_signal() itself, under the same
+    # per-user advisory lock as the trade write (audit H8/H9) — no separate
+    # pre-check call here, since a gap between a standalone check and the
+    # write is exactly the race that allowed two concurrent requests to both
+    # pass a stale risk snapshot.
     try:
         result = await run_in_thread(
             execute_signal,
@@ -242,8 +233,13 @@ async def api_execute_signal(req: ExecuteSignalRequest, user=Depends(get_current
             mode=req.mode or "PAPER",
         )
         result["status"] = "executed"
-        result["risk_checks"] = checks
         return result
+    except RiskCheckFailed as e:
+        return {
+            "status": "rejected",
+            "reason": e.reason,
+            "risk_checks": e.checks,
+        }
     except PartialCapacityError as e:
         raise HTTPException(status_code=409, detail={
             "error": "PARTIAL_CAPACITY",

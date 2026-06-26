@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from database.db import get_connection, release_connection, _execute, get_active_signal_id
+from trading.risk_manager import check_order
 
 _angel_log = logging.getLogger(__name__)
 
@@ -29,6 +30,17 @@ class PartialCapacityError(Exception):
         super().__init__(
             f"{symbol}: requested {requested} shares but only {available} platform capacity remains."
         )
+
+
+class RiskCheckFailed(Exception):
+    """Raised when check_order() rejects a trade — carries the same shape the API previously
+    returned directly. Enforced inside execute_signal() itself (audit H8) under the same
+    advisory lock as the rest of the trade (audit H9), so no caller can bypass risk checks
+    and no concurrent request can act on a stale pre-check snapshot."""
+    def __init__(self, reason: str, checks: list):
+        self.reason = reason
+        self.checks = checks
+        super().__init__(reason)
 
 # ── B9: Cached Angel One session ────────────────────────────────────────────
 # One session is created and reused across all LIVE order calls.
@@ -271,6 +283,33 @@ def execute_signal(
     angel_order_id = None
 
     try:
+        # Advisory transaction lock scoped to this user — auto-released at
+        # commit/rollback. Closes two real races (audit findings H5, H9):
+        # (1) SELECT...FOR UPDATE on the new-position check below only locks
+        # an EXISTING row, so two concurrent first-time-position requests for
+        # the same symbol would both see no row and both proceed; (2) risk
+        # checks (daily-loss/trade-count/concentration, now run below) and
+        # this function's own balance/capacity checks run against a snapshot
+        # that a concurrent request — even for a different symbol, since
+        # daily-trade-count/concentration are account-wide — could invalidate
+        # between the check and the write. Serializing per-user means the
+        # second concurrent call only proceeds once the first has fully
+        # committed (or rolled back), so it always sees true post-commit
+        # state.
+        _execute(conn, "SELECT pg_advisory_xact_lock(hashtext(?))", (f"execute_signal:{user_id}",))
+
+        # Risk checks (audit H8: enforced here, inside execute_signal itself,
+        # so no caller — autopilot, a future script, anything — can bypass
+        # them by skipping the one HTTP route that used to be the only place
+        # this ran).
+        quantity_for_check = int(investment_amount / buy_price) if buy_price > 0 else 0
+        approved, reason, checks = check_order(
+            user_id=user_id, symbol=symbol, investment_amount=investment_amount,
+            quantity=quantity_for_check, mode=mode,
+        )
+        if not approved:
+            raise RiskCheckFailed(reason, checks)
+
         # Get user
         user = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
         if not user:
@@ -284,17 +323,12 @@ def execute_signal(
         if investment_amount > available:
             raise ValueError(f"Insufficient balance: ₹{available:.2f} available, ₹{investment_amount:.2f} requested")
 
-        # Check if already have a position — use SELECT FOR UPDATE to prevent race condition
-        existing = _fetchone(
-            conn,
-            "SELECT * FROM positions WHERE user_id = ? AND symbol = ? FOR UPDATE",
-            (user_id, symbol)
-        )
-        if existing:
-            raise ValueError(f"Already have an open position in {symbol}. Square off first.")
+        # Lock the existing position row (if any) to prevent concurrent duplicate inserts.
+        # A second buy for the same symbol merges via ON CONFLICT DO UPDATE below.
+        _fetchone(conn, "SELECT id FROM positions WHERE user_id = ? AND symbol = ? FOR UPDATE", (user_id, symbol))
 
         # Calculate quantity BEFORE capacity check so both use the same value.
-        quantity = int(investment_amount / buy_price)
+        quantity = round(investment_amount / buy_price)
         if quantity < 1:
             raise ValueError(f"Investment amount ₹{investment_amount:.2f} too small for {symbol} at ₹{buy_price:.2f}")
 
@@ -345,6 +379,7 @@ def execute_signal(
         # ---- GTT or PAPER pending orders ----
         sl_gtt_id = None
         target_gtt_id = None
+        gtt_placement_failed = False
 
         if mode == "LIVE":
             # Place GTT orders on Angel One
@@ -354,8 +389,8 @@ def execute_signal(
             target_gtt_id = gtt_result.get("target_rule_id")
 
             if not gtt_result["success"]:
-                import logging
-                logging.getLogger(__name__).error(
+                gtt_placement_failed = True
+                _angel_log.error(
                     f"GTT placement failed for {symbol}. BUY executed but SL/Target NOT placed!"
                 )
 
@@ -383,12 +418,22 @@ def execute_signal(
               'PENDING' if target_gtt_id else None,
               trade_signal_id, now, now))
 
-        # Create position
+        # Create or merge into existing position for this symbol.
+        # ON CONFLICT merges: weighted avg_buy_price, combined qty + invested_amount.
+        # Keeps existing bracket_id/SL/target so ongoing price-monitor tracking isn't disrupted.
         _execute(conn, """
             INSERT INTO positions (user_id, symbol, name, quantity, avg_buy_price, current_price,
                 target_price, stop_loss, unrealized_pnl, unrealized_pnl_pct, invested_amount,
                 current_value, mode, bracket_id, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
+            ON CONFLICT (user_id, symbol) DO UPDATE SET
+                quantity       = positions.quantity + EXCLUDED.quantity,
+                avg_buy_price  = (positions.invested_amount + EXCLUDED.invested_amount)
+                                 / (positions.quantity + EXCLUDED.quantity),
+                invested_amount = positions.invested_amount + EXCLUDED.invested_amount,
+                current_value  = positions.current_value  + EXCLUDED.current_value,
+                current_price  = EXCLUDED.current_price,
+                updated_at     = EXCLUDED.updated_at
         """, (user_id, symbol, name, quantity, buy_price, buy_price,
               target_price, stop_loss, actual_investment, actual_investment, mode, bracket_id, now))
 
@@ -447,9 +492,33 @@ def execute_signal(
                 """, (angel_order_id, _now(), bracket_id))
                 conn.commit()
             else:
+                # Compensating rollback (audit H6): the BUY never actually executed
+                # on the broker, so reverse the position/balance/order writes that
+                # already committed above rather than leaving a "ghost" position
+                # with no real holding behind it. Currently unreachable — LIVE mode
+                # is blocked at the top of this function — but guarded now so this
+                # can't silently corrupt account state whenever LIVE is enabled.
                 _angel_log.error(
-                    f"Angel One BUY failed for {symbol} after DB commit — position recorded without live order"
+                    f"Angel One BUY failed for {symbol} after DB commit — rolling back position/balance/orders"
                 )
+                try:
+                    _execute(conn, "DELETE FROM positions WHERE user_id = ? AND symbol = ? AND bracket_id = ?",
+                             (user_id, symbol, bracket_id))
+                    _execute(conn, """
+                        UPDATE orders SET status = 'CANCELLED', updated_at = ?
+                        WHERE bracket_id = ?
+                    """, (_now(), bracket_id))
+                    _execute(conn, """
+                        UPDATE users SET
+                            virtual_balance = virtual_balance + ?,
+                            virtual_invested = virtual_invested - ?
+                        WHERE id = ?
+                    """, (actual_investment + fees, actual_investment, user_id))
+                    conn.commit()
+                except Exception as rollback_err:
+                    conn.rollback()
+                    _angel_log.error(f"Compensating rollback for {symbol} FAILED — manual reconciliation needed: {rollback_err}")
+                raise ValueError(f"Angel One BUY order failed for {symbol} — trade reversed")
 
         # Fetch all orders for this bracket
         orders = _fetchall(conn, "SELECT * FROM orders WHERE bracket_id = ? ORDER BY id", (bracket_id,))
@@ -473,6 +542,7 @@ def execute_signal(
         "gtt": {
             "sl_rule_id": sl_gtt_id,
             "target_rule_id": target_gtt_id,
+            "placement_failed": gtt_placement_failed,
         } if mode == "LIVE" else None,
         "position": {
             "symbol": symbol,
@@ -522,113 +592,143 @@ def get_orders(user_id: int, limit: int = 50) -> List[Dict]:
     return [dict(zip(cols, r)) for r in rows]
 
 
-def square_off(user_id: int, symbol: str, sell_price: float = None) -> Dict:
+def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str = "MANUAL") -> Dict:
+    """trigger: 'STOP_LOSS' | 'TARGET' | 'MANUAL'"""
     """
     Sell an entire position at given price (or current price from DB).
     Cancels pending SL/Target orders, books P&L.
+
+    `SELECT ... FOR UPDATE` on the position row makes this atomic against
+    concurrent callers (e.g. an overlapping price-monitor sweep and a
+    synchronous square-off request for the same position): the second
+    caller blocks until the first commits, then cleanly sees no row and
+    raises ValueError, instead of both racing off the same stale read
+    (audit findings C2/H7). The whole body runs in one try/finally so the
+    connection is always released exactly once and rolled back on error
+    (audit finding M6).
     """
     conn = get_connection()
+    try:
+        # Get position — locked until this transaction commits/rolls back
+        pos = _fetchone(
+            conn,
+            "SELECT * FROM positions WHERE user_id = ? AND symbol = ? FOR UPDATE",
+            (user_id, symbol)
+        )
+        if not pos:
+            raise ValueError(f"No open position in {symbol}")
 
-    # Get position
-    pos = _fetchone(
-        conn,
-        "SELECT * FROM positions WHERE user_id = ? AND symbol = ?",
-        (user_id, symbol)
-    )
-    if not pos:
-        release_connection(conn)
-        raise ValueError(f"No open position in {symbol}")
+        pos_cols = _col_names(conn, "positions")
+        pos_dict = dict(zip(pos_cols, pos))
 
-    pos_cols = _col_names(conn, "positions")
-    pos_dict = dict(zip(pos_cols, pos))
+        # Use current_price if sell_price not provided; never silently fall
+        # through to a missing/zero price (audit finding M7 — that would
+        # book a fake 100%-loss P&L with no validation).
+        if not sell_price:
+            sell_price = pos_dict["current_price"] or pos_dict["avg_buy_price"]
+        if not sell_price or sell_price <= 0:
+            raise ValueError(f"No valid price available to square off {symbol}")
 
-    # Use current_price if sell_price not provided
-    if not sell_price:
-        sell_price = pos_dict["current_price"] or pos_dict["avg_buy_price"]
+        qty = pos_dict["quantity"]
+        buy_price = pos_dict["avg_buy_price"]
+        invested = pos_dict["invested_amount"]
+        sell_value = round(qty * sell_price, 2)
+        pnl = round(sell_value - invested, 2)
+        fees = round(sell_value * 0.0005, 2)
+        net_pnl = round(pnl - fees, 2)
 
-    qty = pos_dict["quantity"]
-    buy_price = pos_dict["avg_buy_price"]
-    invested = pos_dict["invested_amount"]
-    sell_value = round(qty * sell_price, 2)
-    pnl = round(sell_value - invested, 2)
-    fees = round(sell_value * 0.0005, 2)
-    net_pnl = round(pnl - fees, 2)
+        now = _now()
+        bracket_id = pos_dict.get("bracket_id")
+        position_mode = pos_dict.get("mode", "PAPER")
 
-    now = _now()
-    bracket_id = pos_dict.get("bracket_id")
-    position_mode = pos_dict.get("mode", "PAPER")
-
-    # Create SELL order
-    _execute(conn, """
-        INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
-            quantity, price, status, mode, fill_price, fees, pnl, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'SELL', 'SQUARE_OFF', ?, ?, 'EXECUTED', ?, ?, ?, ?, ?, ?)
-    """, (user_id, bracket_id, symbol, pos_dict.get("name"), qty, sell_price,
-          position_mode, sell_price, fees, net_pnl, now, now))
-
-    # Cancel pending SL and TARGET orders for this bracket
-    if bracket_id:
-        # If LIVE mode, cancel GTT rules on Angel One first
-        if position_mode == "LIVE":
-            pending_gtts = _fetchall(conn, """
-                SELECT gtt_rule_id FROM orders
-                WHERE bracket_id = ? AND status = 'PENDING' AND gtt_rule_id IS NOT NULL
-            """, (bracket_id,))
-
-            from trading.gtt_manager import cancel_gtt
-            for row in pending_gtts:
-                if row[0]:
-                    cancel_gtt(int(row[0]))
-
+        # Create SELL order
         _execute(conn, """
-            UPDATE orders SET status = 'CANCELLED', gtt_status = CASE
-                WHEN gtt_rule_id IS NOT NULL THEN 'CANCELLED' ELSE gtt_status END,
-                updated_at = ?
-            WHERE bracket_id = ? AND status = 'PENDING'
-        """, (now, bracket_id))
+            INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
+                quantity, price, status, mode, fill_price, fees, pnl, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'SELL', 'SQUARE_OFF', ?, ?, 'EXECUTED', ?, ?, ?, ?, ?, ?)
+        """, (user_id, bracket_id, symbol, pos_dict.get("name"), qty, sell_price,
+              position_mode, sell_price, fees, net_pnl, now, now))
 
-    # Update user balance
-    is_win = 1 if net_pnl > 0 else 0
-    _execute(conn, """
-        UPDATE users SET
-            virtual_balance = virtual_balance + ?,
-            virtual_invested = virtual_invested - ?,
-            total_pnl = total_pnl + ?,
-            win_count = win_count + ?,
-            loss_count = loss_count + ?
-        WHERE id = ?
-    """, (sell_value - fees, invested, net_pnl, is_win, 1 - is_win, user_id))
+        # Cancel pending SL and TARGET orders for this bracket
+        if bracket_id:
+            # If LIVE mode, cancel GTT rules on Angel One first
+            if position_mode == "LIVE":
+                pending_gtts = _fetchall(conn, """
+                    SELECT gtt_rule_id FROM orders
+                    WHERE bracket_id = ? AND status = 'PENDING' AND gtt_rule_id IS NOT NULL
+                """, (bracket_id,))
 
-    # Delete position
-    _execute(conn, "DELETE FROM positions WHERE user_id = ? AND symbol = ?", (user_id, symbol))
+                from trading.gtt_manager import cancel_gtt
+                for row in pending_gtts:
+                    if row[0]:
+                        cancel_gtt(int(row[0]))
 
-    conn.commit()
+            _execute(conn, """
+                UPDATE orders SET status = 'CANCELLED', gtt_status = CASE
+                    WHEN gtt_rule_id IS NOT NULL THEN 'CANCELLED' ELSE gtt_status END,
+                    updated_at = ?
+                WHERE bracket_id = ? AND status = 'PENDING'
+            """, (now, bracket_id))
 
-    # Get updated user
-    user = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
-    user_cols = _col_names(conn, "users")
-    user_dict = dict(zip(user_cols, user))
-    release_connection(conn)
+        # Update user balance
+        is_win = 1 if net_pnl > 0 else 0
+        _execute(conn, """
+            UPDATE users SET
+                virtual_balance = virtual_balance + ?,
+                virtual_invested = virtual_invested - ?,
+                total_pnl = total_pnl + ?,
+                win_count = win_count + ?,
+                loss_count = loss_count + ?
+            WHERE id = ?
+        """, (sell_value - fees, invested, net_pnl, is_win, 1 - is_win, user_id))
 
-    return {
-        "symbol": symbol,
-        "quantity": qty,
-        "buy_price": buy_price,
-        "sell_price": sell_price,
-        "invested": invested,
-        "sell_value": sell_value,
-        "pnl": net_pnl,
-        "pnl_pct": round(net_pnl / invested * 100, 2) if invested > 0 else 0,
-        "fees": fees,
-        "result": "PROFIT" if net_pnl > 0 else "LOSS",
-        "account": {
-            "balance": user_dict["virtual_balance"],
-            "total_invested": user_dict["virtual_invested"],
-            "total_pnl": user_dict["total_pnl"],
-            "win_count": user_dict["win_count"],
-            "loss_count": user_dict["loss_count"],
+        # Delete position
+        _execute(conn, "DELETE FROM positions WHERE user_id = ? AND symbol = ?", (user_id, symbol))
+
+        conn.commit()
+
+        # Settle the autopilot mandate if this position was AI-managed
+        if bracket_id:
+            try:
+                mandate_status = "COMPLETED" if trigger == "TARGET" else "STOPPED"
+                _execute(conn,
+                    """UPDATE authorized_trades
+                       SET status = ?, actual_pnl = ?, updated_at = NOW()
+                       WHERE bracket_id = ? AND status = 'EXECUTED'""",
+                    (mandate_status, net_pnl, bracket_id))
+                conn.commit()
+            except Exception as _e:
+                logger.warning(f"Could not settle authorized_trade for bracket {bracket_id}: {_e}")
+
+        # Get updated user
+        user = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
+        user_cols = _col_names(conn, "users")
+        user_dict = dict(zip(user_cols, user))
+
+        return {
+            "symbol": symbol,
+            "quantity": qty,
+            "buy_price": buy_price,
+            "sell_price": sell_price,
+            "invested": invested,
+            "sell_value": sell_value,
+            "pnl": net_pnl,
+            "pnl_pct": round(net_pnl / invested * 100, 2) if invested > 0 else 0,
+            "fees": fees,
+            "result": "PROFIT" if net_pnl > 0 else "LOSS",
+            "account": {
+                "balance": user_dict["virtual_balance"],
+                "total_invested": user_dict["virtual_invested"],
+                "total_pnl": user_dict["total_pnl"],
+                "win_count": user_dict["win_count"],
+                "loss_count": user_dict["loss_count"],
+            }
         }
-    }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        release_connection(conn)
 
 
 def square_off_all(user_id: int) -> Dict:
@@ -648,7 +748,10 @@ def square_off_all(user_id: int) -> Dict:
         "results": results,
         "account": {
             "balance": user["virtual_balance"],
+            "total_invested": user["virtual_invested"],
             "total_pnl": user["total_pnl"],
+            "win_count": user["win_count"],
+            "loss_count": user["loss_count"],
         }
     }
 

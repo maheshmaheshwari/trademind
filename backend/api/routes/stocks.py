@@ -4,9 +4,7 @@ Nifty 500 AI — Stocks List API Route (Paginated)
 GET /api/stocks?page=0&size=25&sort=symbol&order=asc&globalFilter=TCS&filters=[...]
 """
 
-import json
 import logging
-import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query
@@ -20,13 +18,10 @@ router = APIRouter()
 
 # ── Static maps loaded once at startup ────────────────────────────────────────
 
+import json, os
 _TOKENS_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "..", "data", "angel_tokens.json"
-)
-_SIGNALS_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "..", "data", "trade_signals_latest.json"
 )
 _SECTOR_MAP: dict = {}
 try:
@@ -260,7 +255,7 @@ async def get_all_stocks(
 
     except Exception as e:
         logger.error(f"Error fetching stocks: {e}", exc_info=True)
-        return {"data": [], "total": 0, "page": 0, "size": size, "sectors": [], "error": str(e)}
+        return {"data": [], "total": 0, "page": 0, "size": size, "sectors": [], "error": "Error fetching stocks"}
     finally:
         release_connection(conn)
 
@@ -332,17 +327,17 @@ async def get_stock_history(symbol: str, range: str = "1M"):
         rows = _execute(conn, """
             SELECT date, time, close FROM prices
             WHERE symbol = ? AND interval = ?
-              AND date >= CURRENT_DATE - INTERVAL '{days} days'
+              AND date >= CURRENT_DATE - (? * INTERVAL '1 day')
             ORDER BY date ASC, time ASC NULLS LAST
-        """.replace("{days}", str(days + 5)), (sym, interval)).fetchall()
+        """, (sym, interval, days + 5)).fetchall()
 
         if not rows and interval == "30m":
             rows = _execute(conn, """
                 SELECT date, time, close FROM prices
                 WHERE symbol = ? AND interval = '1d'
-                  AND date >= CURRENT_DATE - INTERVAL '{days} days'
+                  AND date >= CURRENT_DATE - (? * INTERVAL '1 day')
                 ORDER BY date ASC
-            """.replace("{days}", str(days + 5)), (sym,)).fetchall()
+            """, (sym, days + 5)).fetchall()
 
         if not rows:
             return {"prices": [], "labels": [], "change_pct": 0}
@@ -522,22 +517,23 @@ async def get_stock_detail(symbol: str):
                 consumed_vol    = int(row[22])   if row[22] is not None else 0
                 recommended_vol = int(row[23])   if row[23] is not None else 0
 
-        # ── 2b. Fallback: read position sizing from JSON if DB has nulls ──────
+        # ── 2b. Fallback: read position sizing from DB if nulls ───────────────
         if max_qty_user is None:
             try:
-                with open(_SIGNALS_FILE) as _f:
-                    _raw = json.load(_f)
-                for _cat in ("actionable_trades", "avoid_list", "hold_list"):
-                    for _t in _raw.get(_cat, []):
-                        if _t.get("symbol") == sym:
-                            _pos = _t.get("position") or {}
-                            v = _pos.get("suggested_qty_per_user")
-                            if v is not None:
-                                max_qty_user = int(v)
-                            v = _pos.get("suggested_investment_per_user")
-                            if v is not None:
-                                max_invest = float(v)
-                            break
+                _conn2 = get_connection()
+                try:
+                    _cur2 = _execute(_conn2,
+                        "SELECT max_qty_per_user, max_investment_per_user FROM trade_signals "
+                        "WHERE symbol = ? AND is_active = TRUE ORDER BY generated_at DESC LIMIT 1",
+                        (sym,))
+                    _row2 = _cur2.fetchone()
+                    if _row2:
+                        if _row2[0] is not None:
+                            max_qty_user = int(_row2[0])
+                        if _row2[1] is not None:
+                            max_invest = float(_row2[1])
+                finally:
+                    release_connection(_conn2)
             except Exception:
                 pass
 
@@ -646,6 +642,6 @@ async def get_stock_detail(symbol: str):
 
     except Exception as e:
         logger.error(f"Error fetching stock detail for {sym}: {e}", exc_info=True)
-        return {"data": None, "error": str(e)}
+        return {"data": None, "error": "Error fetching stock detail"}
     finally:
         release_connection(conn)

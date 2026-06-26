@@ -63,6 +63,8 @@ class AuthorizeTradeBody(BaseModel):
     exp_profit: float = 0
     max_loss: float = 0
     cmp: Optional[float] = None
+    bracket_id: Optional[str] = None  # pass when adding an already-open position
+    execute_immediately: bool = False  # True = always execute now (buy button), False = respect autopilot toggle
 
 
 # ---------------------------------------------------------------------------
@@ -153,10 +155,21 @@ def _fire_pending_mandates(user_id: int):
     """Execute all PENDING mandates for a user (called when autopilot is turned ON)."""
     conn = get_connection()
     try:
+        # Atomic claim (audit M12): a single UPDATE...WHERE status='PENDING'
+        # RETURNING * means a rapid toggle-off/on that spawns a second
+        # concurrent _fire_pending_mandates can't also claim the same rows —
+        # by the time it runs its own claim, status is no longer 'PENDING'
+        # for anything the first call already grabbed. status is set
+        # straight to 'EXECUTED' as the claim marker since the
+        # authorized_trades CHECK constraint has no separate "claimed" state;
+        # failed executions are reverted back to 'PENDING' below so they
+        # remain retryable, matching the pre-existing failure semantics.
         cur = _execute(conn,
-            "SELECT * FROM authorized_trades WHERE user_id = ? AND status = 'PENDING'",
+            "UPDATE authorized_trades SET status = 'EXECUTED', updated_at = NOW() "
+            "WHERE user_id = ? AND status = 'PENDING' RETURNING *",
             (user_id,))
         pending = _rows_to_dicts(cur)
+        conn.commit()
     finally:
         release_connection(conn)
 
@@ -184,6 +197,12 @@ def _fire_pending_mandates(user_id: int):
         else:
             failed += 1
             logger.warning(f"Mandate {trade['symbol']} failed: {res['error']}")
+            conn = get_connection()
+            try:
+                _execute(conn, "UPDATE authorized_trades SET status = 'PENDING', updated_at = NOW() WHERE id = ?", (trade["id"],))
+                conn.commit()
+            finally:
+                release_connection(conn)
 
     logger.info(f"Autopilot fired: {fired} executed, {failed} failed")
 
@@ -204,7 +223,7 @@ async def get_status(user_id: int, user=Depends(_get_current_user)):
             "SELECT * FROM authorized_trades WHERE user_id = ?", (user_id,))
         trades = _rows_to_dicts(cur)
 
-        capital   = sum(t["amount"] for t in trades)
+        capital   = sum(t["amount"] for t in trades if t["status"] == "EXECUTED")
         active    = sum(1 for t in trades if t["status"] in ("EXECUTED", "PENDING"))
         realized  = sum(
             t["actual_pnl"] for t in trades
@@ -285,16 +304,21 @@ async def authorize_trade(body: AuthorizeTradeBody, background_tasks: Background
         settings = _ensure_settings(conn, body.user_id)
         autopilot_on = settings["enabled"]
 
+        # If a bracket_id is supplied the position is already open — mark EXECUTED immediately
+        # so the autopilot page reflects the real state and square_off() can settle it.
+        initial_status = "EXECUTED" if body.bracket_id else "PENDING"
+
         cur = _execute(conn,
             """INSERT INTO authorized_trades
                (user_id, symbol, name, sector, signal, mode, qty, amount,
-                entry, target, sl, exp_profit, max_loss, cmp, status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING')
+                entry, target, sl, exp_profit, max_loss, cmp, bracket_id, status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                RETURNING *""",
             (body.user_id, body.symbol, body.name, body.sector,
              body.signal, body.mode, body.qty, body.amount,
              body.entry, body.target, body.sl,
-             body.exp_profit, body.max_loss, body.cmp))
+             body.exp_profit, body.max_loss, body.cmp,
+             body.bracket_id, initial_status))
         conn.commit()
         rows = _rows_to_dicts(cur)
         trade = rows[0] if rows else {}
@@ -305,10 +329,15 @@ async def authorize_trade(body: AuthorizeTradeBody, background_tasks: Background
     finally:
         release_connection(conn)
 
-    # If autopilot is on, fire immediately in the background
-    if autopilot_on and trade:
+    # Already-open position handed to autopilot — no need to re-execute
+    if body.bracket_id:
+        return {"status": "ok", "message": "Existing position handed to autopilot — AI will monitor SL/Target", "data": trade}
+
+    # execute_immediately=True (buy button): fire now regardless of autopilot toggle
+    # autopilot_on=True: also fire now
+    if (body.execute_immediately or autopilot_on) and trade:
         background_tasks.add_task(_execute_mandate, trade)
-        return {"status": "ok", "message": "Mandate saved — executing now (autopilot is ON)", "data": trade}
+        return {"status": "ok", "message": "Order placed — AI is managing SL/Target", "data": trade}
 
     return {"status": "ok", "message": "Mandate saved — will execute when autopilot is turned ON", "data": trade}
 
@@ -332,8 +361,10 @@ async def revoke_trade(trade_id: int, user=Depends(_get_current_user)):
     finally:
         release_connection(conn)
 
+    # 404 for both "doesn't exist" and "not yours" — a distinct 403 here
+    # would let a caller enumerate valid trade ids by status-code alone.
     if user["id"] != trade["user_id"]:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise HTTPException(status_code=404, detail="Trade not found")
 
     if trade["status"] not in ("PENDING", "EXECUTED"):
         raise HTTPException(status_code=400,

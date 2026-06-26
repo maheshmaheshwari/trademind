@@ -12,7 +12,7 @@ function baseOptions(isDark: boolean): ApexOptions {
       background: 'transparent',
       toolbar: { show: false },
       zoom: { enabled: false },
-      animations: { enabled: true, speed: 400 },
+      animations: { enabled: false },
     },
     theme: { mode: isDark ? 'dark' : 'light' },
     tooltip: {
@@ -198,7 +198,7 @@ export function Donut({ data, size = 280, centerTop, centerBottom }: DonutProps)
       type: 'donut',
       background: 'transparent',
       toolbar: { show: false },
-      animations: { enabled: true, speed: 400 },
+      animations: { enabled: false },
     },
     theme: { mode: isDark ? 'dark' : 'light' },
     colors: data.map(d => d.color),

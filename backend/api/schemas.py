@@ -328,8 +328,12 @@ class RiskSettingsOut(BaseModel):
     max_daily_loss: Optional[float] = None
     max_daily_trades: Optional[int] = None
     max_position_pct: Optional[float] = None
+    max_position_size: Optional[float] = None
+    stop_loss_pct: Optional[float] = None
+    target_pct: Optional[float] = None
     auto_stop_loss: Optional[int] = None
     auto_target: Optional[int] = None
+    mode: Optional[str] = None
     updated_at: AnyDate = None
 
 

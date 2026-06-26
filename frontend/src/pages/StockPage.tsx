@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Bookmark, AlertTriangle } from 'lucide-react';
@@ -7,6 +7,7 @@ import {
   useGetPositionsQuery,
   useGetOrdersQuery,
   useExecuteSignalMutation,
+  useAuthorizeTradeAutoMutation,
   useSquareOffMutation,
   useAddToWatchlistMutation,
   useGetStockHistoryQuery,
@@ -322,8 +323,14 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
   const toast     = useToast();
   const [qty, setQty]         = useState('');
   const [partialModal, setPartialModal] = useState<{ requested: number; available: number } | null>(null);
-  const [executeSignalMut, { isLoading: busy }] = useExecuteSignalMutation();
+  const [executeSignalMut]                         = useExecuteSignalMutation();
+  const [authorizeTradeAutoMut, { isLoading: busy }] = useAuthorizeTradeAutoMutation();
   const [addToWatchlistMut] = useAddToWatchlistMutation();
+  // Audit H12: `busy` (RTK Query's isLoading) only flips after the mutation
+  // call starts, leaving a brief window where a fast double-click can fire
+  // twice before the `disabled` prop re-renders. This ref-based guard is set
+  // synchronously, independent of React's render cycle.
+  const submittingRef = useRef(false);
 
   const balance    = user?.virtual_balance ?? 0;
   const price      = data?.price ?? 0;
@@ -358,11 +365,29 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
 
   async function executeBuy(overrideQty?: number) {
     const finalQty = overrideQty ?? qtyNum;
-    if (!user || finalQty <= 0) return;
+    if (!user || finalQty <= 0 || submittingRef.current) return;
+    submittingRef.current = true;
     const investment = finalQty * price;
+    const sl     = data?.stop_loss     ?? estSL;
+    const target = data?.target_price  ?? estTarget;
     try {
-      await executeSignalMut({ user_id: user.id, symbol: data?.symbol ?? '', name: data?.name ?? '', investment_amount: investment, buy_price: price, target_price: estTarget, stop_loss: estSL, signal: data?.signal ?? 'HOLD', confidence: data?.confidence ?? 0, mode: 'PAPER' }).unwrap();
-      toast({ type: 'success', title: `Bought ${finalQty} × ${data.symbol}`, msg: `Invested: ${inr(investment)}` });
+      await authorizeTradeAutoMut({
+        user_id:            user.id,
+        symbol:             data?.symbol ?? '',
+        name:               data?.name   ?? '',
+        signal:             'BUY',
+        mode:               'PAPER',
+        qty:                finalQty,
+        amount:             investment,
+        entry:              price,
+        target,
+        sl,
+        cmp:                price,
+        execute_immediately: true,
+        exp_profit:         Math.round((target - price) * finalQty),
+        max_loss:           Math.round((price - sl)     * finalQty),
+      } as any).unwrap();
+      toast({ type: 'success', title: `Bought ${finalQty} × ${data.symbol}`, msg: `Invested: ${inr(investment)} · AI managing SL/Target` });
       setPartialModal(null);
     } catch (e: unknown) {
       const detail = (e as any)?.data?.detail;
@@ -371,6 +396,8 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
         return;
       }
       toast({ type: 'error', title: 'Order failed', msg: detail?.message ?? (e instanceof Error ? e.message : 'Try again') });
+    } finally {
+      submittingRef.current = false;
     }
   }
 
@@ -401,11 +428,13 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
     const pnlPct   = ((price - (position?.avg_buy_price ?? 0)) / (position?.avg_buy_price || 1)) * 100;
 
     async function executeSell() {
-      if (!user || sellQty <= 0) return;
+      if (!user || sellQty <= 0 || submittingRef.current) return;
+      submittingRef.current = true;
       try {
         await executeSignalMut({ user_id: user.id, symbol: data?.symbol ?? '', name: data?.name ?? '', investment_amount: proceeds, buy_price: position?.avg_buy_price ?? 0, target_price: position?.target_price ?? 0, stop_loss: position?.stop_loss ?? 0, signal: 'SELL', mode: 'PAPER' }).unwrap();
         toast({ type: pnlValue >= 0 ? 'success' : 'info', title: `Sold ${sellQty} × ${data.symbol}`, msg: `P&L: ${signed(pnlValue, 0)} (${signed(pnlPct, 2)}%)` });
       } catch (e: unknown) { toast({ type: 'error', title: 'Order failed', msg: e instanceof Error ? e.message : 'Try again' }); }
+      finally { submittingRef.current = false; }
     }
 
     return (
@@ -528,17 +557,19 @@ export default function StockPage() {
   const toast     = useToast();
   const [chartRange, setChartRange] = useState<'1D' | '1W' | '1M' | '3M' | '1Y'>('1M');
 
-  const [fetchDetail, { data: detailRes, isLoading: loadDetail }] = useLazyGetStockDetailQuery();
-  const { data: posRes } = useGetPositionsQuery({ userId: user!.id, size: 100 }, { skip: !user || !symbol });
+  const [fetchDetail, { data: detailRes, isLoading: loadDetail, isError: errDetail }] = useLazyGetStockDetailQuery();
+  const { data: posRes } = useGetPositionsQuery({ userId: user?.id ?? 0, size: 100 }, { skip: !user || !symbol });
   const { data: histRes, isFetching: loadHist } = useGetStockHistoryQuery({ symbol, range: chartRange }, { skip: !symbol });
   const { data: ordersRes } = useGetOrdersQuery(
-    { userId: user!.id, limit: 500, size: 500, globalFilter: symbol },
+    { userId: user?.id ?? 0, limit: 500, size: 500, globalFilter: symbol },
     { skip: !user || !symbol },
   );
   const [squareOff, { isLoading: closing }] = useSquareOffMutation();
+  const closingRef = useRef(false); // audit H12 — see submittingRef in TradePanel above
 
   async function handleClosePosition() {
-    if (!user || !symbol || !position) return;
+    if (!user || !symbol || !position || closingRef.current) return;
+    closingRef.current = true;
     try {
       const res = await squareOff({ userId: user.id, symbol }).unwrap();
       const pnl = (res as any)?.realized_pnl ?? position?.unrealized_pnl ?? 0;
@@ -549,6 +580,8 @@ export default function StockPage() {
       });
     } catch (e: unknown) {
       toast({ type: 'error', title: 'Close failed', msg: e instanceof Error ? e.message : 'Try again' });
+    } finally {
+      closingRef.current = false;
     }
   }
 
@@ -639,6 +672,13 @@ export default function StockPage() {
           </div>
         )}
       </div>
+
+      {/* Audit Low item — was indistinguishable from "no data" */}
+      {errDetail && !data && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-[11px] bg-[var(--red-soft)] text-[var(--red)] text-[13px] font-semibold">
+          Couldn't load this stock. Check your connection and try again.
+        </div>
+      )}
 
       {/* ── Two-column layout ── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6 items-start">

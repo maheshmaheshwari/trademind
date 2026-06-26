@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, RefreshCw } from 'lucide-react';
+import { Download, RefreshCw, BrainCircuit } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/ui';
 import {
   useGetPositionsQuery, useGetOrdersQuery, useSquareOffMutation,
   useGetGTTOrdersQuery, useSyncGTTMutation, useGetUserSignalHistoryQuery,
+  useAuthorizeTradeAutoMutation, useGetAuthorizedTradesQuery,
 } from '../services/tradeMindApiService';
 import { Card, SkeletonRows, SymbolCell, Pager, useSort, Th, PlainTh, Td, SignalBadge } from '../components/ui';
 
@@ -46,31 +47,82 @@ export default function TradesPage() {
   const [histPage,  setHistPage]  = useState(1);
   const navigate = useNavigate();
 
-  const { data: posRes,    isLoading: loadPos  } = useGetPositionsQuery({ userId: user!.id, size: 100 }, { skip: !user });
-  const { data: ordRes,    isLoading: loadOrd  } = useGetOrdersQuery({ userId: user!.id, size: 200 }, { skip: !user });
-  const { data: gttRes,    isLoading: loadGtt  } = useGetGTTOrdersQuery(user!.id, { skip: !user });
-  const { data: sigHist,   isLoading: loadSig  } = useGetUserSignalHistoryQuery({ userId: user!.id }, { skip: !user });
+  const { data: posRes,    isLoading: loadPos, isError: errPos  } = useGetPositionsQuery({ userId: user?.id ?? 0, size: 100 }, { skip: !user });
+  const { data: ordRes,    isLoading: loadOrd, isError: errOrd  } = useGetOrdersQuery({ userId: user?.id ?? 0, size: 200 }, { skip: !user });
+  const { data: gttRes,    isLoading: loadGtt  } = useGetGTTOrdersQuery(user?.id ?? 0, { skip: !user });
+  const { data: sigHist,   isLoading: loadSig  } = useGetUserSignalHistoryQuery({ userId: user?.id ?? 0 }, { skip: !user });
   const [squareOff]                               = useSquareOffMutation();
   const [syncGTT, { isLoading: syncing }]         = useSyncGTTMutation();
+  const [authorizeTradeAuto]                      = useAuthorizeTradeAutoMutation();
+  const { data: authTradesRes }                   = useGetAuthorizedTradesQuery({ userId: user?.id ?? 0 }, { skip: !user });
+  const [autopilotingSymbols, setAutopilotingSymbols] = useState<Set<string>>(new Set());
+  const autopilotSymbolsRef = useRef<Set<string>>(new Set());
+
+  // Symbols already managed by autopilot (PENDING or EXECUTED)
+  const autopilotSymbolSet = new Set(
+    ((authTradesRes as any)?.data ?? [])
+      .filter((t: any) => t?.status === 'PENDING' || t?.status === 'EXECUTED')
+      .map((t: any) => t?.symbol ?? '')
+  );
 
   const loading   = loadPos || loadOrd || loadGtt;
   const positions: OpenPosition[] = (posRes as any)?.data ?? [];
   const trades:    Trade[]        = (ordRes as any)?.data  ?? [];
   const gttOrders: GTTOrder[]     = (gttRes as any)?.data  ?? [];
 
+  // Audit H12 — per-symbol in-flight guard, set synchronously (independent
+  // of React's render cycle) so a fast double-click on the same row's close
+  // button can't fire two square-off requests before the row re-renders.
+  const closingSymbolsRef = useRef<Set<string>>(new Set());
 
   async function closePos(p: OpenPosition) {
-    if (!user) return;
+    if (!user || closingSymbolsRef.current.has(p.symbol)) return;
+    closingSymbolsRef.current.add(p.symbol);
     try {
       const res = await squareOff({ userId: user.id, symbol: p.symbol }).unwrap();
       setClosed(s => new Set([...s, p.symbol]));
       toast({ type: (p.unrealized_pnl ?? 0) >= 0 ? 'success' : 'info', title: `Closed ${p.symbol}`, msg: `Realized ${((p.unrealized_pnl ?? 0) >= 0 ? '+' : '') + Number((res as any)?.pnl ?? p.unrealized_pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (${((p.unrealized_pnl_pct ?? 0) >= 0 ? '+' : '') + (p.unrealized_pnl_pct ?? 0).toFixed(2)}%)` });
     } catch (e: unknown) { toast({ type: 'error', title: 'Close failed', msg: e instanceof Error ? e.message : 'Try again' }); }
+    finally { closingSymbolsRef.current.delete(p.symbol); }
   }
 
   async function handleSync() {
     try { await syncGTT().unwrap(); toast({ type: 'info', title: 'Synced with Angel One', msg: 'GTT rules up to date' }); }
     catch { toast({ type: 'error', title: 'Sync failed' }); }
+  }
+
+  async function addToAutopilot(p: OpenPosition) {
+    if (!user || autopilotSymbolsRef.current.has(p?.symbol ?? '')) return;
+    autopilotSymbolsRef.current.add(p?.symbol ?? '');
+    setAutopilotingSymbols(s => new Set([...s, p?.symbol ?? '']));
+    try {
+      await authorizeTradeAuto({
+        user_id:    user.id,
+        symbol:     p?.symbol ?? '',
+        name:       p?.name ?? '',
+        signal:     'BUY',
+        mode:       (p as any)?.mode ?? 'PAPER',
+        qty:        p?.quantity ?? 0,
+        amount:     (p?.avg_buy_price ?? 0) * (p?.quantity ?? 0),
+        entry:      p?.avg_buy_price ?? 0,
+        target:     p?.target_price ?? 0,
+        sl:         p?.stop_loss ?? 0,
+        cmp:        p?.current_price ?? null,
+        bracket_id: (p as any)?.bracket_id ?? undefined,
+        exp_profit: p?.target_price && p?.avg_buy_price && p?.quantity
+          ? Math.round((p.target_price - p.avg_buy_price) * p.quantity)
+          : 0,
+        max_loss:   p?.stop_loss && p?.avg_buy_price && p?.quantity
+          ? Math.round((p.avg_buy_price - p.stop_loss) * p.quantity)
+          : 0,
+      }).unwrap();
+      toast({ type: 'success', title: 'Added to Autopilot', msg: `${p?.symbol ?? ''} is now AI-managed` });
+    } catch (e: unknown) {
+      toast({ type: 'error', title: 'Autopilot failed', msg: e instanceof Error ? e.message : 'Try again' });
+    } finally {
+      autopilotSymbolsRef.current.delete(p?.symbol ?? '');
+      setAutopilotingSymbols(s => { const n = new Set(s); n.delete(p?.symbol ?? ''); return n; });
+    }
   }
 
   const today = new Date();
@@ -116,6 +168,13 @@ export default function TradesPage() {
   return (
     <div className="flex flex-col dgap animate-page-in">
 
+      {/* Audit Low item — was indistinguishable from "no data" */}
+      {(errPos || errOrd) && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-[11px] bg-[var(--red-soft)] text-[var(--red)] text-[13px] font-semibold">
+          Couldn't load your {errPos && errOrd ? 'positions and orders' : errPos ? 'positions' : 'orders'}. Check your connection and try again.
+        </div>
+      )}
+
       {/* ── Header ── */}
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
@@ -146,7 +205,7 @@ export default function TradesPage() {
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr>
-                  {['Symbol', 'Entry', 'SL', 'Target', 'CMP', 'P&L', 'Days', 'Action'].map((h, i) => (
+                  {['Symbol', 'Entry', 'SL', 'Target', 'CMP', 'P&L', 'Days', 'Actions'].map((h, i) => (
                     <th key={h} style={{ ...thS, textAlign: i >= 1 ? 'right' : 'left' }}>{h}</th>
                   ))}
                 </tr>
@@ -173,10 +232,32 @@ export default function TradesPage() {
                     </td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="text-ink-3 font-mono">{p?.created_at ? Math.floor((Date.now() - new Date(p.created_at).getTime()) / 86400000) : '—'}d</td>
                     <td style={{ ...tdS, textAlign: 'right' }}>
-                      <button onClick={() => closePos(p)}
-                        className="h-8 px-[11px] rounded-[9px] text-[12.5px] font-semibold cursor-pointer border-0 bg-loss-soft text-loss transition-colors font-sans hover:bg-loss hover:text-white">
-                        Close
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        {autopilotSymbolSet.has(p?.symbol ?? '') ? (
+                          <span
+                            title="Already managed by autopilot"
+                            className="inline-flex items-center gap-1 h-8 px-[10px] rounded-[9px] text-[12px] font-semibold border-0 font-sans"
+                            style={{ background: 'var(--green-soft, #DCFCE7)', color: 'var(--green, #16A34A)' }}
+                          >
+                            <BrainCircuit size={13} /> In Autopilot
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => addToAutopilot(p)}
+                            disabled={autopilotingSymbols.has(p?.symbol ?? '')}
+                            title="Hand this position to the AI autopilot"
+                            className="inline-flex items-center gap-1 h-8 px-[10px] rounded-[9px] text-[12px] font-semibold cursor-pointer border-0 font-sans transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{ background: 'var(--accent-soft, #EEF2FF)', color: 'var(--accent-2, #4F46E5)' }}
+                          >
+                            <BrainCircuit size={13} />
+                            {autopilotingSymbols.has(p?.symbol ?? '') ? '…' : 'Autopilot'}
+                          </button>
+                        )}
+                        <button onClick={() => closePos(p)}
+                          className="h-8 px-[11px] rounded-[9px] text-[12.5px] font-semibold cursor-pointer border-0 bg-loss-soft text-loss transition-colors font-sans hover:bg-loss hover:text-white">
+                          Close
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -41,9 +41,12 @@ def get_risk_settings(user_id: int) -> Dict:
 
 def update_risk_settings(user_id: int, settings: Dict) -> Dict:
     """Update risk settings for a user."""
+    get_risk_settings(user_id)  # ensure a default row exists before UPDATE — first-ever
+                                 # update for a user would otherwise affect 0 rows
     conn = get_connection()
     allowed = ["max_daily_loss", "max_daily_trades", "max_position_pct",
-               "auto_stop_loss", "auto_target"]
+               "max_position_size", "stop_loss_pct", "target_pct",
+               "auto_stop_loss", "auto_target", "mode"]
     try:
         for key, value in settings.items():
             if key in allowed:
@@ -63,7 +66,7 @@ def check_order(
     symbol: str,
     investment_amount: float,
     quantity: int,
-    max_safe_qty: int = None,
+    max_safe_qty: int = None,  # deprecated/ignored — see audit M9; kept only for call-site compatibility
     mode: str = "PAPER",
 ) -> Tuple[bool, str, list]:
     """
@@ -133,13 +136,24 @@ def check_order(
             "detail": f"{position_pct:.1f}% of capital / {settings['max_position_pct']}% max"
         })
 
-        # 5. Volume safety
-        if max_safe_qty and max_safe_qty > 0:
-            vol_ok = quantity <= max_safe_qty
+        # 5. Volume safety — derived server-side from trade_signals.recommended_volume
+        # / consumed_volume, never trusted from the caller (audit M9: a client could
+        # previously omit max_safe_qty entirely to disable this check).
+        sig_row = _execute(conn, """
+            SELECT recommended_volume, consumed_volume FROM trade_signals
+            WHERE symbol = ? AND is_active = TRUE
+            ORDER BY generated_date DESC LIMIT 1
+        """, (symbol,)).fetchone()
+        server_max_safe_qty = None
+        if sig_row and sig_row[0]:
+            server_max_safe_qty = max(0, (sig_row[0] or 0) - (sig_row[1] or 0))
+
+        if server_max_safe_qty is not None:
+            vol_ok = quantity <= server_max_safe_qty
             checks.append({
                 "name": "Volume Safety",
                 "passed": vol_ok,
-                "detail": f"{quantity} qty / {max_safe_qty} max safe qty (2% ADV)"
+                "detail": f"{quantity} qty / {server_max_safe_qty} max safe qty (platform capacity remaining)"
             })
         else:
             checks.append({

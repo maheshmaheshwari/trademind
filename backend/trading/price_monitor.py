@@ -44,14 +44,24 @@ def _fetch_live_prices(symbols: List[str]) -> Dict[str, float]:
         return {}
 
 
+_MAX_DB_PRICE_STALENESS_DAYS = 4  # covers a long weekend; older than this and we refuse to drive SL/Target off it
+
+
 def _get_db_price(conn, symbol: str) -> float:
-    """Get latest close price from DB as fallback."""
+    """Get latest close price from DB as fallback. Refuses stale (multi-day-old) data."""
     cur = _execute(conn,
-        "SELECT close FROM prices WHERE symbol = ? ORDER BY date DESC, time DESC LIMIT 1",
+        "SELECT close, date FROM prices WHERE symbol = ? ORDER BY date DESC, time DESC LIMIT 1",
         (symbol,)
     )
     latest = cur.fetchone()
-    return float(latest[0]) if latest else 0.0
+    if not latest:
+        return 0.0
+    close, price_date = latest
+    age_days = (datetime.now().date() - price_date).days
+    if age_days > _MAX_DB_PRICE_STALENESS_DAYS:
+        logger.warning(f"DB price for {symbol} is {age_days} days old — refusing to use it for SL/Target")
+        return 0.0
+    return float(close)
 
 
 _ALLOWED_TABLES = frozenset({"positions", "orders", "users"})
@@ -136,41 +146,50 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
             """, (current_price, current_value, pnl, pnl_pct,
                   datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pos_dict["id"]))
 
+            # Commit now so this UPDATE's row lock is released before
+            # square_off() (on its own pooled connection) takes its own
+            # FOR UPDATE lock on the same row below.
+            conn.commit()
+
             # Check SL trigger
             sl = pos_dict.get("stop_loss")
             target = pos_dict.get("target_price")
 
             if sl and current_price <= sl:
-                conn.commit()
-                release_connection(conn)
-                conn = None  # mark released so finally doesn't double-release
                 logger.warning(
                     f"🛑 STOP LOSS triggered: {symbol} @ ₹{current_price:.2f} "
                     f"(SL: ₹{sl:.2f}) [{price_source}]"
                 )
-                result = square_off(uid, symbol, sell_price=sl)
-                result["trigger"] = "STOP_LOSS"
-                result["trigger_price"] = current_price
-                result["price_source"] = price_source
-                triggered.append(result)
-                conn = get_connection()
+                # square_off() is now self-contained and atomic (FOR UPDATE +
+                # its own try/finally) — a concurrent sweep or synchronous
+                # request may have already closed this position, in which
+                # case it cleanly raises ValueError. Isolate that per
+                # position so one already-closed position doesn't abort the
+                # rest of the batch (audit finding C2).
+                try:
+                    result = square_off(uid, symbol, sell_price=sl, trigger="STOP_LOSS")
+                    result["trigger"] = "STOP_LOSS"
+                    result["trigger_price"] = current_price
+                    result["price_source"] = price_source
+                    triggered.append(result)
+                except Exception as e:
+                    logger.warning(f"square_off failed for {symbol} (SL trigger), skipping: {e}")
                 continue
 
             # Check Target trigger
             if target and current_price >= target:
-                conn.commit()
-                release_connection(conn)
-                conn = None
                 logger.warning(
                     f"🎯 TARGET triggered: {symbol} @ ₹{current_price:.2f} "
                     f"(Target: ₹{target:.2f}) [{price_source}]"
                 )
-                result = square_off(uid, symbol, sell_price=target)
-                result["trigger"] = "TARGET"
-                result["trigger_price"] = current_price
-                result["price_source"] = price_source
-                triggered.append(result)
-                conn = get_connection()
+                try:
+                    result = square_off(uid, symbol, sell_price=target, trigger="TARGET")
+                    result["trigger"] = "TARGET"
+                    result["trigger_price"] = current_price
+                    result["price_source"] = price_source
+                    triggered.append(result)
+                except Exception as e:
+                    logger.warning(f"square_off failed for {symbol} (target trigger), skipping: {e}")
                 continue
 
         if conn is not None:

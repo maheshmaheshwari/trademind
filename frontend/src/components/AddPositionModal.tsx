@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Plus } from 'lucide-react';
-import { useLazyGetStocksQuery, useExecuteSignalMutation, useAddPositionMutation } from '../services/tradeMindApiService';
+import { useLazyGetStocksQuery, useAuthorizeTradeAutoMutation } from '../services/tradeMindApiService';
 import { useToast, symColor } from './ui';
 import { useAuth } from '../AuthContext';
 import type { Stock } from '../types';
@@ -28,8 +28,7 @@ export function AddPositionModal({ onClose }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const [fetchStocks, { data: stockRes }] = useLazyGetStocksQuery();
-  const [executeSignal] = useExecuteSignalMutation();
-  const [addPosition] = useAddPositionMutation();
+  const [authorizeTradeAuto] = useAuthorizeTradeAutoMutation();
   const opts: Stock[] = (stockRes as any)?.data ?? [];
 
   useEffect(() => {
@@ -59,38 +58,38 @@ export function AddPositionModal({ onClose }: Props) {
 
   function choose(s: Stock) { setSel(s); setQ(s.symbol); setPrice(String(s.price)); setOpen(false); }
 
-  const valid = sel !== null && +qty > 0 && +price > 0;
-  const total = valid ? +qty * +price : 0;
+  // Audit M20: previously only `+qty > 0` — allowed fractional shares
+  // (e.g. 2.5) and had no upper bound or balance check, unlike
+  // StockDrawer.tsx's equivalent `insufficient` pattern.
+  const qtyNum = +qty;
+  const balance = user?.virtual_balance ?? 0;
+  const total = sel !== null && qtyNum > 0 && +price > 0 ? qtyNum * +price : 0;
+  const insufficient = total > 0 && total > balance;
+  const valid = sel !== null && Number.isInteger(qtyNum) && qtyNum > 0 && +price > 0 && !insufficient;
 
   async function submit() {
     if (!valid || !sel || !user) return;
     setBusy(true);
     const investment = +qty * +price;
     try {
-      // Try the portfolio positions endpoint first; fall back to executeSignal
-      try {
-        await addPosition({
-          symbol: sel.symbol,
-          quantity: +qty,
-          buy_price: +price,
-          account_type: mode === 'live' ? 'LIVE' : 'PAPER',
-        }).unwrap();
-      } catch {
-        // Fallback to trading engine if portfolio endpoint not available
-        await executeSignal({
-          user_id: user.id,
-          symbol: sel.symbol,
-          name: sel.name,
-          investment_amount: investment,
-          buy_price: +price,
-          target_price: sel.target_price ?? +price * 1.05,
-          stop_loss: sel.stop_loss ?? +price * 0.95,
-          signal: sel.signal ?? 'BUY',
-          confidence: sel.confidence ?? 0,
-          horizon: sel.horizon ?? 'Unknown',
-          mode: mode === 'live' ? 'LIVE' : 'PAPER',
-        }).unwrap();
-      }
+      const sl     = sel.stop_loss    ?? +price * 0.95;
+      const target = sel.target_price ?? +price * 1.05;
+      await authorizeTradeAuto({
+        user_id:            user.id,
+        symbol:             sel.symbol,
+        name:               sel.name,
+        signal:             'BUY',
+        mode:               mode === 'live' ? 'LIVE' : 'PAPER',
+        qty:                +qty,
+        amount:             investment,
+        entry:              +price,
+        target,
+        sl,
+        cmp:                +price,
+        execute_immediately: true,
+        exp_profit:         Math.round((target - +price) * +qty),
+        max_loss:           Math.round((+price - sl)     * +qty),
+      } as any).unwrap();
       toast({ type: 'success', title: 'Position added', msg: `${qty} × ${sel.symbol} @ ${inr(+price)} · ${mode === 'paper' ? 'Paper' : 'Live'} account` });
       onClose();
     } catch (e: unknown) {
@@ -194,7 +193,8 @@ export function AddPositionModal({ onClose }: Props) {
           <div style={{ display: 'flex', gap: 13, marginBottom: 15 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
               <label style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-2)' }}>Quantity</label>
-              <input type="number" style={inputS} value={qty} onChange={e => setQty(e.target.value)} placeholder="0"
+              <input type="number" step={1} min={1} style={{ ...inputS, borderColor: qtyNum > 0 && !Number.isInteger(qtyNum) ? 'var(--red)' : inputS.borderColor }}
+                value={qty} onChange={e => setQty(e.target.value)} placeholder="0"
                 onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; }} onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; }} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
@@ -204,8 +204,17 @@ export function AddPositionModal({ onClose }: Props) {
             </div>
           </div>
 
+          {qtyNum > 0 && !Number.isInteger(qtyNum) && (
+            <p style={{ fontSize: 12, color: 'var(--red)', margin: '0 0 8px' }}>Quantity must be a whole number of shares.</p>
+          )}
+          {insufficient && (
+            <p style={{ fontSize: 12, color: 'var(--red)', margin: '0 0 8px' }}>
+              Total cost {inr(total)} exceeds available balance {inr(balance)}.
+            </p>
+          )}
+
           {/* Total preview */}
-          {valid && (
+          {total > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 13px', background: 'var(--accent-soft)', borderRadius: 11, marginBottom: 6 }}>
               <span style={{ fontSize: 13, color: 'var(--text-2)', fontWeight: 500 }}>Total investment</span>
               <span style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 15, color: 'var(--accent-2)' }}>{inr(total)}</span>

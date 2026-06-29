@@ -186,6 +186,7 @@ CREATE TABLE IF NOT EXISTS positions (
     current_value      DOUBLE PRECISION,
     mode               TEXT DEFAULT 'PAPER',
     bracket_id         TEXT,
+    created_at         TIMESTAMPTZ DEFAULT NOW(),
     updated_at         TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id, symbol)
 );

@@ -205,17 +205,18 @@ export default function TradesPage() {
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr>
-                  {['Symbol', 'Entry', 'SL', 'Target', 'CMP', 'P&L', 'Days', 'Actions'].map((h, i) => (
+                  {['Symbol', 'Qty', 'Entry', 'SL', 'Target', 'CMP', 'P&L', 'Days', 'Actions'].map((h, i) => (
                     <th key={h} style={{ ...thS, textAlign: i >= 1 ? 'right' : 'left' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {loading ? <SkeletonRows cols={8} rows={6} /> : openPos.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center py-[50px] px-5 text-ink-3">No open positions. All trades closed 🎉</td></tr>
+                {loading ? <SkeletonRows cols={9} rows={6} /> : openPos.length === 0 ? (
+                  <tr><td colSpan={9} className="text-center py-[50px] px-5 text-ink-3">No open positions. All trades closed 🎉</td></tr>
                 ) : (openPos ?? []).map(p => (
                   <tr key={p?.symbol} className="transition-colors hover:bg-surface-2">
                     <td style={tdS} onClick={() => navigate(`/stocks/${encodeURIComponent(p?.symbol ?? '')}`)} className="cursor-pointer"><SymbolCell symbol={p?.symbol ?? ''} name={p?.name ?? ''} sector={p?.sector ?? ''} /></td>
+                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums text-ink-2">{p?.quantity ?? '—'}</td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(p?.avg_buy_price ?? 0)}</td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-loss tabular-nums">{inr(p?.stop_loss ?? 0)}</td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-gain tabular-nums">{inr(p?.target_price ?? 0)}</td>
@@ -230,7 +231,7 @@ export default function TradesPage() {
                         </span>
                       </div>
                     </td>
-                    <td style={{ ...tdS, textAlign: 'right' }} className="text-ink-3 font-mono">{p?.created_at ? Math.floor((Date.now() - new Date(p.created_at).getTime()) / 86400000) : '—'}d</td>
+                    <td style={{ ...tdS, textAlign: 'right' }} className="text-ink-3 font-mono">{(() => { const ts = p?.created_at ?? p?.updated_at; return ts ? Math.floor((Date.now() - new Date(ts).getTime()) / 86400000) + 'd' : '—'; })()}</td>
                     <td style={{ ...tdS, textAlign: 'right' }}>
                       <div className="flex items-center justify-end gap-2">
                         {autopilotSymbolSet.has(p?.symbol ?? '') ? (

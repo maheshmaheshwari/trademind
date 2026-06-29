@@ -424,8 +424,8 @@ def execute_signal(
         _execute(conn, """
             INSERT INTO positions (user_id, symbol, name, quantity, avg_buy_price, current_price,
                 target_price, stop_loss, unrealized_pnl, unrealized_pnl_pct, invested_amount,
-                current_value, mode, bracket_id, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
+                current_value, mode, bracket_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, symbol) DO UPDATE SET
                 quantity       = positions.quantity + EXCLUDED.quantity,
                 avg_buy_price  = (positions.invested_amount + EXCLUDED.invested_amount)
@@ -435,7 +435,7 @@ def execute_signal(
                 current_price  = EXCLUDED.current_price,
                 updated_at     = EXCLUDED.updated_at
         """, (user_id, symbol, name, quantity, buy_price, buy_price,
-              target_price, stop_loss, actual_investment, actual_investment, mode, bracket_id, now))
+              target_price, stop_loss, actual_investment, actual_investment, mode, bracket_id, now, now))
 
         # Deduct from virtual balance
         _execute(conn, """
@@ -534,6 +534,20 @@ def execute_signal(
         raise
     finally:
         release_connection(conn)
+
+    try:
+        from database.db import insert_notification
+        insert_notification(
+            user_id=user_id,
+            type="trade",
+            title=f"Order placed — {symbol}",
+            message=f"{mode} BUY · {quantity} shares @ ₹{buy_price:,.2f} · "
+                    f"Target ₹{target_price:,.2f} · SL ₹{stop_loss:,.2f}",
+            icon="ShoppingCart",
+            color="#3B82F6",
+        )
+    except Exception:
+        pass
 
     return {
         "bracket_id": bracket_id,
@@ -729,6 +743,22 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
         raise
     finally:
         release_connection(conn)
+
+    try:
+        from database.db import insert_notification
+        is_profit = net_pnl >= 0
+        trigger_label = {"TARGET": "Target hit", "STOP_LOSS": "Stop-loss hit"}.get(trigger, "Closed manually")
+        insert_notification(
+            user_id=user_id,
+            type="trade",
+            title=f"{trigger_label} — {symbol}",
+            message=f"{'PROFIT' if is_profit else 'LOSS'} · {qty} shares · "
+                    f"₹{sell_price:,.2f} exit · P&L {'+'if is_profit else ''}{net_pnl:,.0f} ({round(net_pnl/invested*100,1) if invested else 0:+.1f}%)",
+            icon="TrendingUp" if is_profit else "TrendingDown",
+            color="#16A34A" if is_profit else "#EF4444",
+        )
+    except Exception:
+        pass
 
 
 def square_off_all(user_id: int) -> Dict:

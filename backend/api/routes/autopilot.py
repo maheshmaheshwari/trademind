@@ -183,17 +183,7 @@ def _fire_pending_mandates(user_id: int):
         res = _execute_mandate(trade)
         if res["success"]:
             fired += 1
-            try:
-                insert_notification(
-                    user_id=user_id, type="trade",
-                    title=f"Autopilot executed {trade['symbol']}",
-                    message=f"{trade.get('mode','PAPER')} {trade.get('signal','BUY')} "
-                            f"@ ₹{trade.get('entry',0):,.2f} · "
-                            f"target ₹{trade.get('target',0):,.2f}",
-                    icon="BrainCircuit", color="#3B82F6",
-                )
-            except Exception:
-                pass
+            # execute_signal already inserts the "Order placed" notification
         else:
             failed += 1
             logger.warning(f"Mandate {trade['symbol']} failed: {res['error']}")

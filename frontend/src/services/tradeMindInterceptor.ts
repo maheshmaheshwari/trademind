@@ -29,6 +29,10 @@ const onRequest = (config: InternalAxiosRequestConfig): InternalAxiosRequestConf
 // cleared (i.e. on the next page load / re-login).
 let loggingOut = false;
 
+export function resetLoggingOut(): void {
+  loggingOut = false;
+}
+
 const onResponseError = (error: AxiosError | Error): Promise<AxiosError> => {
   if (axios.isAxiosError(error) && error.response?.status === 401) {
     if (!loggingOut) {

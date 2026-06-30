@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useAuth } from '../AuthContext';
-import { useGetPortfolioSummaryQuery } from '../services/tradeMindApiService';
+import { useGetPortfolioSummaryQuery, useGetTodayPnlQuery } from '../services/tradeMindApiService';
 import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell, useSort, Th, Td } from '../components/ui';
 import { AreaChart, Donut } from '../components/Charts';
 import { AddPositionModal } from '../components/AddPositionModal';
@@ -27,6 +27,7 @@ export default function PortfolioPage() {
   const navigate = useNavigate();
 
   const { data: portData, isLoading: loading, isError } = useGetPortfolioSummaryQuery(user?.id ?? 0, { skip: !user });
+  const { data: todayPnlData } = useGetTodayPnlQuery(user?.id ?? 0, { skip: !user });
   const raw = portData as any;
 
   const holdings: Holding[] = raw?.positions ? ([...raw.positions]).sort((a: Holding, b: Holding) => {
@@ -107,10 +108,12 @@ export default function PortfolioPage() {
               </span>
             </div>
             <div className="font-bold tracking-tight text-ink" style={{ fontSize: 'calc(27px * var(--u))', margin: '10px 0 5px' }}>{inrCompact(raw?.total_value ?? 0)}</div>
-            <span className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-gain">
-              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>
-              +1.84% today
-            </span>
+            {todayPnlData?.today_pnl_pct != null && (
+              <span className="inline-flex items-center gap-1 text-[12.5px] font-semibold"
+                    style={{ color: (todayPnlData.today_pnl_pct ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {(todayPnlData.today_pnl_pct ?? 0) >= 0 ? '+' : ''}{(todayPnlData?.today_pnl_pct ?? 0).toFixed(2)}% today
+              </span>
+            )}
           </div>
 
           <div className="border border-line" style={{

@@ -179,7 +179,13 @@ async def log_requests(request: Request, call_next):
             f"✗ {method} {path} | EXCEPTION | {elapsed_ms:.1f}ms | {exc}",
             exc_info=True,
         )
-        raise
+        # Return a JSONResponse instead of re-raising so this response flows
+        # outward through CORSMiddleware (which is outside this middleware in
+        # the stack). Re-raising would bypass CORS and send a bare 500 with no
+        # Access-Control-Allow-Origin header, which the browser rejects as a
+        # CORS error before showing the actual 500.
+        detail = str(exc) if os.getenv("DEBUG", "").lower() == "true" else "An internal error occurred"
+        return JSONResponse(status_code=500, content={"error": "Internal server error", "detail": detail})
 
 
 # ==========================================

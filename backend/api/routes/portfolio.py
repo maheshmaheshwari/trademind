@@ -28,8 +28,13 @@ class PortfolioCreate(BaseModel):
     risk_profile: str = "moderate"  # "conservative", "moderate", "aggressive"
 
 
+class SectorAlloc(BaseModel):
+    sector: str
+    allocation_pct: float
+
+
 class SectorUpdate(BaseModel):
-    sectors: List[dict]  # [{"sector": "IT", "allocation_pct": 20}, ...]
+    sectors: List[SectorAlloc]
 
 
 # ==========================================
@@ -244,7 +249,6 @@ async def create_portfolio(body: PortfolioCreate, user=Depends(get_current_user)
             (body.name, body.investment_amount, body.time_horizon, body.risk_profile, user["id"]),
         )
         portfolio_id = cur.fetchone()[0]
-        conn.commit()
 
         # Save sector allocations
         for sector, pct in allocations:
@@ -347,7 +351,7 @@ async def update_sectors(portfolio_id: int, body: SectorUpdate, user=Depends(get
             raise HTTPException(404, "Portfolio not found")
 
         # Validate total = 100%
-        total = sum(s["allocation_pct"] for s in body.sectors)
+        total = sum(s.allocation_pct for s in body.sectors)
         if abs(total - 100) > 1:
             raise HTTPException(400, f"Sector allocations must sum to 100% (got {total}%)")
 
@@ -356,7 +360,7 @@ async def update_sectors(portfolio_id: int, body: SectorUpdate, user=Depends(get
             _execute(
                 conn,
                 "UPDATE portfolio_sectors SET allocation_pct = ? WHERE portfolio_id = ? AND sector = ?",
-                (sector_data["allocation_pct"], portfolio_id, sector_data["sector"])
+                (sector_data.allocation_pct, portfolio_id, sector_data.sector)
             )
 
         _execute(conn, "UPDATE portfolios SET updated_at = NOW() WHERE id = ?", (portfolio_id,))

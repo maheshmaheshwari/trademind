@@ -73,7 +73,7 @@ export default function MarketPage() {
 
   const indices: IndexData[]    = (mktData as any)?.indices  ?? [];
   const fiiDii:  FIIDIIBar[]   = (mktData as any)?.fii_dii  ?? [];
-  const heatmap: HeatmapSector[] = [...(sectorsData ?? (mktData as any)?.heatmap ?? [])].sort((a: HeatmapSector, b: HeatmapSector) => (b.change ?? 0) - (a.change ?? 0));
+  const heatmap: HeatmapSector[] = [...(sectorsData ?? (mktData as any)?.heatmap ?? [])].sort((a: HeatmapSector, b: HeatmapSector) => (b?.change ?? 0) - (a?.change ?? 0));
   const gainers: Stock[]        = (mktData as any)?.gainers  ?? [];
   const losers:  Stock[]        = (mktData as any)?.losers   ?? [];
   const breadth: Breadth | null = (mktData as any)?.breadth  ?? null;
@@ -154,8 +154,8 @@ export default function MarketPage() {
               <div className="flex justify-between items-center">
                 <span className="text-[13px] text-ink-2">India VIX</span>
                 <span className="font-mono font-bold text-[16px]" style={{ color: (vix?.pct ?? 0) <= 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {vix ? vix.value.toFixed(2) : '—'}
-                  {vix && <span className="text-[12px]"> {pct(vix.pct)}</span>}
+                  {vix ? (vix?.value ?? 0).toFixed(2) : '—'}
+                  {vix && vix?.pct != null && <span className="text-[12px]"> {pct(vix.pct)}</span>}
                 </span>
               </div>
             </> : null}

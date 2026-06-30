@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { getMe, clearToken } from './api';
+import { resetLoggingOut } from './services/tradeMindInterceptor';
 
 interface User {
     id: number;
@@ -62,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const login = (u: User) => {
         setUser(u);
+        resetLoggingOut();
     };
 
     const refreshUser = async () => {

@@ -157,7 +157,7 @@ export default function DashboardPage() {
 
   const { data: portData,    isLoading: loadPort    } = useGetPortfolioSummaryQuery(user?.id ?? 0, { skip: !user });
   const { data: todayPnl,    isLoading: loadPnl     } = useGetTodayPnlQuery(user?.id ?? 0, { skip: !user });
-  const { data: signalsData, isLoading: loadSignals } = useGetActionableSignalsQuery();
+  const { data: signalsData, isLoading: loadSignals } = useGetActionableSignalsQuery(undefined, { skip: !user });
   const { data: ordersData,  isLoading: loadOrders  } = useGetOrdersQuery({ userId: user?.id ?? 0, size: 6 }, { skip: !user });
   const { data: posData,     isLoading: loadPos     } = useGetPositionsQuery({ userId: user?.id ?? 0, size: 1 }, { skip: !user });
   const { data: mktData,     isLoading: loadMkt     } = useGetMarketOverviewQuery();
@@ -172,10 +172,10 @@ export default function DashboardPage() {
     price:        t.price?.current             ?? 0,
     horizon:      t.model?.horizon             ?? '',
     signal:       t.signal?.includes('BUY') ? 'BUY' : t.signal?.includes('SELL') ? 'SELL' : 'HOLD',
-    confidence:   Math.round(t.confidence      ?? 0),
-    change:       t.change                     ?? 0,
-    spark:        t.spark                      ?? [],
-    sector:       t.sector                     ?? '',
+    confidence:   Math.round(t?.confidence      ?? 0),
+    change:       t?.change                     ?? 0,
+    spark:        t?.spark                      ?? [],
+    sector:       t?.sector                     ?? '',
     target_price: t.trade?.target_price,
     stop_loss:    t.trade?.stop_loss,
   }));
@@ -197,8 +197,12 @@ export default function DashboardPage() {
   async function handleSaveTopSignals() {
     if (!user) return;
     const top5 = (signals ?? []).slice(0, 5).map(s => s?.symbol).filter(Boolean) as string[];
-    await Promise.all(top5.map(sym => addToWatchlistMut({ userId: user.id, symbol: sym })));
-    toast({ type: 'success', title: 'Top 5 signals saved to your watchlist' });
+    try {
+      await Promise.all(top5.map(sym => addToWatchlistMut({ userId: user.id, symbol: sym })));
+      toast({ type: 'success', title: 'Top 5 signals saved to your watchlist' });
+    } catch {
+      toast({ type: 'error', title: 'Some signals could not be saved to watchlist' });
+    }
   }
 
   const nifty    = indices?.[0];
@@ -301,8 +305,8 @@ export default function DashboardPage() {
                   <div key={ix?.name} className="flex items-center gap-2 px-[11px] py-[7px] rounded-[9px] bg-surface-2 text-[12px]">
                     <span className="text-ink-2 font-semibold">{ix?.name}</span>
                     <span className="font-mono font-bold text-ink">{ix?.value?.toLocaleString('en-IN')}</span>
-                    <span className="font-semibold tabular-nums" style={{ color: (ix.pct ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {((ix.pct ?? 0) >= 0 ? '+' : '') + (ix.pct ?? 0).toFixed(2) + '%'}
+                    <span className="font-semibold tabular-nums" style={{ color: (ix?.pct ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {((ix?.pct ?? 0) >= 0 ? '+' : '') + (ix?.pct ?? 0).toFixed(2) + '%'}
                     </span>
                   </div>
                 ))

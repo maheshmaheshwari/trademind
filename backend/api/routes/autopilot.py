@@ -103,6 +103,20 @@ def _execute_mandate(trade: dict) -> dict:
         result["error"] = "qty < 1 — cannot execute"
         return result
 
+    # Atomically claim the trade — prevents double-execution if both
+    # authorize_trade and _fire_pending_mandates race to the same record.
+    claim_conn = get_connection()
+    try:
+        cur = _execute(claim_conn,
+            "UPDATE authorized_trades SET status='EXECUTING' WHERE id=? AND status='PENDING' RETURNING id",
+            (trade["id"],))
+        claimed = cur.fetchone()
+        claim_conn.commit()
+    finally:
+        release_connection(claim_conn)
+    if not claimed:
+        return {"success": False, "error": "Trade already claimed by another executor"}
+
     try:
         exec_result = execute_signal(
             user_id    = trade["user_id"],
@@ -379,7 +393,7 @@ async def revoke_trade(trade_id: int, user=Depends(_get_current_user)):
         try:
             from trading.trading_engine import square_off
             sq = square_off(trade["user_id"], trade["symbol"])
-            actual_pnl = sq.get("net_pnl")
+            actual_pnl = sq.get("pnl")
             logger.info(
                 f"Squared off {trade['symbol']} for user {trade['user_id']} — P&L: ₹{actual_pnl}"
             )

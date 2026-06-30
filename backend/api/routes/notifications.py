@@ -29,6 +29,8 @@ async def _current_user_id(authorization: Optional[str] = Header(None)) -> int:
     payload = decode_token(authorization.split(" ", 1)[1])
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("scope") != "full":
+        raise HTTPException(status_code=401, detail="Incomplete authentication — please complete MFA")
     user = get_user(payload["user_id"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")

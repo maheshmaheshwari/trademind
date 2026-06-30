@@ -35,6 +35,44 @@ from trading.trading_engine import get_user
 
 logger = logging.getLogger(__name__)
 
+_RESEND_API_KEY  = os.getenv("RESEND_API_KEY", "")
+_RESEND_FROM     = os.getenv("RESEND_FROM_EMAIL", "noreply@trademind.ai")
+
+
+def _send_otp_email(to_email: str, otp: str, ip_address: Optional[str] = None) -> bool:
+    """Send password-reset OTP via Resend. Returns True on success."""
+    if not _RESEND_API_KEY or _RESEND_API_KEY.startswith("re_placeholder"):
+        logger.warning("Resend API key not configured — OTP email not sent")
+        return False
+
+    from api.emails.password_reset import render
+    requested_at = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M UTC")
+    content = render(otp=otp, requested_at=requested_at, ip_address=ip_address)
+
+    try:
+        resp = http_requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {_RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": _RESEND_FROM,
+                "to": [to_email],
+                "subject": content["subject"],
+                "html": content["html"],
+                "text": content["text"],
+            },
+            timeout=10,
+        )
+        if resp.status_code in (200, 201):
+            return True
+        logger.error("Resend API error %s: %s", resp.status_code, resp.text)
+        return False
+    except Exception as exc:
+        logger.error("Failed to send OTP email: %s", exc)
+        return False
+
 router = APIRouter(tags=["Auth"])
 
 
@@ -312,12 +350,16 @@ async def password_reset_request(req: ResetRequestBody, request: Request):
     """Generate a 6-digit OTP and store its hash for password reset.
 
     Rate-limited (audit M2) — was previously unthrottled (row-growth/spam vector)."""
-    otp = "".join(secrets.choice("0123456789") for _ in range(6))
-    otp_hash = hash_password(otp)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
-
     conn = get_connection()
     try:
+        cur = _execute(conn, "SELECT id FROM users WHERE email = ?", (req.email,))
+        if not _row_to_dict(cur):
+            raise HTTPException(status_code=404, detail="No account found with this email address")
+
+        otp = "".join(secrets.choice("0123456789") for _ in range(6))
+        otp_hash = hash_password(otp)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+
         _execute(conn, """
             INSERT INTO password_reset_otps (email, otp_hash, expires_at)
             VALUES (?, ?, ?)
@@ -326,9 +368,10 @@ async def password_reset_request(req: ResetRequestBody, request: Request):
     finally:
         release_connection(conn)
 
-    # SMTP not configured — OTP is not logged to prevent credential exposure in logs
+    ip_address = request.client.host if request.client else None
+    _send_otp_email(req.email, otp, ip_address=ip_address)
 
-    return {"status": "ok", "message": "If that email exists, an OTP has been sent"}
+    return {"status": "ok", "message": "OTP sent to your email address"}
 
 
 # ---------------------------------------------------------------------------

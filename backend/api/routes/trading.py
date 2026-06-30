@@ -138,7 +138,11 @@ async def api_login(req: LoginRequest, request: Request):
     user = get_user_by_username(req.username)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    if not verify_password(req.password, user.get("password_hash", "")):
+    pw_hash = user.get("password_hash", "")
+    if not pw_hash:
+        # Google-only account — no password set; bcrypt.checkpw would throw on empty hash
+        raise HTTPException(status_code=401, detail="This account uses Google sign-in. Please use 'Continue with Google'.")
+    if not verify_password(req.password, pw_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     if user.get("totp_enabled"):
@@ -419,18 +423,18 @@ async def api_today_pnl(user_id: int, user=Depends(get_current_user)):
 
     conn = get_connection()
     today = datetime.now().strftime("%Y-%m-%d")
-
-    row = _execute(conn, """
-        SELECT
-            COALESCE(SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END), 0) as profit,
-            COALESCE(SUM(CASE WHEN pnl < 0 THEN pnl ELSE 0 END), 0) as loss,
-            COALESCE(SUM(pnl), 0) as net,
-            COUNT(CASE WHEN pnl IS NOT NULL THEN 1 END) as trades
-        FROM orders
-        WHERE user_id = ? AND DATE(created_at) = ? AND order_purpose = 'SQUARE_OFF'
-    """, (user_id, today)).fetchone()
-    
-    release_connection(conn)
+    try:
+        row = _execute(conn, """
+            SELECT
+                COALESCE(SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END), 0) as profit,
+                COALESCE(SUM(CASE WHEN pnl < 0 THEN pnl ELSE 0 END), 0) as loss,
+                COALESCE(SUM(pnl), 0) as net,
+                COUNT(CASE WHEN pnl IS NOT NULL THEN 1 END) as trades
+            FROM orders
+            WHERE user_id = ? AND DATE(created_at) = ? AND order_purpose = 'SQUARE_OFF'
+        """, (user_id, today)).fetchone()
+    finally:
+        release_connection(conn)
     
     return {
         "date": today,

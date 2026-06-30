@@ -53,5 +53,5 @@ backend/logs/
 # Runtime pid/lock files
 backend/logs/.scheduler_owner.pid
 
-# Fundraising docs (private — not for repo)
-docs/fundraising/
+# Docs — local only, not for repo
+docs/

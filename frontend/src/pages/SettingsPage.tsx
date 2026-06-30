@@ -23,7 +23,37 @@ import {
   useGetSessionsQuery,
   useRevokeSessionMutation,
 } from '../services/tradeMindApiService';
-import { User, Link, Bell, Palette, Shield, CheckCircle, Loader2, ExternalLink } from 'lucide-react';
+import { User, Link, Bell, Palette, Shield, CheckCircle, Loader2, ExternalLink, Eye, EyeOff } from 'lucide-react';
+
+// ── Password strength helper ─────────────────────────────────────────────────
+
+function pwStrength(v: string): { level: 0 | 1 | 2 | 3; label: string; color: string } {
+  if (!v) return { level: 0, label: '', color: '' };
+  const has = (r: RegExp) => r.test(v);
+  const score = (v.length >= 8 ? 1 : 0) + (has(/[A-Z]/) && has(/[a-z]/) ? 1 : 0) + (has(/\d/) ? 1 : 0) + (has(/[^A-Za-z0-9]/) ? 1 : 0);
+  if (v.length < 8) return { level: 1, label: 'Too short — min 8 characters', color: 'var(--red)' };
+  if (score <= 2)   return { level: 2, label: 'Fair', color: 'var(--gold)' };
+  if (score === 3)  return { level: 3, label: 'Good', color: '#3b82f6' };
+  return { level: 3, label: 'Strong', color: 'var(--green)' };
+}
+
+function PasswordHelp({ value }: { value: string }) {
+  const { level, label, color } = pwStrength(value);
+  const bars = [1, 2, 3] as const;
+  return (
+    <div className="flex flex-col gap-[5px] mt-[2px]">
+      <div className="flex gap-[4px]">
+        {bars.map(b => (
+          <div key={b} className="flex-1 h-[3px] rounded-full transition-colors duration-200"
+            style={{ background: level >= b ? color : 'var(--border)' }} />
+        ))}
+      </div>
+      <span className="text-[11.5px]" style={{ color: value ? color : 'var(--text-3)' }}>
+        {value ? label : 'At least 8 characters required'}
+      </span>
+    </div>
+  );
+}
 
 // ── Shared primitives ────────────────────────────────────────────────────────
 
@@ -217,9 +247,10 @@ function ProfileTab({ user }: { user: any }) {
 
 function AngelOneModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const toast = useToast();
-  const [clientId, setClientId] = useState('');
-  const [password, setPassword] = useState('');
-  const [totp,     setTotp]     = useState('');
+  const [clientId,     setClientId]     = useState('');
+  const [password,     setPassword]     = useState('');
+  const [totp,         setTotp]         = useState('');
+  const [showBrokerPw, setShowBrokerPw] = useState(false);
   const [connectBroker, { isLoading }] = useConnectBrokerAngelOneMutation();
 
   async function handleConnect(e: React.FormEvent) {
@@ -254,7 +285,13 @@ function AngelOneModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
           </div>
           <div className="flex flex-col gap-[6px]">
             <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Password</label>
-            <input type="password" autoComplete="off" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" className={inputCls} />
+            <div className="relative">
+              <input type={showBrokerPw ? 'text' : 'password'} autoComplete="off" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" className={inputCls + ' pr-10'} />
+              <button type="button" onClick={() => setShowBrokerPw(v => !v)}
+                className="absolute right-[11px] top-1/2 -translate-y-1/2 text-[var(--text-3)] hover:text-[var(--text-2)] bg-transparent border-none cursor-pointer p-0">
+                {showBrokerPw ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
           <div className="flex flex-col gap-[6px]">
             <label className="text-[12.5px] font-semibold text-[var(--text-2)]">TOTP (from your authenticator app)</label>
@@ -543,7 +580,9 @@ function SecurityTab() {
   const [totpDisable,  { isLoading: totpDisableLoading }] = useTotpDisableMutation();
   const [revokeSession] = useRevokeSessionMutation();
 
-  const [show,        setShow]        = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew,     setShowNew]     = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [pwCurrent,   setPwCurrent]   = useState('');
   const [pwNew,       setPwNew]       = useState('');
   const [pwConfirm,   setPwConfirm]   = useState('');
@@ -565,8 +604,9 @@ function SecurityTab() {
       await setPassword({ new_password: pwNew }).unwrap();
       toast({ type: 'success', title: 'Password set successfully' });
       setPwNew(''); setPwConfirm('');
-    } catch {
-      toast({ type: 'error', title: 'Failed to set password' });
+    } catch (ex: any) {
+      const msg = ex?.data?.detail ?? ex?.message ?? 'Failed to set password';
+      toast({ type: 'error', title: msg });
     }
   }
 
@@ -577,8 +617,9 @@ function SecurityTab() {
       await changePassword({ current_password: pwCurrent, new_password: pwNew }).unwrap();
       toast({ type: 'success', title: 'Password updated' });
       setPwCurrent(''); setPwNew(''); setPwConfirm('');
-    } catch {
-      toast({ type: 'error', title: 'Password change failed', msg: 'Check your current password' });
+    } catch (ex: any) {
+      const msg = ex?.data?.detail ?? ex?.message ?? 'Password change failed';
+      toast({ type: 'error', title: msg });
     }
   }
 
@@ -633,21 +674,36 @@ function SecurityTab() {
             {hasPassword && (
               <div className="flex flex-col gap-[7px]">
                 <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Current password</label>
-                <input type={show ? 'text' : 'password'} value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} placeholder="••••••••" className={inputCls} />
+                <div className="relative">
+                  <input type={showCurrent ? 'text' : 'password'} value={pwCurrent} onChange={e => setPwCurrent(e.target.value)} placeholder="••••••••" className={inputCls + ' pr-10'} />
+                  <button type="button" onClick={() => setShowCurrent(v => !v)}
+                    className="absolute right-[11px] top-1/2 -translate-y-1/2 text-[var(--text-3)] hover:text-[var(--text-2)] bg-transparent border-none cursor-pointer p-0">
+                    {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
             )}
             <div className="flex flex-col gap-[7px]">
               <label className="text-[12.5px] font-semibold text-[var(--text-2)]">New password</label>
-              <input type={show ? 'text' : 'password'} value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="••••••••" className={inputCls} />
+              <div className="relative">
+                <input type={showNew ? 'text' : 'password'} value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="••••••••" className={inputCls + ' pr-10'} />
+                <button type="button" onClick={() => setShowNew(v => !v)}
+                  className="absolute right-[11px] top-1/2 -translate-y-1/2 text-[var(--text-3)] hover:text-[var(--text-2)] bg-transparent border-none cursor-pointer p-0">
+                  {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <PasswordHelp value={pwNew} />
             </div>
             <div className="flex flex-col gap-[7px]">
               <label className="text-[12.5px] font-semibold text-[var(--text-2)]">Confirm new password</label>
-              <input type={show ? 'text' : 'password'} value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} placeholder="••••••••" className={inputCls} />
+              <div className="relative">
+                <input type={showConfirm ? 'text' : 'password'} value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} placeholder="••••••••" className={inputCls + ' pr-10'} />
+                <button type="button" onClick={() => setShowConfirm(v => !v)}
+                  className="absolute right-[11px] top-1/2 -translate-y-1/2 text-[var(--text-3)] hover:text-[var(--text-2)] bg-transparent border-none cursor-pointer p-0">
+                  {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
-            <label className="flex items-center gap-2 text-[12.5px] text-[var(--text-2)] cursor-pointer">
-              <input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
-              Show passwords
-            </label>
             <button
               type="button"
               onClick={hasPassword ? handleChangePassword : handleSetPassword}

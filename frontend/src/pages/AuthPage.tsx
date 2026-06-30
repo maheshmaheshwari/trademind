@@ -73,6 +73,40 @@ function IconPlus() {
 function IconSparkle() {
   return <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>;
 }
+function IconEye() {
+  return <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
+}
+function IconEyeOff() {
+  return <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 20C5 20 1 12 1 12a18.5 18.5 0 0 1 5.1-6.9M9.9 4.2A10.4 10.4 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M1 1l22 22"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>;
+}
+
+function pwStrength(v: string): { level: 0 | 1 | 2 | 3; label: string; color: string } {
+  if (!v) return { level: 0, label: '', color: '' };
+  const has = (r: RegExp) => r.test(v);
+  const score = (v.length >= 8 ? 1 : 0) + (has(/[A-Z]/) && has(/[a-z]/) ? 1 : 0) + (has(/\d/) ? 1 : 0) + (has(/[^A-Za-z0-9]/) ? 1 : 0);
+  if (v.length < 8) return { level: 1, label: 'Too short — min 8 characters', color: 'var(--red)' };
+  if (score <= 2)   return { level: 2, label: 'Fair', color: 'var(--gold)' };
+  if (score === 3)  return { level: 3, label: 'Good', color: '#3b82f6' };
+  return { level: 3, label: 'Strong', color: 'var(--green)' };
+}
+
+function PasswordHelp({ value }: { value: string }) {
+  const { level, label, color } = pwStrength(value);
+  const bars = [1, 2, 3] as const;
+  return (
+    <div className="flex flex-col gap-[5px] mt-[2px]">
+      <div className="flex gap-[4px]">
+        {bars.map(b => (
+          <div key={b} className="flex-1 h-[3px] rounded-full transition-colors duration-200"
+            style={{ background: level >= b ? color : 'var(--border)' }} />
+        ))}
+      </div>
+      <span className="text-[11.5px]" style={{ color: value ? color : 'var(--text-3)' }}>
+        {value ? label : 'At least 8 characters required'}
+      </span>
+    </div>
+  );
+}
 
 export default function AuthPage() {
   const navigate              = useNavigate();
@@ -80,12 +114,14 @@ export default function AuthPage() {
   const { theme, toggleTheme } = useTheme();
   const toast                 = useToast();
 
-  const [mode,     setMode]     = useState<'login' | 'register'>('login');
-  const [username, setUsername] = useState('');
-  const [pw,       setPw]       = useState('');
-  const [name,     setName]     = useState('');
-  const [err,      setErr]      = useState('');
-  const [remember, setRemember] = useState(true);
+  const [mode,         setMode]         = useState<'login' | 'register'>('login');
+  const [username,     setUsername]     = useState('');
+  const [pw,           setPw]           = useState('');
+  const [name,         setName]         = useState('');
+  const [err,          setErr]          = useState('');
+  const [remember,     setRemember]     = useState(true);
+  const [showLoginPw,  setShowLoginPw]  = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
 
   // Forgot password state
   const [forgotStep,      setForgotStep]      = useState<0 | 1 | 2>(0);
@@ -119,7 +155,7 @@ export default function AuthPage() {
         login(res.user);
         navigate('/dashboard');
       } catch (err: any) {
-        toast({ type: 'error', title: 'Google sign-in failed', message: err?.data?.detail ?? 'Please try again' });
+        toast({ type: 'error', title: 'Google sign-in failed', msg: err?.data?.detail ?? 'Please try again' });
       }
     },
     onError: () => toast({ type: 'error', title: 'Google sign-in cancelled' }),
@@ -132,8 +168,13 @@ export default function AuthPage() {
     try {
       await requestReset({ email: forgotEmail.trim() }).unwrap();
       setForgotStep(2);
-    } catch {
-      setForgotErr('Failed to send OTP. Please check your email.');
+    } catch (ex: any) {
+      const msg = ex?.data?.detail ?? ex?.message ?? '';
+      if (msg.toLowerCase().includes('no account')) {
+        setForgotErr('No account found with this email address. Please register first.');
+      } else {
+        setForgotErr('Failed to send OTP. Please try again.');
+      }
     }
   }
 
@@ -370,12 +411,16 @@ export default function AuthPage() {
                 <div className="relative">
                   <span className="absolute left-[13px] top-[14px] text-ink-3 pointer-events-none"><IconLock /></span>
                   <input
-                    className={inputCls}
-                    type="password"
+                    className={inputCls + ' pr-10'}
+                    type={showLoginPw ? 'text' : 'password'}
                     value={pw} onChange={e => setPw(e.target.value)}
                     placeholder="••••••••"
                     autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
                   />
+                  <button type="button" onClick={() => setShowLoginPw(v => !v)}
+                    className="absolute right-[11px] top-[13px] text-ink-3 hover:text-ink-2 bg-transparent border-none cursor-pointer p-0">
+                    {showLoginPw ? <IconEyeOff /> : <IconEye />}
+                  </button>
                 </div>
               </div>
 
@@ -482,10 +527,17 @@ export default function AuthPage() {
                 <div className="flex flex-col gap-[7px]">
                   <label className="text-[12.5px] font-semibold text-ink-2">New password</label>
                   <input type="password" value={forgotNewPw} onChange={e => setForgotNewPw(e.target.value)} placeholder="••••••••" className="h-11 px-[13px] rounded-[11px] border border-line bg-surface-2 text-ink font-sans text-sm outline-none w-full box-border transition-colors focus:border-accent" />
+                  <PasswordHelp value={forgotNewPw} />
                 </div>
                 <div className="flex flex-col gap-[7px]">
                   <label className="text-[12.5px] font-semibold text-ink-2">Confirm new password</label>
-                  <input type="password" value={forgotConfirmPw} onChange={e => setForgotConfirmPw(e.target.value)} placeholder="••••••••" className="h-11 px-[13px] rounded-[11px] border border-line bg-surface-2 text-ink font-sans text-sm outline-none w-full box-border transition-colors focus:border-accent" />
+                  <div className="relative">
+                    <input type={showConfirmPw ? 'text' : 'password'} value={forgotConfirmPw} onChange={e => setForgotConfirmPw(e.target.value)} placeholder="••••••••" className="h-11 px-[13px] pr-10 rounded-[11px] border border-line bg-surface-2 text-ink font-sans text-sm outline-none w-full box-border transition-colors focus:border-accent" />
+                    <button type="button" onClick={() => setShowConfirmPw(v => !v)}
+                      className="absolute right-[11px] top-[13px] text-ink-3 hover:text-ink-2 bg-transparent border-none cursor-pointer p-0">
+                      {showConfirmPw ? <IconEyeOff /> : <IconEye />}
+                    </button>
+                  </div>
                 </div>
                 <div className="flex gap-3">
                   <button type="button" onClick={() => setForgotStep(1)} className="flex-1 h-[44px] rounded-[11px] font-sans text-[13.5px] font-semibold cursor-pointer border border-line bg-surface-2 text-ink">Back</button>

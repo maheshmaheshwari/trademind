@@ -149,10 +149,9 @@ def create_user(username: str, password_hash: str, display_name: str = None, ema
         conn.commit()
         user = _fetchone(conn, "SELECT * FROM users WHERE username = ?", (username,))
         cols = _col_names(conn, "users")
-        release_connection(conn)
         return dict(zip(cols, user))
     except Exception as e:
-        release_connection(conn)
+        conn.rollback()
         try:
             import psycopg2.errors
             if isinstance(e, psycopg2.errors.UniqueViolation):
@@ -162,6 +161,8 @@ def create_user(username: str, password_hash: str, display_name: str = None, ema
         if "UNIQUE" in str(e) or "unique" in str(e):
             raise ValueError(f"Username '{username}' already exists") from e
         raise
+    finally:
+        release_connection(conn)
 
 
 def get_user(user_id: int) -> Optional[Dict]:
@@ -583,27 +584,23 @@ def execute_signal(
 def get_positions(user_id: int) -> List[Dict]:
     """Get all open positions for a user with current P&L."""
     conn = get_connection()
-    rows = _fetchall(
-        conn,
-        "SELECT * FROM positions WHERE user_id = ? ORDER BY updated_at DESC",
-        (user_id,)
-    )
-    cols = _col_names(conn, "positions")
-    release_connection(conn)
-    return [dict(zip(cols, r)) for r in rows]
+    try:
+        rows = _fetchall(conn, "SELECT * FROM positions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,))
+        cols = _col_names(conn, "positions")
+        return [dict(zip(cols, r)) for r in rows]
+    finally:
+        release_connection(conn)
 
 
 def get_orders(user_id: int, limit: int = 50) -> List[Dict]:
     """Get order history for a user."""
     conn = get_connection()
-    rows = _fetchall(
-        conn,
-        "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-        (user_id, limit)
-    )
-    cols = _col_names(conn, "orders")
-    release_connection(conn)
-    return [dict(zip(cols, r)) for r in rows]
+    try:
+        rows = _fetchall(conn, "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", (user_id, limit))
+        cols = _col_names(conn, "orders")
+        return [dict(zip(cols, r)) for r in rows]
+    finally:
+        release_connection(conn)
 
 
 def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str = "MANUAL") -> Dict:
@@ -712,12 +709,28 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
                     (mandate_status, net_pnl, bracket_id))
                 conn.commit()
             except Exception as _e:
-                logger.warning(f"Could not settle authorized_trade for bracket {bracket_id}: {_e}")
+                _angel_log.warning(f"Could not settle authorized_trade for bracket {bracket_id}: {_e}")
 
         # Get updated user
         user = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))
         user_cols = _col_names(conn, "users")
         user_dict = dict(zip(user_cols, user))
+
+        try:
+            from database.db import insert_notification
+            is_profit = net_pnl >= 0
+            trigger_label = {"TARGET": "Target hit", "STOP_LOSS": "Stop-loss hit"}.get(trigger, "Closed manually")
+            insert_notification(
+                user_id=user_id,
+                type="trade",
+                title=f"{trigger_label} — {symbol}",
+                message=f"{'PROFIT' if is_profit else 'LOSS'} · {qty} shares · "
+                        f"₹{sell_price:,.2f} exit · P&L {'+'if is_profit else ''}{net_pnl:,.0f} ({round(net_pnl/invested*100,1) if invested else 0:+.1f}%)",
+                icon="TrendingUp" if is_profit else "TrendingDown",
+                color="#16A34A" if is_profit else "#EF4444",
+            )
+        except Exception:
+            pass
 
         return {
             "symbol": symbol,
@@ -743,22 +756,6 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
         raise
     finally:
         release_connection(conn)
-
-    try:
-        from database.db import insert_notification
-        is_profit = net_pnl >= 0
-        trigger_label = {"TARGET": "Target hit", "STOP_LOSS": "Stop-loss hit"}.get(trigger, "Closed manually")
-        insert_notification(
-            user_id=user_id,
-            type="trade",
-            title=f"{trigger_label} — {symbol}",
-            message=f"{'PROFIT' if is_profit else 'LOSS'} · {qty} shares · "
-                    f"₹{sell_price:,.2f} exit · P&L {'+'if is_profit else ''}{net_pnl:,.0f} ({round(net_pnl/invested*100,1) if invested else 0:+.1f}%)",
-            icon="TrendingUp" if is_profit else "TrendingDown",
-            color="#16A34A" if is_profit else "#EF4444",
-        )
-    except Exception:
-        pass
 
 
 def square_off_all(user_id: int) -> Dict:

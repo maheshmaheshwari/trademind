@@ -135,7 +135,7 @@ export default function TradesPage() {
     .sort((a, b) => {
       const va = a[histSort.key as keyof Trade], vb = b[histSort.key as keyof Trade];
       let cmp = 0;
-      if (typeof va === 'string' && typeof vb === 'string' && histSort.key === 'date') {
+      if (typeof va === 'string' && typeof vb === 'string' && histSort.key === 'created_at') {
         cmp = new Date(va).getTime() - new Date(vb).getTime();
       } else if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
       else if (typeof va === 'string' && typeof vb === 'string') cmp = va.localeCompare(vb);
@@ -405,7 +405,7 @@ export default function TradesPage() {
                     No AI signals acted on yet. Execute a signal from the AI Signals page.
                   </td></tr>
                 ) : (signalHist ?? []).map((s: any, i: number) => (
-                  <tr key={i} className="transition-colors hover:bg-surface-2">
+                  <tr key={s?.id ?? `${s?.symbol}-${s?.traded_at ?? s?.date}-${i}`} className="transition-colors hover:bg-surface-2">
                     <td style={tdS} onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)} className="cursor-pointer">
                       <SymbolCell symbol={s?.symbol ?? ''} name={(s?.symbol ?? '').replace('.NS','')} sector="" showSector={false} />
                     </td>

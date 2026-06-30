@@ -37,15 +37,15 @@ export default function AISignalsPage() {
 
   const filtered = useMemo(() => [...allSignals]
     .filter(s =>
-      (sigType  === 'All' || s.signal  === sigType)  &&
-      (horizon  === 'All' || s.horizon === horizon)  &&
-      (sector   === 'All' || s.sector  === sector)   &&
-      (s.confidence ?? 0) >= conf &&
+      (sigType  === 'All' || s?.signal  === sigType)  &&
+      (horizon  === 'All' || s?.horizon === horizon)  &&
+      (sector   === 'All' || s?.sector  === sector)   &&
+      (s?.confidence ?? 0) >= conf &&
       (!dSearch || s?.symbol?.toLowerCase()?.includes(dSearch.toLowerCase()) ||
                    s?.name?.toLowerCase()?.includes(dSearch.toLowerCase()))
     )
     .sort((a, b) => {
-      const va = a[sort.key as keyof AllSignal], vb = b[sort.key as keyof AllSignal];
+      const va = a?.[sort.key as keyof AllSignal], vb = b?.[sort.key as keyof AllSignal];
       let cmp = 0;
       if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
       else if (typeof va === 'string' && typeof vb === 'string') cmp = va.localeCompare(vb);
@@ -56,7 +56,7 @@ export default function AISignalsPage() {
   const rows  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   const counts = { BUY: 0, SELL: 0, HOLD: 0 };
-  (allSignals ?? []).forEach(s => { if (s?.signal in counts) counts[s.signal as keyof typeof counts]++; });
+  (allSignals ?? []).forEach(s => { if (s?.signal && s?.signal in counts) counts[s?.signal as keyof typeof counts]++; });
 
   const segBtn = (active: boolean) =>
     `border-none font-sans text-[12.5px] font-semibold px-3 py-[6px] rounded-[7px] cursor-pointer transition-colors ${

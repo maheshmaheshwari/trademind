@@ -346,7 +346,7 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
 
   useEffect(() => {
     if (suggestedQty > 0 && qty === '') setQty(String(affordableQty));
-  }, [suggestedQty]);
+  }, [suggestedQty, affordableQty, qty]);
 
   const consumed    = data?.consumed_volume ?? 0;
   const recommended = data?.recommended_volume ?? 0;
@@ -356,7 +356,7 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
 
   const handleAddToWatchlist = async () => {
     try {
-      await addToWatchlistMut(data?.symbol ?? '').unwrap();
+      await addToWatchlistMut({ userId: user?.id ?? 0, symbol: data?.symbol ?? '' }).unwrap();
       toast({ type: 'success', title: `${data?.symbol ?? ''} added to watchlist` });
     } catch {
       toast({ type: 'error', title: 'Failed to add to watchlist' });

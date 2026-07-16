@@ -1,0 +1,36 @@
+# Auto-deploy the backend to the private Hugging Face Space on every push to
+# main that touches backend/. Uses the same filtered upload as running
+# scripts/deploy_space.py push locally (secrets/models/data never uploaded).
+#
+# Requires the HF_TOKEN repository secret (Settings → Secrets and variables →
+# Actions): an HF token with WRITE access to the Space.
+name: Deploy backend to HF Space
+
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**']
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install huggingface_hub python-dotenv
+
+      - name: Push backend to Space
+        working-directory: backend
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_REPO: MaheshMaheshwari/trademind
+        run: python scripts/deploy_space.py push

@@ -136,7 +136,7 @@ app.add_middleware(SlowAPIMiddleware)
 # Request / Response logging middleware
 # ==========================================
 
-_SKIP_LOG_PATHS = {"/api/health", "/docs", "/redoc", "/openapi.json"}
+_SKIP_LOG_PATHS = {"/api/health", "/api/health/db", "/docs", "/redoc", "/openapi.json"}
 _SENSITIVE_FIELDS = {"password", "token", "secret", "password_hash", "totp"}
 
 _req_logger = logging.getLogger("trademind.access")
@@ -442,6 +442,31 @@ async def health_check():
         "timestamp": now.isoformat(),
         "version": "1.0.0",
     }
+
+
+@app.get("/api/health/db", tags=["Health"])
+async def health_check_db():
+    """
+    DB-touching health check. Pinged by the keep-alive cron
+    (.github/workflows/keepalive.yml): Timescale Cloud's free tier pauses
+    idle services, so this SELECT 1 doubles as DB keep-alive traffic.
+    Kept separate from /api/health so the plain check stays DB-independent.
+    """
+    def _probe():
+        from database.db import get_connection, release_connection, _execute
+        conn = get_connection()
+        try:
+            _execute(conn, "SELECT 1").fetchone()
+        finally:
+            release_connection(conn)
+
+    try:
+        await run_in_thread(_probe)
+        return {"status": "ok", "database": "ok"}
+    except Exception as exc:
+        logger.error(f"DB health check failed: {exc}")
+        return JSONResponse(status_code=503,
+                            content={"status": "degraded", "database": "unreachable"})
 
 
 # ==========================================

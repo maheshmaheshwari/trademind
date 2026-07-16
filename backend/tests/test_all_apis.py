@@ -1729,6 +1729,11 @@ class TestServerEndpoints:
         resp = api_client.get("/api/health")
         assert resp.status_code == 200
 
+    def test_health_check_db(self, api_client):
+        resp = api_client.get("/api/health/db")
+        assert resp.status_code == 200
+        assert resp.json()["database"] == "ok"
+
     def test_scheduler_status(self, api_client):
         resp = api_client.get("/api/scheduler/status")
         assert resp.status_code == 200

@@ -21,7 +21,7 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping /api/health
+      - name: Ping /api/health and /api/health/db
         run: |
           code=$(curl -s -o /dev/null -w '%{http_code}' -m 60 \
             -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" \
@@ -30,3 +30,9 @@ jobs:
           # 200 = up; anything else on a wake-from-sleep first hit is fine,
           # the request itself triggers the wake. Fail only on auth errors.
           if [ "$code" = "401" ] || [ "$code" = "403" ]; then exit 1; fi
+          # DB-touching ping — Timescale Cloud's free tier pauses idle
+          # services, so this SELECT 1 keeps the database awake too.
+          dbcode=$(curl -s -o /dev/null -w '%{http_code}' -m 60 \
+            -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" \
+            https://maheshmaheshwari-trademind.hf.space/api/health/db)
+          echo "health/db: HTTP $dbcode"

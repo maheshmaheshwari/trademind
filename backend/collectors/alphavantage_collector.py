@@ -158,8 +158,15 @@ def fetch_av_news(adr_ticker: str, nse_symbol: str) -> List[Dict]:
         if matched is None:
             continue
 
-        label = matched.get("ticker_sentiment_label", "Neutral")
-        sentiment = _map_sentiment(label)
+        # Store the signed numeric score (same convention as the FinBERT
+        # scorer: sign = direction, magnitude = strength) — NOT the text
+        # label; every news_sentiment reader expects the numeric format.
+        try:
+            sentiment = str(float(matched.get("ticker_sentiment_score", 0.0)))
+        except (ValueError, TypeError):
+            label = matched.get("ticker_sentiment_label", "Neutral")
+            score = {"positive": 1.0, "negative": -1.0}.get(_map_sentiment(label), 0.0)
+            sentiment = str(score)
         try:
             confidence = float(matched.get("relevance_score", 0.0))
         except (ValueError, TypeError):

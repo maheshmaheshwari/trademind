@@ -599,8 +599,24 @@ SQL_COMPRESSION = [
     "SELECT add_compression_policy('news_sentiment', INTERVAL '7 days', if_not_exists => TRUE);",
 ]
 
-# Continuous aggregate — auto-computed from news_sentiment every hour
-SQL_NEWS_DAILY_CAGG = """
+# Continuous aggregate — auto-computed from news_sentiment every hour.
+#
+# The sentiment column's canonical format is a SIGNED NUMERIC STRING
+# ("-0.83", "0.0") — sign = direction, magnitude = strength — written by the
+# FinBERT scorer and all collectors. The CASE below also tolerates legacy
+# text labels ('positive'/'negative'/'neutral') so a stray label row can
+# never break a cagg refresh; anything unparseable becomes NULL (excluded
+# from the aggregates). The old definition treated ONLY labels as signal,
+# silently zeroing every numeric row — see _NEWS_CAGG_OLD_MARKER migration.
+_SENTIMENT_VAL = """CASE
+        WHEN sentiment = 'positive' THEN  COALESCE(confidence, 1.0)
+        WHEN sentiment = 'negative' THEN -COALESCE(confidence, 1.0)
+        WHEN sentiment = 'neutral'  THEN 0.0
+        WHEN sentiment ~ '^-?[0-9]+\\.?[0-9]*([eE]-?[0-9]+)?$'
+            THEN sentiment::double precision
+        ELSE NULL END"""
+
+SQL_NEWS_DAILY_CAGG = f"""
 CREATE MATERIALIZED VIEW IF NOT EXISTS news_daily_sentiment
 WITH (timescaledb.continuous) AS
 SELECT
@@ -608,18 +624,31 @@ SELECT
     symbol,
     COUNT(*)                                                    AS news_count,
     AVG(confidence)                                             AS avg_confidence,
-    AVG(CASE sentiment
-        WHEN 'positive' THEN  1.0
-        WHEN 'negative' THEN -1.0
-        ELSE 0.0 END)                                           AS avg_sentiment,
-    SUM(CASE WHEN sentiment = 'positive' THEN 1 ELSE 0 END)     AS positive_count,
-    SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END)     AS negative_count,
-    SUM(CASE WHEN sentiment = 'neutral'  THEN 1 ELSE 0 END)     AS neutral_count,
-    MAX(CASE WHEN sentiment = 'positive' THEN confidence END)   AS max_positive,
-    MAX(CASE WHEN sentiment = 'negative' THEN confidence END)   AS max_negative
+    AVG({_SENTIMENT_VAL})                                       AS avg_sentiment,
+    SUM(CASE WHEN ({_SENTIMENT_VAL}) > 0 THEN 1 ELSE 0 END)     AS positive_count,
+    SUM(CASE WHEN ({_SENTIMENT_VAL}) < 0 THEN 1 ELSE 0 END)     AS negative_count,
+    SUM(CASE WHEN ({_SENTIMENT_VAL}) = 0 THEN 1 ELSE 0 END)     AS neutral_count,
+    MAX(CASE WHEN ({_SENTIMENT_VAL}) > 0 THEN confidence END)   AS max_positive,
+    MAX(CASE WHEN ({_SENTIMENT_VAL}) < 0 THEN confidence END)   AS max_negative
 FROM news_sentiment
 GROUP BY 1, 2
 WITH NO DATA;
+"""
+
+# The numeric-format definition is recognisable by its regex literal. If the
+# live view's definition lacks it, the cagg predates the numeric-format fix
+# (it zeroed all numeric rows) and must be dropped, recreated, and refreshed.
+_NEWS_CAGG_NEW_MARKER = "[eE]-?[0-9]+"
+
+# One-time data normalisation: convert legacy label rows (alphavantage
+# collector wrote these until 2026-07) to the canonical signed-numeric
+# format. Idempotent — matches nothing once converted.
+SQL_SENTIMENT_LABEL_MIGRATE = """
+UPDATE news_sentiment SET sentiment = (CASE
+    WHEN sentiment = 'positive' THEN  COALESCE(confidence, 1.0)
+    WHEN sentiment = 'negative' THEN -COALESCE(confidence, 1.0)
+    ELSE 0.0 END)::text
+WHERE sentiment IN ('positive', 'negative', 'neutral');
 """
 
 SQL_NEWS_DAILY_CAGG_POLICY = """
@@ -763,6 +792,33 @@ def init_timescale(conn) -> None:
             conn.rollback()
             logger.warning(f"Compression policy: {e}")
 
+    # Normalise legacy label-format sentiment rows to signed numeric (one-time;
+    # idempotent). Must happen before any cagg refresh so corrected values land.
+    try:
+        cur.execute(SQL_SENTIMENT_LABEL_MIGRATE)
+        if cur.rowcount:
+            logger.info(f"sentiment format migration: {cur.rowcount} label rows → numeric")
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"sentiment label migration: {e}")
+
+    # If the live cagg still has the old label-based definition (which zeroed
+    # every numeric-format row), drop it so the numeric-aware one replaces it.
+    cagg_dropped = False
+    try:
+        cur.execute("""SELECT view_definition FROM timescaledb_information.continuous_aggregates
+                       WHERE view_name = 'news_daily_sentiment'""")
+        row = cur.fetchone()
+        if row and _NEWS_CAGG_NEW_MARKER not in (row[0] or ""):
+            logger.info("Dropping outdated news_daily_sentiment cagg (label-based definition)...")
+            cur.execute("DROP MATERIALIZED VIEW news_daily_sentiment")
+            conn.commit()
+            cagg_dropped = True
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"cagg definition check: {e}")
+
     # Continuous aggregate for news_daily_sentiment
     try:
         cur.execute(SQL_NEWS_DAILY_CAGG)
@@ -772,6 +828,18 @@ def init_timescale(conn) -> None:
     except Exception as e:
         conn.rollback()
         logger.warning(f"Continuous aggregate (may already exist): {e}")
+
+    # After a definition migration, rebuild the full history (the hourly policy
+    # only refreshes the trailing 3 days). CALL cannot run in a transaction.
+    if cagg_dropped:
+        try:
+            old_autocommit = conn.autocommit
+            conn.autocommit = True
+            cur.execute("CALL refresh_continuous_aggregate('news_daily_sentiment', NULL, NULL)")
+            conn.autocommit = old_autocommit
+            logger.info("news_daily_sentiment fully refreshed with numeric-format definition")
+        except Exception as e:
+            logger.warning(f"cagg full refresh: {e}")
 
     # Indexes
     for sql in SQL_INDEXES:

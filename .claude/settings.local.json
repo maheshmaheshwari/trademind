@@ -259,7 +259,9 @@
       "Bash(awk '{print \"PID:\"$2,\"CPU:\"$3\"%\",\"STATE:\"$8,\"TIME:\"$10}')",
       "Bash(ps -*)",
       "Bash(chmod +x *)",
-      "Bash(awk *)"
+      "Bash(awk *)",
+      "Bash(APP_ENV=test ./venv/bin/python -m pytest tests/test_all_apis.py::TestAuthMe -x -q)",
+      "Bash(APP_ENV=test ./venv/bin/python -c ' *)"
     ]
   }
 }

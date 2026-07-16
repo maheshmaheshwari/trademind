@@ -178,6 +178,7 @@ export interface AuthorizedTrade {
   cmp: number | null;
   actual_pnl: number | null;
   status: 'PENDING' | 'EXECUTED' | 'COMPLETED' | 'STOPPED';
+  bracket_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -194,7 +195,9 @@ export interface AutopilotStatus {
 // API Service
 // ---------------------------------------------------------------------------
 
-const API_BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:8000';
+// '' (set in .env.production) = same origin — requests go through the Vercel
+// proxy (api/[...path].ts). Unset (dev) falls back to the local backend.
+const API_BASE_URL = import.meta.env.VITE_BASE_URL ?? 'http://localhost:8000';
 
 export const tradeMindApiService = createApi({
   reducerPath: 'tradeMindApi',
@@ -268,7 +271,7 @@ export const tradeMindApiService = createApi({
       query: (broker) => ({ url: `/api/brokers/${broker}/disconnect`, method: 'DELETE' }),
       invalidatesTags: ['Brokers'],
     }),
-    totpSetup: builder.mutation<{ qr_uri: string; secret: string }, void>({
+    totpSetup: builder.mutation<{ qr_uri: string; qr_image?: string | null; secret: string }, void>({
       query: () => ({ url: '/auth/totp/setup', method: 'POST', data: {} }),
     }),
     totpConfirm: builder.mutation<{ status: string }, { code: string }>({

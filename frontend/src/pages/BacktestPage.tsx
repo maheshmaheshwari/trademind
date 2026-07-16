@@ -105,7 +105,7 @@ export default function BacktestPage() {
   const horizonOptions: ApexOptions = {
     ...chartBase(isDark),
     chart: { ...(chartBase(isDark).chart), type: 'bar' },
-    plotOptions: { bar: { borderRadius: 5, columnWidth: '55%', grouped: true } },
+    plotOptions: { bar: { borderRadius: 5, columnWidth: '55%' } },
     colors: ['#3B82F6', '#10B981'],
     xaxis: { ...(chartBase(isDark).xaxis), categories: horizonLabels },
     yaxis: { ...chartBase(isDark).yaxis, min: 60, max: 100, labels: { ...(chartBase(isDark).yaxis as any).labels, formatter: (v: number) => v + '%' } },

@@ -44,6 +44,7 @@ export interface OpenPosition extends Stock {
   unrealized_pnl: number;
   unrealized_pnl_pct: number;
   created_at?: string;
+  updated_at?: string;
 }
 
 export interface Trade {

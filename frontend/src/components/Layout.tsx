@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, LineChart, PieChart,
@@ -136,7 +136,9 @@ export default function Layout() {
         <Navbar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
           <div className="dp dgap max-w-[1480px] mx-auto">
-            <Outlet />
+            <Suspense fallback={<div className="py-20 text-center text-[var(--text-2)]">Loading…</div>}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>

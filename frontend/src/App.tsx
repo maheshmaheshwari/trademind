@@ -1,20 +1,30 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import { ThemeProvider } from './ThemeContext';
 import { ToastProvider } from './components/ui';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import Layout from './components/Layout';
-import AuthPage       from './pages/AuthPage';
-import DashboardPage  from './pages/DashboardPage';
-import AISignalsPage  from './pages/AISignalsPage';
-import AutopilotPage  from './pages/AutopilotPage';
-import MarketPage     from './pages/MarketPage';
-import PortfolioPage  from './pages/PortfolioPage';
-import TradesPage     from './pages/TradesPage';
-import WatchlistPage  from './pages/WatchlistPage';
-import SettingsPage   from './pages/SettingsPage';
-import BacktestPage   from './pages/BacktestPage';
-import StockPage      from './pages/StockPage';
+
+const AuthPage      = lazy(() => import('./pages/AuthPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const AISignalsPage = lazy(() => import('./pages/AISignalsPage'));
+const AutopilotPage = lazy(() => import('./pages/AutopilotPage'));
+const MarketPage    = lazy(() => import('./pages/MarketPage'));
+const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
+const TradesPage    = lazy(() => import('./pages/TradesPage'));
+const WatchlistPage = lazy(() => import('./pages/WatchlistPage'));
+const SettingsPage  = lazy(() => import('./pages/SettingsPage'));
+const BacktestPage  = lazy(() => import('./pages/BacktestPage'));
+const StockPage     = lazy(() => import('./pages/StockPage'));
+
+function PageLoader() {
+  return (
+    <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center text-[var(--text)]">
+      Loading…
+    </div>
+  );
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -36,6 +46,7 @@ function AppRoutes() {
   );
 
   return (
+    <Suspense fallback={<PageLoader />}>
     <Routes>
       <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <AuthPage />} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
@@ -55,6 +66,7 @@ function AppRoutes() {
       <Route path="/trade/:symbol"  element={<Navigate to="/signals" replace />} />
       <Route path="/market/:symbol" element={<Navigate to="/market"  replace />} />
     </Routes>
+    </Suspense>
   );
 }
 

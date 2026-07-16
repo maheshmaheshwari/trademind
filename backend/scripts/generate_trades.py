@@ -9,8 +9,10 @@ a readable JSON with:
   - Risk:Reward ratio
   - Signal + confidence
 
-Each run appends a NEW timestamped record to data/trade_history.json
-and also writes the latest to data/trade_signals_latest.json
+Each run stores all signals in the trade_signals DB table
+(via insert_trade_signals_batch) — the single source of truth read by
+/api/signals/all, /api/backtest/summary and /api/stocks. No JSON files
+are written.
 
 Usage:
     cd backend && python scripts/generate_trades.py
@@ -621,7 +623,10 @@ def generate_signals():
     }
     
     # ==========================================
-    # Store trade signals in database
+    # Store trade signals in database — the ONLY persistence.
+    # The API (/api/signals/all, /api/backtest/summary, /api/stocks) reads
+    # from the trade_signals table; no JSON snapshot is written, so a DB
+    # failure here means the run produced nothing.
     # ==========================================
     try:
         from database.db import insert_trade_signals_batch
@@ -631,36 +636,9 @@ def generate_signals():
         stored = insert_trade_signals_batch(all_trades, today, timestamp, sync=False)
         print(f"\n   💾 Stored {stored} trade signals in database for {today}")
     except Exception as e:
-        print(f"\n   ⚠️  DB storage failed: {e}")
+        print(f"\n   ❌ DB storage failed — signals from this run were NOT persisted: {e}")
+        raise
 
-    # Save latest snapshot
-    latest_file = os.path.join(OUTPUT_DIR, "trade_signals_latest.json")
-    with open(latest_file, "w") as f:
-        json.dump(output, f, indent=2, default=str)
-    
-    # Append to history (one entry per run)
-    history_file = os.path.join(OUTPUT_DIR, "trade_history.json")
-    history = []
-    if os.path.exists(history_file):
-        try:
-            with open(history_file) as f:
-                history = json.load(f)
-        except:
-            history = []
-    
-    history_entry = {
-        "run_id": now.strftime("%Y%m%d_%H%M%S"),
-        "generated_at": timestamp,
-        "summary": output["summary"],
-        "actionable_trades": output["actionable_trades"],
-        "avoid_list": [{"symbol": t["symbol"], "signal": t["signal"], "confidence": t["confidence"], 
-                        "price": t["price"]["current"]} for t in output["avoid_list"]],
-    }
-    history.append(history_entry)
-    
-    with open(history_file, "w") as f:
-        json.dump(history, f, indent=2, default=str)
-    
     # Print summary
     print(f"\n{'='*70}")
     print(f"📊 TRADE SIGNALS — {timestamp}")
@@ -670,9 +648,8 @@ def generate_signals():
     print(f"   ⚪   HOLD:       {output['summary']['HOLD']}")
     print(f"   🔴   SELL:       {output['summary']['SELL']}")
     print(f"   🔴🔴 STRONG SELL: {output['summary']['STRONG_SELL']}")
-    print(f"\n   💾 Latest:  {latest_file}")
-    print(f"   📜 History: {history_file} ({len(history)} runs)")
-    
+    print(f"\n   💾 Stored in trade_signals table for {today}")
+
     if output["actionable_trades"]:
         print(f"\n{'='*70}")
         print(f"💰 TOP TRADES (sorted by confidence)")
@@ -685,7 +662,7 @@ def generate_signals():
                   f"₹{t['trade']['stop_loss']:>8.2f} {t['trade']['risk_reward'] or 0:>4.1f}x {t['model']['horizon']:<10} "
                   f"{t['position']['liquidity']:<10} {t['position']['suggested_qty_per_user']:>7}")
     
-    return latest_file
+    return f"{stored} signals stored in DB for {today}"
 
 
 if __name__ == "__main__":

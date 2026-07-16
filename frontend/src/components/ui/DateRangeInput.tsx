@@ -110,7 +110,7 @@ export function DateRangeInput({
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{startLabel}</span>
-          <DatePicker<Dayjs>
+          <DatePicker
             format={format}
             value={start}
             onChange={d => onChange?.([d, end])}
@@ -130,7 +130,7 @@ export function DateRangeInput({
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{endLabel}</span>
-          <DatePicker<Dayjs>
+          <DatePicker
             format={format}
             value={end}
             onChange={d => onChange?.([start, d])}

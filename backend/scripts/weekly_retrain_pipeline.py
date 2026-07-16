@@ -148,6 +148,26 @@ def run_generate_signals() -> bool:
         return False
 
 
+def run_upload_models() -> bool:
+    """Encrypt + push the freshly retrained models to the HF Hub store.
+
+    Skipped (not failed) when HF_TOKEN/MODEL_KEY are absent — local runs
+    without Hub credentials still retrain and generate signals normally.
+    """
+    if not (os.environ.get("HF_TOKEN") and os.environ.get("MODEL_KEY")):
+        logger.warning("⏭️  HF_TOKEN/MODEL_KEY not set — skipping model upload")
+        return True
+    try:
+        from scripts.model_store import upload_all
+        t0 = time.time()
+        upload_all(commit_message=f"weekly retrain {date.today().isoformat()}")
+        logger.info(f"✅ Models uploaded to HF Hub in {int(time.time() - t0)}s")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Model upload failed: {e}", exc_info=True)
+        return False
+
+
 def run_pipeline(workers: int = 1, resume: bool = False, skip_wait: bool = False):
     start = datetime.now()
     logger.info("")
@@ -172,7 +192,12 @@ def run_pipeline(workers: int = 1, resume: bool = False, skip_wait: bool = False
         logger.error("Pipeline aborted — retraining failed.")
         sys.exit(1)
 
-    # ── Step 3: Generate signals ─────────────────────────────────────────────────
+    # ── Step 3: Upload models to the HF Hub store ───────────────────────────────
+    # Non-fatal: models are still on local disk and signals must be ready for
+    # Monday even if the Hub push fails; retry the upload manually if so.
+    upload_ok = run_upload_models()
+
+    # ── Step 4: Generate signals ─────────────────────────────────────────────────
     signals_ok = run_generate_signals()
 
     # ── Summary ──────────────────────────────────────────────────────────────────
@@ -182,6 +207,7 @@ def run_pipeline(workers: int = 1, resume: bool = False, skip_wait: bool = False
     logger.info("📊 Pipeline Summary")
     logger.info(f"   EOD prices  : ✅")
     logger.info(f"   Retraining  : {'✅' if retrain_ok  else '❌'}")
+    logger.info(f"   Model upload: {'✅' if upload_ok   else '❌'}")
     logger.info(f"   Signals     : {'✅' if signals_ok  else '❌'}")
     logger.info(f"   Total time  : {elapsed_total:.1f}h")
     logger.info(f"   Log file    : {LOG_FILE}")

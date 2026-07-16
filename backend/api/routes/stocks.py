@@ -48,7 +48,8 @@ _HORIZON_SHORT = {
 
 def _build_signal_map() -> dict:
     """
-    Load trade_signals_latest.json and return a symbol-keyed dict with
+    Load the latest trade signals from the trade_signals DB table (via
+    get_trade_signals_formatted) and return a symbol-keyed dict with
     normalised signal fields ready to be merged into the stocks response.
     """
     try:

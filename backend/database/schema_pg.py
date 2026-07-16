@@ -372,6 +372,14 @@ ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(
 CREATE INDEX IF NOT EXISTS idx_portfolios_user_id ON portfolios (user_id);
 """
 
+# Migration: created_at was added to SQL_POSITIONS later, but CREATE TABLE
+# IF NOT EXISTS never adds columns to a table that already exists — any DB
+# created before that change (e.g. the test instance) is missing the column
+# and every INSERT INTO positions fails.
+SQL_POSITIONS_ALTER = """
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+"""
+
 # Migration: widen trade_signals UNIQUE from (symbol, date) to (symbol, date, horizon)
 # so that 6 per-horizon signals can coexist for the same stock on the same day.
 SQL_TRADE_SIGNALS_MIGRATE = [
@@ -675,6 +683,16 @@ def init_timescale(conn) -> None:
             except Exception as e:
                 conn.rollback()
                 logger.warning(f"ALTER TABLE portfolios: {e}")
+
+    # Add created_at to positions (idempotent ALTER TABLE)
+    for stmt in SQL_POSITIONS_ALTER.strip().split("\n"):
+        stmt = stmt.strip()
+        if stmt:
+            try:
+                cur.execute(stmt)
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"ALTER TABLE positions: {e}")
 
     # Widen trade_signals UNIQUE constraint to include model_horizon (per-horizon signals)
     for stmt in SQL_TRADE_SIGNALS_MIGRATE:

@@ -1,4 +1,6 @@
-const API_BASE = import.meta.env.VITE_BASE_URL || 'http://localhost:8000';
+// '' (set in .env.production) = same origin — requests go through the Vercel
+// proxy (api/[...path].ts). Unset (dev) falls back to the local backend.
+const API_BASE = import.meta.env.VITE_BASE_URL ?? 'http://localhost:8000';
 
 // ==========================================
 // Server-Side Table Params

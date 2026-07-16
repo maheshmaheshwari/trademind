@@ -1,11 +1,10 @@
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import type { DatePickerProps } from '@mui/x-date-pickers/DatePicker';
-import type { Dayjs } from 'dayjs';
 
 const DEFAULT_FORMAT = 'DD MMM YYYY';
 
-interface DatePickerInputProps extends Omit<DatePickerProps<Dayjs>, 'label'> {
+interface DatePickerInputProps extends Omit<DatePickerProps, 'label'> {
   label?: ReactNode;
   showLabel?: boolean;
   errorMessage?: string;
@@ -40,7 +39,7 @@ export function DatePickerInput({
         </div>
       )}
 
-      <DatePicker<Dayjs>
+      <DatePicker
         format={format}
         disabled={disabled}
         {...rest}

@@ -130,21 +130,23 @@ const HOLD_SYMS = ['RELIANCE','TCS','HDFCBANK','INFY','TATAMOTORS','BHARTIARTL',
 
 export const HOLDINGS: Holding[] = HOLD_SYMS.map(sym => {
   const s = STOCKS.find(x => x.symbol === sym)!;
-  const qty = randI(5, 140);
-  const avg = +(s.price * rand(.72, 1.08)).toFixed(2);
-  const invested = qty * avg;
-  const current  = qty * s.price;
-  return { ...s, qty, avg, cmp: s.price, invested: +invested.toFixed(0), current: +current.toFixed(0),
-    pnl: +(current - invested).toFixed(0), pnlPct: +(((s.price - avg) / avg) * 100).toFixed(2) };
+  const quantity = randI(5, 140);
+  const avg_buy_price = +(s.price * rand(.72, 1.08)).toFixed(2);
+  const invested = quantity * avg_buy_price;
+  const current  = quantity * s.price;
+  return { ...s, quantity, avg_buy_price, current_price: s.price,
+    invested_amount: +invested.toFixed(0), current_value: +current.toFixed(0),
+    unrealized_pnl: +(current - invested).toFixed(0),
+    unrealized_pnl_pct: +(((s.price - avg_buy_price) / avg_buy_price) * 100).toFixed(2) };
 });
 
-export const PF_INVESTED = HOLDINGS.reduce((a, h) => a + h.invested, 0);
-export const PF_CURRENT  = HOLDINGS.reduce((a, h) => a + h.current, 0);
+export const PF_INVESTED = HOLDINGS.reduce((a, h) => a + h.invested_amount, 0);
+export const PF_CURRENT  = HOLDINGS.reduce((a, h) => a + h.current_value, 0);
 export const PF_PNL      = PF_CURRENT - PF_INVESTED;
 
 export const ALLOC: AllocSlice[] = (() => {
   const m: Record<string, number> = {};
-  HOLDINGS.forEach(h => { m[h.sector] = (m[h.sector] ?? 0) + h.current; });
+  HOLDINGS.forEach(h => { m[h.sector] = (m[h.sector] ?? 0) + h.current_value; });
   return Object.entries(m)
     .map(([sector, val]) => ({ sector, val, color: SECTOR_COLORS[sector] }))
     .sort((a, b) => b.val - a.val);
@@ -167,14 +169,15 @@ export const PNL_HISTORY: Record<string, number[]> = {
 
 export const OPEN_POS: OpenPosition[] = ['RELIANCE','TATAMOTORS','JSWSTEEL','BHARTIARTL','SUNPHARMA','LTIM'].map(sym => {
   const s = STOCKS.find(x => x.symbol === sym)!;
-  const entry  = +(s.price * rand(.88, .98)).toFixed(2);
-  const sl     = +(entry * rand(.9, .96)).toFixed(2);
-  const target = +(entry * rand(1.06, 1.18)).toFixed(2);
-  const qty    = randI(10, 120);
-  return { ...s, entry, sl, target, qty,
-    pnl: +((s.price - entry) * qty).toFixed(0),
-    pnlPct: +(((s.price - entry) / entry) * 100).toFixed(2),
-    days: randI(1, 42),
+  const avg_buy_price = +(s.price * rand(.88, .98)).toFixed(2);
+  const stop_loss     = +(avg_buy_price * rand(.9, .96)).toFixed(2);
+  const target_price  = +(avg_buy_price * rand(1.06, 1.18)).toFixed(2);
+  const quantity      = randI(10, 120);
+  const opened = new Date(); opened.setDate(opened.getDate() - randI(1, 42));
+  return { ...s, avg_buy_price, stop_loss, target_price, quantity, current_price: s.price,
+    unrealized_pnl: +((s.price - avg_buy_price) * quantity).toFixed(0),
+    unrealized_pnl_pct: +(((s.price - avg_buy_price) / avg_buy_price) * 100).toFixed(2),
+    created_at: opened.toISOString(),
   };
 });
 
@@ -185,15 +188,15 @@ export const TRADE_HISTORY: Trade[] = (() => {
   const today = new Date(2026, 5, 1);
   for (let i = 0; i < 46; i++) {
     const s = pick(STOCKS);
-    const side = pick(['BUY', 'SELL'] as const);
+    const order_type = pick(['BUY', 'SELL'] as const);
     const d = new Date(today); d.setDate(d.getDate() - randI(1, 140));
-    const qty  = randI(5, 150);
+    const quantity = randI(5, 150);
     const pr   = +(s.price * rand(.8, 1.15)).toFixed(2);
-    const realized = +((rng() > .42 ? 1 : -1) * s.price * qty * rand(.005, .09)).toFixed(0);
-    out.push({ id: i, symbol: s.symbol, name: s.name, sector: s.sector, side, qty, price: pr,
-      value: +(qty * pr).toFixed(0), date: d, realized, status: 'EXECUTED' });
+    const pnl  = +((rng() > .42 ? 1 : -1) * s.price * quantity * rand(.005, .09)).toFixed(0);
+    out.push({ id: i, symbol: s.symbol, name: s.name, sector: s.sector, order_type, quantity, price: pr,
+      value: +(quantity * pr).toFixed(0), created_at: d.toISOString(), pnl, status: 'EXECUTED' });
   }
-  return out.sort((a, b) => b.date.getTime() - a.date.getTime());
+  return out.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 })();
 
 // ─── GTT ORDERS ────────────────────────────────────────────────────────────

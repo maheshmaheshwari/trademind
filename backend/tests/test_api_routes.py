@@ -6,12 +6,12 @@ Pattern: seed the test DB the same way production data would arrive
 real route through TestClient and assert on the response — mirrors how
 values actually enter the system (collectors/schedulers -> DB -> API).
 
-A few routes are file-backed instead of DB-backed (signals/all,
-backtest/summary) — those are tested by monkeypatching the route module's
-path constant to a fixture file, so they never touch the real
-backend/data/*.json used by the live app.
+All signal routes (signals/all, backtest/summary, stocks) are DB-backed —
+they read the trade_signals table. The only remaining file-backed input is
+retrain_results.csv (model-training stats in backtest/summary), which is
+tested by monkeypatching the route module's DATA_DIR to a tmp dir so it
+never touches the real backend/data/ used by the live app.
 """
-import json
 from datetime import datetime
 
 from database.db import get_connection, release_connection, _execute
@@ -119,15 +119,20 @@ def test_portfolio_sectors_route(api_client):
     assert "total_sectors" in body and body["total_sectors"] > 0
 
 
-def test_signals_all_route_file_backed(api_client, monkeypatch, tmp_path):
-    """File-backed route — fixture substituted via the module's path constant."""
-    import api.routes.signals as signals_module
+def test_signals_all_route_db_backed(api_client, monkeypatch):
+    """DB-backed route — seeds trade_signals and reads back through the API.
 
-    raw_fixture = load_fixture("trade_signals_latest_raw")
-    raw_fixture.pop("_mirrors")
-    fixture_path = tmp_path / "trade_signals_latest.json"
-    fixture_path.write_text(json.dumps(raw_fixture))
-    monkeypatch.setattr(signals_module, "_SIGNALS_FILE", str(fixture_path))
+    The route keeps an in-process cache keyed on generated_date; reset it so
+    a previous test's (or process's) payload can't be served here.
+    """
+    import api.routes.signals as signals_module
+    monkeypatch.setattr(signals_module, "_cache", {"date": None, "payload": None, "ts": 0.0})
+
+    conn = get_connection()
+    try:
+        _insert_trade_signal(conn, symbol="TESTSTOCK.NS", signal="BUY", confidence=85.0)
+    finally:
+        release_connection(conn)
 
     resp = api_client.get("/api/signals/all")
     assert resp.status_code == 200
@@ -138,7 +143,7 @@ def test_signals_all_route_file_backed(api_client, monkeypatch, tmp_path):
 
 
 def test_backtest_summary_route_file_backed(api_client, monkeypatch, tmp_path):
-    """File-backed route (retrain_results.csv) — point DATA_DIR at an empty tmp dir."""
+    """Only the retrain_results.csv part is file-backed — point DATA_DIR at an empty tmp dir; signal stats come from the test DB."""
     import api.routes.backtest as backtest_module
     monkeypatch.setattr(backtest_module, "DATA_DIR", tmp_path)
 

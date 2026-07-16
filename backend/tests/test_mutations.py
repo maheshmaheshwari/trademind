@@ -14,6 +14,8 @@ external dependencies are tested via fixtures instead.
 """
 from datetime import datetime
 
+import pytest
+
 from database.db import get_connection, release_connection, _execute
 
 _TODAY = datetime.now().strftime("%Y-%m-%d")
@@ -383,7 +385,8 @@ def test_execute_signal_creates_position_and_square_off_closes_it(api_client):
     symbols = [p["symbol"] for p in resp.json()["data"]]
     assert "WIPRO.NS" in symbols
 
-    # Can't open a second position in the same symbol without squaring off first.
+    # A second buy of the same symbol merges into the existing position
+    # (summed quantity), never creates a second row.
     resp = api_client.post(
         "/api/trading/execute-signal",
         json={
@@ -393,8 +396,14 @@ def test_execute_signal_creates_position_and_square_off_closes_it(api_client):
         },
         headers=headers,
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 200, resp.text
 
+    resp = api_client.get(f"/api/trading/positions/{user_id}", headers=headers)
+    wipro = [p for p in resp.json()["data"] if p["symbol"] == "WIPRO.NS"]
+    assert len(wipro) == 1, "second buy must merge into one position row"
+    assert wipro[0]["quantity"] == round(10000.0 / 250.0) + round(5000.0 / 250.0)
+
+    # square-off closes the whole merged position
     resp = api_client.post(f"/api/trading/square-off/{user_id}/WIPRO.NS", json={}, headers=headers)
     assert resp.status_code == 200
     assert resp.json()["symbol"] == "WIPRO.NS"
@@ -440,21 +449,15 @@ def test_execute_signal_rejects_insufficient_balance(api_client):
     assert any(not c["passed"] for c in resp.json()["risk_checks"])
 
 
-def test_execute_signal_concurrent_same_symbol_only_one_wins(api_client):
+def test_execute_signal_concurrent_same_symbol_merges_consistently(api_client):
     """
-    Best-effort regression test for audit finding H5 (new-position TOCTOU
-    race). Before the per-user advisory lock, two concurrent first-time
-    execute_signal() calls for the same symbol could both pass the
-    no-existing-position check and both proceed, with only the positions
-    table's UNIQUE(user_id, symbol) constraint catching the second one
-    AFTER its money movement had already committed. This is probabilistic
-    by nature of testing real concurrency in a single process — the actual
-    guarantee comes from the DB-level advisory lock, not from this test —
-    but it reliably reproduces the race shape often enough to catch a
-    regression if the lock is ever removed. What must always hold
-    regardless of timing: exactly one call succeeds, the rest fail cleanly
-    (a caught exception/error dict), and the account is left in a
-    consistent state (exactly one open position, balance debited once).
+    Concurrency regression test for the same-symbol execute race (audit H5).
+    Repeat buys for a symbol now intentionally MERGE into the existing
+    position (FOR UPDATE row lock + ON CONFLICT DO UPDATE in
+    trading_engine.execute_signal), so all concurrent calls may succeed.
+    The invariant is no lost updates regardless of timing: exactly one
+    position row, its quantity/invested_amount equal to the sum of every
+    successful buy, and the balance debited exactly once per success.
     """
     from concurrent.futures import ThreadPoolExecutor
     from trading.trading_engine import execute_signal
@@ -475,19 +478,23 @@ def test_execute_signal_concurrent_same_symbol_only_one_wins(api_client):
         results = list(pool.map(lambda _: attempt(), range(5)))
 
     successes = [r for r in results if "error" not in r]
-    failures = [r for r in results if "error" in r]
-    assert len(successes) == 1, f"expected exactly 1 success, got {len(successes)}: {results}"
-    assert len(failures) == 4
+    assert successes, f"at least one execute should succeed: {results}"
 
     conn = get_connection()
     try:
-        positions = _execute(conn, "SELECT symbol FROM positions WHERE user_id = ? AND symbol = ?", (user_id, "ITC.NS")).fetchall()
+        positions = _execute(conn,
+            "SELECT quantity, invested_amount FROM positions WHERE user_id = ? AND symbol = ?",
+            (user_id, "ITC.NS")).fetchall()
         balance = _execute(conn, "SELECT virtual_balance FROM users WHERE id = ?", (user_id,)).fetchone()[0]
     finally:
         release_connection(conn)
-    assert len(positions) == 1, "exactly one position should exist, not duplicated or zero"
-    quantity = int(5000.0 / 400.0)
+    assert len(positions) == 1, "exactly one merged position row should exist"
+
+    n = len(successes)
+    quantity = round(5000.0 / 400.0)
     actual_investment = round(quantity * 400.0, 2)
     fees = round(actual_investment * (0.0005 + 0.001 + 0.000001 + 0.00015), 2)
-    assert balance == 1000000.0 - actual_investment - fees, \
-        "balance should be debited exactly once, not once per attempt"
+    assert positions[0][0] == quantity * n, "merged quantity must equal the sum of all successful buys"
+    assert positions[0][1] == pytest.approx(actual_investment * n, abs=0.01)
+    assert balance == pytest.approx(1000000.0 - n * (actual_investment + fees), abs=0.01), \
+        "balance should be debited exactly once per successful buy"

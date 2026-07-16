@@ -118,6 +118,21 @@ class TestAuthMe:
         resp = api_client.get("/auth/me")
         assert resp.status_code == 401
 
+    def test_x_app_authorization_promoted(self, api_client):
+        # Behind the Vercel proxy the JWT arrives in X-App-Authorization
+        # (Authorization carries the HF Space token) — the promote_proxied_auth
+        # middleware must make it win over whatever is in Authorization.
+        token, _ = _register(api_client, "proxyauthtest")
+        resp = api_client.get(
+            "/auth/me",
+            headers={
+                "Authorization": "Bearer hf_not_a_jwt",
+                "X-App-Authorization": f"Bearer {token}",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["username"] == "proxyauthtest"
+
     def test_patch_auth_me_phone_update(self, api_client):
         token, _ = _register(api_client, "phoneupdatetest")
         resp = api_client.patch("/auth/me",
@@ -221,13 +236,13 @@ class TestPasswordReset:
         import api.routes.auth_routes as m
         monkeypatch.setattr(m, "_send_otp_email", lambda *a, **k: True)
 
-    def test_reset_request_always_returns_ok(self, api_client, monkeypatch):
+    def test_reset_request_unknown_email_404(self, api_client, monkeypatch):
         self._patch_email(monkeypatch)
-        # Returns "ok" even for a non-existent email (timing-safe)
+        # Intentional UX choice: tell the user when no account matches the
+        # email (a deliberate trade-off against enumeration-resistance).
         resp = api_client.post("/auth/password/reset-request",
                                json={"email": "nonexistent@example.com"})
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
+        assert resp.status_code == 404
 
     def test_reset_confirm_invalid_otp(self, api_client, monkeypatch):
         self._patch_email(monkeypatch)
@@ -521,7 +536,9 @@ class TestExecuteSignal:
         assert body["status"] == "executed"
         assert body["position"]["symbol"] == "INFOSYS.NS"
 
-    def test_execute_duplicate_symbol_rejected(self, api_client):
+    def test_execute_duplicate_symbol_merges(self, api_client):
+        # A second buy of the same symbol merges into the existing position
+        # (ON CONFLICT DO UPDATE: summed quantity, weighted avg price).
         token, user_id = _register(api_client, "execduptest")
         _execute_trade(api_client, token, user_id, "HDFCBANK.NS", 10000.0, 1600.0)
         resp = api_client.post("/api/trading/execute-signal", json={
@@ -529,7 +546,18 @@ class TestExecuteSignal:
             "investment_amount": 5000.0, "buy_price": 1600.0,
             "target_price": 1760.0, "stop_loss": 1520.0, "mode": "PAPER",
         }, headers=_h(token))
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+
+        conn = get_connection()
+        try:
+            rows = _execute(conn,
+                "SELECT quantity FROM positions WHERE user_id = ? AND symbol = ?",
+                (user_id, "HDFCBANK.NS")).fetchall()
+        finally:
+            release_connection(conn)
+        assert len(rows) == 1, "second buy must merge, not create a second row"
+        expected_qty = round(10000.0 / 1600.0) + round(5000.0 / 1600.0)
+        assert rows[0][0] == expected_qty
 
     def test_execute_zero_buy_price_422(self, api_client):
         token, user_id = _register(api_client, "zeropricetestapi")
@@ -866,7 +894,9 @@ class TestNotifications:
         token, user_id = _register(api_client, "notiflisttest2")
         insert_notification(user_id, "signal", "Alert", "Body text")
         resp = api_client.get("/api/notifications", headers=_h(token))
-        assert resp.json()["total"] >= 1
+        body = resp.json()
+        assert len(body["data"]) >= 1
+        assert body["unread"] >= 1
 
     def test_mark_read(self, api_client):
         token, user_id = _register(api_client, "notifmarktest")

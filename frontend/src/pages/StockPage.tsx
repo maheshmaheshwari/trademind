@@ -28,6 +28,8 @@ interface StockDetail {
   sentiment: number; updatedMin: number;
   spark: number[]; news: NewsItem[]; horizons: HorizonBreakdown[];
   suggested_qty_per_user?: number;
+  target_price?: number;
+  stop_loss?: number;
   consumed_volume?: number;
   recommended_volume?: number;
   remaining_volume?: number;
@@ -230,7 +232,7 @@ function TradeHistory({ orders }: { orders: Trade[] }) {
 
 // ─── Partial capacity modal ────────────────────────────────────────────────────
 
-function PartialCapacityModal({ symbol, requested, available, onConfirm, onCancel }: {
+function PartialCapacityModal({ symbol, available, onConfirm, onCancel }: {
   symbol: string; requested: number; available: number;
   onConfirm: (qty: number) => void; onCancel: () => void;
 }) {

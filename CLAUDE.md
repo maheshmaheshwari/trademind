@@ -40,7 +40,7 @@ trademind/
 │   ├── model_archives/
 │   │   ├── training_snapshots/ — Per-symbol training output (v2/v3) written by model_training.py, read by scripts/retrain_failed_models.py
 │   │   └── previous_models/    — Pre-retrain backups, written by scripts/retrain_walk_forward.py
-│   ├── data/                  — trade_signals_latest.json, angel_tokens.json
+│   ├── data/                  — angel_tokens.json, retrain_results.csv (signals live in the trade_signals DB table, not JSON)
 │   ├── tests/                  — pytest suite, runs against the TEST Timescale Cloud instance only
 │   ├── migrate_sqlite_to_pg.py — One-shot SQLite → TimescaleDB migration
 │   ├── nifty500.db            — SQLite fallback (226MB, kept for reference)
@@ -219,7 +219,7 @@ APP_ENV=test python -c "from database.db import get_connection; print(get_connec
 
 - `conftest.py` sets `APP_ENV=test` at import time, bootstraps the schema once per session, truncates `prices`/`technical_indicators`/`trade_signals`/`news_sentiment` before every test, and provides an `api_client` fixture (`TestClient(app)`, deliberately not used as a context manager so `api/server.py`'s `startup_event` — and the real APScheduler — never runs).
 - `tests/fixtures/*.json` mirror real external API response shapes (Angel One `getCandleData`/`ltpData`, yfinance `Ticker.news`) and real live API-layer responses (`/api/signals/all`, `/api/stocks`, etc.) — each fixture's `_mirrors` key states exactly which file/function's contract it represents, so it's traceable when that code changes.
-- `tests/test_api_routes.py` — seeds the test DB the same way production data actually arrives (the same insert helpers/SQL the app uses), then hits the real route through `api_client` and asserts on the response. A few routes are file-backed instead of DB-backed (`/api/signals/all`, `/api/backtest/summary`) — those tests monkeypatch the route module's path constant to a fixture file so they never touch the real `backend/data/*.json` used by the live app.
+- `tests/test_api_routes.py` — seeds the test DB the same way production data actually arrives (the same insert helpers/SQL the app uses), then hits the real route through `api_client` and asserts on the response. All signal routes (`/api/signals/all`, `/api/backtest/summary`, `/api/stocks`) are DB-backed — they read the `trade_signals` table, and `scripts/generate_trades.py` writes ONLY to that table (no JSON snapshots). The one remaining file-backed input is `retrain_results.csv` (model-training stats in `/api/backtest/summary`); its test monkeypatches the route module's `DATA_DIR` to a tmp dir so it never touches the real `backend/data/`.
 - `tests/test_scheduler_jobs.py` — DB-only jobs (`calculate_indicators_job`, `cleanup_old_data_job`, `verify_data_integrity_job`) run directly against seeded test-DB data.
 - `tests/test_external_api_contracts.py` — feeds the Angel One/yfinance fixtures into the actual parsing functions (`scripts/update_stocks_angel.py:fetch_candles`, `collectors/yfinance_news_collector.py:collect_stock`, etc.) with a fake API object standing in for `SmartConnect`/`yf.Ticker`, and checks the resulting DB rows — this is what would catch an Angel One/yfinance response-shape change before it breaks a live job.
 

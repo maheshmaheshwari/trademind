@@ -8,6 +8,7 @@ Uses Angel One LTP (live) during market hours, falls back to DB prices.
 Run every 5 minutes during market hours (9:15 AM – 3:30 PM IST).
 """
 import logging
+import os
 from datetime import datetime
 from typing import List, Dict
 from database.db import get_connection, release_connection, _execute
@@ -31,6 +32,12 @@ def _fetch_live_prices(symbols: List[str]) -> Dict[str, float]:
     Try to fetch live LTP from Angel One.
     Returns dict of {symbol: price}. Falls back to empty dict on failure.
     """
+    # Tests must never hit the live Angel One API — a real LTP against a
+    # fabricated test position can trigger a genuine SL/Target square-off
+    # mid-test. DB fallback is safe: the test DB's prices table is truncated.
+    if os.getenv("APP_ENV") == "test":
+        return {}
+
     if not _is_market_open():
         logger.info("Market closed — skipping live price fetch")
         return {}

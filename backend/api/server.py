@@ -104,6 +104,28 @@ app.add_middleware(
 )
 
 # ==========================================
+# Proxied auth header promotion
+# ==========================================
+# When the app runs on a private HF Space behind the Vercel proxy
+# (frontend/api/[...path].ts), the real Authorization header must carry the
+# HF Space token, so the proxy moves the user's JWT into
+# X-App-Authorization. Promote it back so every route's
+# `authorization: Header(None)` dependency keeps working unchanged.
+
+
+@app.middleware("http")
+async def promote_proxied_auth(request: Request, call_next):
+    proxied = request.headers.get("x-app-authorization")
+    if proxied:
+        headers = [
+            (k, v) for k, v in request.scope["headers"] if k != b"authorization"
+        ]
+        headers.append((b"authorization", proxied.encode("latin-1")))
+        request.scope["headers"] = headers
+    return await call_next(request)
+
+
+# ==========================================
 # Rate limiting (audit findings H2, H3, M2, M15)
 # ==========================================
 app.state.limiter = limiter
@@ -303,6 +325,25 @@ async def startup_event():
             logger.info("Database initialized (worker %d)", worker_pid)
         except Exception as e:
             logger.error("Database initialization failed: %s", e)
+
+    # Pull the encrypted model store from HF Hub in the background — deployed
+    # containers boot with an empty final_models/ (ephemeral disk). Local dev
+    # skips this when HF_TOKEN/MODEL_KEY aren't set; models load from disk.
+    if is_scheduler_worker:
+        if os.environ.get("HF_TOKEN") and os.environ.get("MODEL_KEY"):
+            import asyncio as _asyncio
+
+            async def _model_sync_task():
+                try:
+                    from scripts.model_store import sync_models
+                    n = await run_in_thread(sync_models)
+                    logger.info("✅ Model store synced (%d file(s) decrypted)", n)
+                except Exception as e:
+                    logger.error("Model store sync failed: %s", e)
+
+            _asyncio.create_task(_model_sync_task())
+        else:
+            logger.info("HF_TOKEN/MODEL_KEY not set — skipping model store sync")
 
     if is_scheduler_worker:
         try:

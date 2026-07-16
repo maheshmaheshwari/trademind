@@ -642,8 +642,12 @@ _NEWS_CAGG_NEW_MARKER = "[eE]-?[0-9]+"
 
 # One-time data normalisation: convert legacy label rows (alphavantage
 # collector wrote these until 2026-07) to the canonical signed-numeric
-# format. Idempotent — matches nothing once converted.
+# format. Idempotent — matches nothing once converted. The rows live in
+# compressed chunks, so lift the DML decompression cap for this session
+# (0 = unlimited) or the UPDATE aborts with "tuple decompression limit
+# exceeded by operation".
 SQL_SENTIMENT_LABEL_MIGRATE = """
+SET LOCAL timescaledb.max_tuples_decompressed_per_dml_transaction TO 0;
 UPDATE news_sentiment SET sentiment = (CASE
     WHEN sentiment = 'positive' THEN  COALESCE(confidence, 1.0)
     WHEN sentiment = 'negative' THEN -COALESCE(confidence, 1.0)

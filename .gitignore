@@ -55,3 +55,10 @@ backend/logs/.scheduler_owner.pid
 
 # Docs — local only, not for repo
 docs/
+
+# Claude Code local/plugin artifacts
+.claude/settings.local.json
+.claude/security-scans/
+.claude/.proven-config-version
+.claude/proven-config.json
+.claude-flow/

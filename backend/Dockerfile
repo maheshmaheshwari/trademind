@@ -1,6 +1,8 @@
 # TradeMind backend — Hugging Face Docker Space image.
 # Deployed with scripts/deploy_space.py (see docs/DEPLOYMENT.md).
-FROM python:3.9-slim
+# 3.11 (not 3.9): transformers refuses torch.load on torch < 2.6 (CVE gate),
+# and torch 2.6+ has no Python 3.9 wheels — FinBERT scoring dies on 3.9.
+FROM python:3.11-slim
 
 # lightgbm needs OpenMP at runtime
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \

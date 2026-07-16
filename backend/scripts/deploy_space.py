@@ -35,6 +35,7 @@ SECRET_KEYS = [
     "ANGEL_TOTP_SECRET",
     "JWT_SECRET", "HF_TOKEN", "MODEL_KEY", "HF_MODELS_REPO",
     "CORS_ALLOWED_ORIGINS",
+    "RESEND_API_KEY", "RESEND_FROM_EMAIL",
 ]
 
 # Never uploaded to the Space repo. .env exclusion is non-negotiable.

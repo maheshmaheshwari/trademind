@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 # server.py) but should be set for production.
 SECRET_KEYS = [
     "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
-    "ANGEL_API_KEY", "ANGEL_CLIENT_ID", "ANGEL_PASSWORD", "ANGEL_TOTP_SECRET",
+    "ANGEL_API_KEY", "ANGEL_CLIENT_ID", "ANGEL_PASSWORD", "ANGEL_MPIN",
+    "ANGEL_TOTP_SECRET",
     "JWT_SECRET", "HF_TOKEN", "MODEL_KEY", "HF_MODELS_REPO",
     "CORS_ALLOWED_ORIGINS",
 ]

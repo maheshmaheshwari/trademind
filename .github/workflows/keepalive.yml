@@ -1,0 +1,32 @@
+# Keep the HF Space awake so APScheduler jobs actually fire.
+#
+# Free-tier Spaces pause after ~48h without traffic, and a sleeping Space
+# runs no scheduler — the 15:35 IST EOD chain and the Friday 22:00 IST
+# weekly retrain would silently never start. This ping counts as traffic
+# and also wakes the Space back up if it did go to sleep.
+#
+# Uses the same HF_TOKEN repo secret as deploy-backend.yml (the Space is
+# private, so the health check needs auth).
+#
+# Note: GitHub disables cron workflows after 60 days without repo activity —
+# any push resets the clock.
+name: Keep Space awake
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/health
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 60 \
+            -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" \
+            https://maheshmaheshwari-trademind.hf.space/api/health)
+          echo "health: HTTP $code"
+          # 200 = up; anything else on a wake-from-sleep first hit is fine,
+          # the request itself triggers the wake. Fail only on auth errors.
+          if [ "$code" = "401" ] || [ "$code" = "403" ]; then exit 1; fi

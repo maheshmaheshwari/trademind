@@ -965,7 +965,7 @@ def _add_all_jobs(scheduler):
     # Friday 22:00 — Retrain all 502 models → regenerate signals so Monday has fresh predictions
     # misfire_grace_time=28800 (8h) allows a delayed start if server was down at 22:00
     # but still completes before Monday market open (~04:00 IST finish + 8h window = covered)
-    # scheduler.add_job(weekly_retrain_job, CronTrigger(day_of_week="fri", hour=22, minute=0, timezone="Asia/Kolkata"), id="weekly_retrain", name="Friday Night Model Retrain + Signals", misfire_grace_time=28800, replace_existing=True)
+    scheduler.add_job(weekly_retrain_job, CronTrigger(day_of_week="fri", hour=22, minute=0, timezone="Asia/Kolkata"), id="weekly_retrain", name="Friday Night Model Retrain + Signals", misfire_grace_time=28800, replace_existing=True)
 
 
 
@@ -1191,5 +1191,5 @@ RECOVERABLE_JOBS.update({
     "signal_notifications": ("Signal Change Notifications",                 17, 30, notify_signal_changes_job,     "mon-fri", 24),
     # Weekly Friday retrain — 80h lookback so Monday startup still recovers a missed Friday run
     # (Friday 22:00 → Monday 06:00 = 56h; 80h gives 24h extra margin)
-    # "weekly_retrain":       ("Friday Night Model Retrain + Signals",        22,  0, weekly_retrain_job,            "fri",     80),
+    "weekly_retrain":       ("Friday Night Model Retrain + Signals",        22,  0, weekly_retrain_job,            "fri",     80),
 })

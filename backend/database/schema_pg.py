@@ -513,6 +513,20 @@ CREATE INDEX IF NOT EXISTS idx_corp_actions_symbol  ON corporate_actions (nse_sy
 CREATE INDEX IF NOT EXISTS idx_corp_actions_ex_date ON corporate_actions (ex_date DESC);
 """
 
+# Persistent application logs (the HF Space container filesystem is ephemeral,
+# so file logs vanish on every restart — this table is the durable copy).
+# Hypertable + 30-day retention policy; fed by api/logging_setup.DBLogHandler.
+SQL_APP_LOGS = """
+CREATE TABLE IF NOT EXISTS app_logs (
+    time     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    level    TEXT NOT NULL,
+    logger   TEXT NOT NULL,
+    message  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_app_logs_time  ON app_logs (time DESC);
+CREATE INDEX IF NOT EXISTS idx_app_logs_level ON app_logs (level, time DESC);
+"""
+
 # ---------------------------------------------------------------------------
 # Hypertable conversion + compression
 # ---------------------------------------------------------------------------
@@ -539,6 +553,18 @@ SQL_HYPERTABLES = [
         if_not_exists => TRUE
     );
     """,
+    # app_logs: partition weekly by time
+    """
+    SELECT create_hypertable('app_logs', 'time',
+        chunk_time_interval => INTERVAL '1 week',
+        if_not_exists => TRUE
+    );
+    """,
+]
+
+# Drop old chunks automatically — logs only need a rolling window.
+SQL_RETENTION = [
+    "SELECT add_retention_policy('app_logs', INTERVAL '30 days', if_not_exists => TRUE);",
 ]
 
 SQL_COMPRESSION = [
@@ -704,7 +730,8 @@ def init_timescale(conn) -> None:
             logger.warning(f"trade_signals migration: {e}")
 
     # Hypertable candidates
-    for sql in [SQL_PRICES, SQL_TECHNICAL_INDICATORS, SQL_NEWS_SENTIMENT]:
+    for sql in [SQL_PRICES, SQL_TECHNICAL_INDICATORS, SQL_NEWS_SENTIMENT,
+                SQL_APP_LOGS]:
         cur.execute(sql)
 
     conn.commit()
@@ -717,6 +744,15 @@ def init_timescale(conn) -> None:
         except Exception as e:
             conn.rollback()
             logger.warning(f"Hypertable already exists or error: {e}")
+
+    # Retention policies
+    for sql in SQL_RETENTION:
+        try:
+            cur.execute(sql)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"Retention policy: {e}")
 
     # Compression policies
     for sql in SQL_COMPRESSION:

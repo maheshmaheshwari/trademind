@@ -23,7 +23,10 @@ To survive that reset we:
 
 import logging
 import os
-from datetime import datetime
+import threading
+import time as time_mod
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -56,6 +59,80 @@ class DailyFileHandler(logging.FileHandler):
             self.baseFilename = os.path.abspath(self._make_path(today))
             self.stream = self._open()
         super().emit(record)
+
+
+# ── DB handler: persists logs to the app_logs hypertable ─────────────────────
+
+class DBLogHandler(logging.Handler):
+    """
+    Buffers INFO+ records and bulk-inserts them into the app_logs table
+    (TimescaleDB, 30-day retention) from a daemon thread.
+
+    Exists because the HF Space container filesystem is ephemeral — file logs
+    vanish on every restart; the DB copy is the durable one. Enabled via
+    LOG_TO_DB=1 (set in the Dockerfile, off for local dev by default).
+
+    Logging must never take the app down: every failure here is swallowed,
+    and if the DB is unreachable the bounded buffer simply drops the oldest
+    records. Records from database.* loggers are skipped so a DB outage
+    can't feed its own error logs back into the DB handler.
+    """
+
+    FLUSH_INTERVAL_S = 5.0
+    MAX_BUFFER = 5000
+    MAX_BATCH = 500
+    MAX_MSG_LEN = 2000
+
+    def __init__(self):
+        super().__init__(level=logging.INFO)
+        self._buf = deque(maxlen=self.MAX_BUFFER)
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="db-log-flush"
+        )
+        self._thread.start()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            if record.name.startswith("database"):
+                return
+            msg = record.getMessage()
+            if record.exc_info and record.exc_info[1] is not None:
+                msg = f"{msg} | {record.exc_info[0].__name__}: {record.exc_info[1]}"
+            self._buf.append((
+                datetime.fromtimestamp(record.created, tz=timezone.utc),
+                record.levelname,
+                record.name,
+                msg[: self.MAX_MSG_LEN],
+            ))
+        except Exception:
+            pass
+
+    def _run(self) -> None:
+        while True:
+            time_mod.sleep(self.FLUSH_INTERVAL_S)
+            self.flush_to_db()
+
+    def flush_to_db(self) -> None:
+        if not self._buf:
+            return
+        rows = []
+        while self._buf and len(rows) < self.MAX_BATCH:
+            rows.append(self._buf.popleft())
+        try:
+            from database.db import get_connection, release_connection
+            conn = get_connection()
+            try:
+                cur = conn.cursor()
+                cur.executemany(
+                    "INSERT INTO app_logs (time, level, logger, message) "
+                    "VALUES (%s, %s, %s, %s)",
+                    rows,
+                )
+                conn.commit()
+            finally:
+                release_connection(conn)
+        except Exception:
+            pass  # DB unreachable — this batch is dropped
 
 
 # ── Log format used by both handlers ──────────────────────────────────────────
@@ -98,6 +175,10 @@ def setup_logging(log_dir: str = "logs", level: str = "INFO") -> None:
     console_handler.setLevel(log_level)
     console_handler.setFormatter(_FMT)
     root.addHandler(console_handler)
+
+    # ── DB handler (durable logs — see DBLogHandler docstring) ───────────────
+    if os.getenv("LOG_TO_DB") == "1":
+        root.addHandler(DBLogHandler())
 
     # Quieten noisy third-party loggers
     for noisy in ("uvicorn.access", "httpx", "httpcore", "hpack",

@@ -24,7 +24,8 @@ RUN mkdir -p logs data final_models model_archives/previous_models .cache \
 
 USER user
 ENV HF_HOME=/app/.cache \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    LOG_TO_DB=1
 
 EXPOSE 8000
 CMD ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

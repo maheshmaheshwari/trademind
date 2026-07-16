@@ -107,7 +107,7 @@ app.add_middleware(
 # Proxied auth header promotion
 # ==========================================
 # When the app runs on a private HF Space behind the Vercel proxy
-# (frontend/api/[...path].ts), the real Authorization header must carry the
+# (frontend/api/proxy.ts), the real Authorization header must carry the
 # HF Space token, so the proxy moves the user's JWT into
 # X-App-Authorization. Promote it back so every route's
 # `authorization: Header(None)` dependency keeps working unchanged.

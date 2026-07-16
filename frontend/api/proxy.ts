@@ -11,15 +11,29 @@
 // X-App-Authorization. The backend (api/server.py promote_proxied_auth
 // middleware) moves it back into Authorization before routing.
 //
-// Path handling: /api/* passes through as-is; /auth/* is rewritten by
-// vercel.json to /api/auth/* so it reaches this function, and is mapped
-// back to /auth/* here before forwarding.
+// Routing: Vercel only supports single-segment dynamic API filenames outside
+// Next.js (a [...path].ts catch-all does NOT match /api/a/b), so vercel.json
+// rewrites every /api/* and /auth/* request to this one function, passing
+// the original path in the __proxy_path query param as a fallback in case
+// req.url arrives as the rewrite destination rather than the original URL.
 
 const SPACE_URL = (
   process.env.SPACE_URL || 'https://maheshmaheshwari-trademind.hf.space'
 ).replace(/\/+$/, '');
 
 export const config = { api: { bodyParser: false } };
+
+function upstreamPath(reqUrl: string): string {
+  const u = new URL(reqUrl, 'http://internal');
+  let path = u.searchParams.get('__proxy_path');
+  if (path) {
+    u.searchParams.delete('__proxy_path');
+  } else {
+    path = u.pathname; // req.url kept the original requested path
+  }
+  const qs = u.searchParams.toString();
+  return path + (qs ? `?${qs}` : '');
+}
 
 export default async function handler(req: any, res: any) {
   const hfToken = process.env.HF_SPACE_TOKEN;
@@ -28,9 +42,10 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  let path: string = req.url || '';
-  if (path.startsWith('/api/auth/') || path === '/api/auth') {
-    path = path.slice('/api'.length); // rewritten /auth/* call — restore it
+  const path = upstreamPath(req.url || '');
+  if (!path.startsWith('/api/') && !path.startsWith('/auth/')) {
+    res.status(404).json({ error: 'Not found' });
+    return;
   }
 
   const headers: Record<string, string> = {

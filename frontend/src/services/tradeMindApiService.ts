@@ -196,7 +196,7 @@ export interface AutopilotStatus {
 // ---------------------------------------------------------------------------
 
 // '' (set in .env.production) = same origin — requests go through the Vercel
-// proxy (api/[...path].ts). Unset (dev) falls back to the local backend.
+// proxy (api/proxy.ts). Unset (dev) falls back to the local backend.
 const API_BASE_URL = import.meta.env.VITE_BASE_URL ?? 'http://localhost:8000';
 
 export const tradeMindApiService = createApi({

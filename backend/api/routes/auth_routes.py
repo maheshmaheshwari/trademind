@@ -36,7 +36,9 @@ from trading.trading_engine import get_user
 logger = logging.getLogger(__name__)
 
 _RESEND_API_KEY  = os.getenv("RESEND_API_KEY", "")
-_RESEND_FROM     = os.getenv("RESEND_FROM_EMAIL", "noreply@trademind.ai")
+# Default to Resend's sandbox sender — no verified domain yet. Sandbox can
+# only deliver to the Resend account owner's address.
+_RESEND_FROM     = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 
 
 def _send_otp_email(to_email: str, otp: str, ip_address: Optional[str] = None) -> bool:
@@ -369,7 +371,11 @@ async def password_reset_request(req: ResetRequestBody, request: Request):
         release_connection(conn)
 
     ip_address = request.client.host if request.client else None
-    _send_otp_email(req.email, otp, ip_address=ip_address)
+    if not _send_otp_email(req.email, otp, ip_address=ip_address):
+        raise HTTPException(
+            status_code=502,
+            detail="Could not send the OTP email. Please try again later.",
+        )
 
     return {"status": "ok", "message": "OTP sent to your email address"}
 

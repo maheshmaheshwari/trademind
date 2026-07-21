@@ -5,11 +5,14 @@
 # scheduler_log for 2026-07-17), so scheduler/jobs.py no longer schedules the
 # retrain when SPACE_ID is set and this workflow owns it instead.
 #
-# Four matrix shards each train ~125 models and push them models-only to the
-# encrypted HF Hub store (scripts/model_store.py). The finalize job then pulls
-# the complete fresh set, merges the shards' training stats, regenerates trade
-# signals in the DB, pushes the data files, and restarts the Space so its
-# startup sync picks up the new models.
+# Twelve matrix shards each train ~42 models and push them models-only to the
+# encrypted HF Hub store (scripts/model_store.py). Twelve, not four: hosted
+# runners train at ~3-5 min/model and a job is hard-capped at 6h, so a shard
+# must stay well under ~70 models (run 29821691143's 4x~125 shards would have
+# been killed at ~13% remaining). The finalize job then pulls the complete
+# fresh set, merges the shards' training stats, regenerates trade signals in
+# the DB, pushes the data files, and restarts the Space so its startup sync
+# picks up the new models.
 #
 # Secrets required: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD,
 # HF_TOKEN (write), MODEL_KEY, HF_MODELS_REPO (optional).
@@ -36,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     defaults:
       run:
         working-directory: backend
@@ -63,21 +66,22 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
-      # Stagger shard starts so the four prefetch queries don't hit Timescale
-      # Cloud simultaneously — four concurrent big sorts OOM'd the instance
+      # Stagger shard starts so the prefetch queries don't all hit Timescale
+      # Cloud simultaneously — concurrent big sorts OOM'd the instance
       # (shard 1 of run 29821691143: "out of memory ... TupleSort main").
+      # 60s is enough now that each prefetch is filtered to its own shard.
       - name: Stagger start (shard ${{ matrix.shard }})
-        run: sleep $(( (${{ matrix.shard }} - 1) * 120 ))
+        run: sleep $(( (${{ matrix.shard }} - 1) * 60 ))
         working-directory: .
 
       # Retry once: the second attempt resumes, skipping symbols whose models
       # were already trained before the failure.
-      - name: Retrain shard ${{ matrix.shard }}/4
+      - name: Retrain shard ${{ matrix.shard }}/12
         run: |
-          python scripts/weekly_retrain_pipeline.py --shard ${{ matrix.shard }}/4 --no-resume || {
+          python scripts/weekly_retrain_pipeline.py --shard ${{ matrix.shard }}/12 --no-resume || {
             echo "::warning::shard ${{ matrix.shard }} failed — retrying once in 5 minutes"
             sleep 300
-            python scripts/weekly_retrain_pipeline.py --shard ${{ matrix.shard }}/4
+            python scripts/weekly_retrain_pipeline.py --shard ${{ matrix.shard }}/12
           }
 
       - name: Upload shard training stats

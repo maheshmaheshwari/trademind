@@ -63,8 +63,22 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
+      # Stagger shard starts so the four prefetch queries don't hit Timescale
+      # Cloud simultaneously — four concurrent big sorts OOM'd the instance
+      # (shard 1 of run 29821691143: "out of memory ... TupleSort main").
+      - name: Stagger start (shard ${{ matrix.shard }})
+        run: sleep $(( (${{ matrix.shard }} - 1) * 120 ))
+        working-directory: .
+
+      # Retry once: the second attempt resumes, skipping symbols whose models
+      # were already trained before the failure.
       - name: Retrain shard ${{ matrix.shard }}/4
-        run: python scripts/weekly_retrain_pipeline.py --shard ${{ matrix.shard }}/4 --no-resume
+        run: |
+          python scripts/weekly_retrain_pipeline.py --shard ${{ matrix.shard }}/4 --no-resume || {
+            echo "::warning::shard ${{ matrix.shard }} failed — retrying once in 5 minutes"
+            sleep 300
+            python scripts/weekly_retrain_pipeline.py --shard ${{ matrix.shard }}/4
+          }
 
       - name: Upload shard training stats
         if: always()

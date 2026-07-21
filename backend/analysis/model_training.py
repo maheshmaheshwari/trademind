@@ -67,12 +67,18 @@ def prefetch_all_data(symbols: list = None) -> None:
     log = logging.getLogger(__name__)
     log.info("📦 Pre-fetching all stock data from DB (one-time batch)...")
 
+    # Restrict the heavy queries to the requested symbols — parallel retrain
+    # shards each prefetch only their slice, so the DB never sorts the full
+    # universe several times concurrently (that OOM'd Timescale Cloud).
+    sym_clause = f" AND p.symbol = ANY({_PH})" if symbols else ""
+    sym_params = (list(symbols),) if symbols else ()
+
     conn = get_connection()
     try:
         # ── 1. Prices + indicators + market overview + delivery (one big JOIN) ──
         log.info("   Loading prices + indicators + market + delivery...")
         conn.cursor().execute("SET statement_timeout = '600s'")
-        df_all = _query_to_df(conn, """
+        df_all = _query_to_df(conn, f"""
             SELECT
                 p.symbol, p.date,
                 p.close, p.open, p.high, p.low, p.volume,
@@ -94,14 +100,14 @@ def prefetch_all_data(symbols: list = None) -> None:
             LEFT JOIN market_overview m      ON p.date = m.date
             LEFT JOIN fii_dii_daily f        ON p.date = f.date
             LEFT JOIN delivery_data d        ON p.symbol = d.symbol AND p.date = d.date
-            WHERE p.interval = '1d'
+            WHERE p.interval = '1d'{sym_clause}
             ORDER BY p.symbol, p.date ASC
-        """, timeout="600s")
+        """, sym_params, timeout="600s")
         log.info(f"   Prices loaded: {len(df_all):,} rows across {df_all['symbol'].nunique()} symbols")
 
         # ── 2. Stock-level news sentiment ─────────────────────────────────────
         log.info("   Loading stock news sentiment...")
-        df_sent = _query_to_df(conn, """
+        df_sent = _query_to_df(conn, f"""
             SELECT symbol, date,
                    avg_sentiment   AS sent_stock,
                    news_count      AS news_count_stock,
@@ -110,9 +116,9 @@ def prefetch_all_data(symbols: list = None) -> None:
                    max_positive    AS sent_max_pos,
                    max_negative    AS sent_max_neg
             FROM news_daily_sentiment
-            WHERE symbol IS NOT NULL
+            WHERE symbol IS NOT NULL{sym_clause.replace("p.symbol", "symbol")}
             ORDER BY symbol, date ASC
-        """, timeout="120s")
+        """, sym_params, timeout="120s")
         log.info(f"   Sentiment loaded: {len(df_sent):,} rows")
 
         # ── 3. Market-wide sentiment ──────────────────────────────────────────

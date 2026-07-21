@@ -29,7 +29,7 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 import joblib
 import numpy as np
@@ -175,7 +175,8 @@ def _worker(args):
 
 def retrain_all(symbol_filter: Optional[str] = None,
                 workers: int = 1,
-                resume: bool = True):
+                resume: bool = True,
+                shard: Optional[Tuple[int, int]] = None):
     from database.db import get_connection, release_connection, _execute
 
     # Load all symbols from DB
@@ -189,6 +190,12 @@ def retrain_all(symbol_filter: Optional[str] = None,
         if not all_symbols:
             logger.error(f"Symbol {symbol_filter} not found in DB")
             sys.exit(1)
+
+    if shard:
+        # Round-robin split so shards stay balanced regardless of list size
+        idx, n = shard
+        all_symbols = all_symbols[idx::n]
+        logger.info(f"Shard {idx + 1}/{n}: {len(all_symbols)} symbols")
 
     if resume:
         pending = [s for s in all_symbols if not already_trained(s)]
@@ -228,7 +235,8 @@ def retrain_all(symbol_filter: Optional[str] = None,
 
     # Shared run identifier — all rows from this invocation share the same run_id
     # so you can filter retrain_results.csv by run_id to see only the latest run.
-    RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # RETRAIN_RUN_ID lets parallel shards of one logical run share a single id.
+    RUN_ID = os.environ.get("RETRAIN_RUN_ID") or datetime.now().strftime("%Y%m%d_%H%M%S")
 
     WORKER_TIMEOUT = 600  # 10 minutes max per stock — auto-skip if stuck
 

@@ -28,6 +28,7 @@ Usage:
 """
 
 import logging
+import os
 import pytz
 from datetime import datetime, timedelta
 from typing import Optional
@@ -730,6 +731,18 @@ def sync_gtt_status_job():
         logger.error(f"GTT sync failed: {e}")
 
 
+def weekly_retrain_on_this_host() -> bool:
+    """Whether this deployment should run the Friday retrain itself.
+
+    On HF Spaces (SPACE_ID is set by the platform) the retrain is owned by
+    the GitHub Actions workflow .github/workflows/weekly-retrain.yml —
+    cpu-basic (2 vCPU) dies mid-run and the models never land (see the
+    failed weekly_retrain rows in scheduler_log, 2026-07-17). Set
+    WEEKLY_RETRAIN_ON_SPACE=1 to force it back onto the Space.
+    """
+    return not os.environ.get("SPACE_ID") or os.environ.get("WEEKLY_RETRAIN_ON_SPACE") == "1"
+
+
 def weekly_retrain_job():
     """
     Friday 22:00 IST: retrain all 502 models with the week's latest data,
@@ -965,7 +978,11 @@ def _add_all_jobs(scheduler):
     # Friday 22:00 — Retrain all 502 models → regenerate signals so Monday has fresh predictions
     # misfire_grace_time=28800 (8h) allows a delayed start if server was down at 22:00
     # but still completes before Monday market open (~04:00 IST finish + 8h window = covered)
-    scheduler.add_job(weekly_retrain_job, CronTrigger(day_of_week="fri", hour=22, minute=0, timezone="Asia/Kolkata"), id="weekly_retrain", name="Friday Night Model Retrain + Signals", misfire_grace_time=28800, replace_existing=True)
+    # Not scheduled on HF Spaces — GitHub Actions owns the retrain there.
+    if weekly_retrain_on_this_host():
+        scheduler.add_job(weekly_retrain_job, CronTrigger(day_of_week="fri", hour=22, minute=0, timezone="Asia/Kolkata"), id="weekly_retrain", name="Friday Night Model Retrain + Signals", misfire_grace_time=28800, replace_existing=True)
+    else:
+        logger.info("Weekly retrain not scheduled here — owned by the GitHub Actions workflow")
 
 
 
@@ -1193,3 +1210,8 @@ RECOVERABLE_JOBS.update({
     # (Friday 22:00 → Monday 06:00 = 56h; 80h gives 24h extra margin)
     "weekly_retrain":       ("Friday Night Model Retrain + Signals",        22,  0, weekly_retrain_job,            "fri",     80),
 })
+
+# On HF Spaces the retrain belongs to GitHub Actions — recovering it on Space
+# startup would relaunch the very run that keeps killing the container.
+if not weekly_retrain_on_this_host():
+    RECOVERABLE_JOBS.pop("weekly_retrain", None)

@@ -21,6 +21,8 @@ Env (backend/.env): HF_TOKEN (write scope), MODEL_KEY, HF_MODELS_REPO (optional)
 
 Usage:
     python scripts/model_store.py upload            # encrypt + push everything (bootstrap / post-retrain)
+    python scripts/model_store.py upload "<msg>" --models-only   # only final_models/ (retrain shard)
+    python scripts/model_store.py upload "<msg>" --data-only     # only data files (finalize step)
     python scripts/model_store.py sync              # pull + decrypt latest (server boot)
     python scripts/model_store.py history           # list commits (date, hash, message)
     python scripts/model_store.py sync <commit>     # restore the model set as of that commit
@@ -69,13 +71,20 @@ BATCH_SIZE = 75          # files per commit — one big commit 504s on HF's comm
 COMMIT_RETRIES = 3
 
 
-def upload_all(commit_message: str = "model upload") -> str:
+def upload_all(commit_message: str = "model upload",
+               include_models: bool = True,
+               include_data: bool = True) -> str:
     """Encrypt final_models/*.NS_final.pkl + tracked data files and push.
 
     Pushes in batches of BATCH_SIZE files per commit (a single ~1 GB commit
     times out server-side). The final batch's commit completes the set — a
     snapshot at any final-batch commit is a complete, consistent model set.
     Called for the one-time bootstrap and at the end of every retrain run.
+
+    include_models/include_data let a retrain shard push only its models
+    (a partial final_models/ is a valid incremental commit — the Hub keeps
+    every file not touched by the commit), and the finalize step push only
+    the merged data files.
     """
     from huggingface_hub import CommitOperationAdd
 
@@ -89,21 +98,24 @@ def upload_all(commit_message: str = "model upload") -> str:
         (staging / "models").mkdir()
         (staging / "data").mkdir()
 
-        models = sorted(FINAL_DIR.glob("*.NS_final.pkl"))
-        if not models:
+        models = sorted(FINAL_DIR.glob("*.NS_final.pkl")) if include_models else []
+        if include_models and not models:
             raise RuntimeError(f"no models found in {FINAL_DIR}")
         for src in models:
             (staging / "models" / (src.name + ".enc")).write_bytes(
                 fernet.encrypt(src.read_bytes())
             )
-        for name in DATA_FILES:
-            src = DATA_DIR / name
-            if src.exists():
-                (staging / "data" / (name + ".enc")).write_bytes(
-                    fernet.encrypt(src.read_bytes())
-                )
+        if include_data:
+            for name in DATA_FILES:
+                src = DATA_DIR / name
+                if src.exists():
+                    (staging / "data" / (name + ".enc")).write_bytes(
+                        fernet.encrypt(src.read_bytes())
+                    )
 
         files = sorted(staging.rglob("*.enc"))
+        if not files:
+            raise RuntimeError("nothing to upload")
         batches = [files[i : i + BATCH_SIZE] for i in range(0, len(files), BATCH_SIZE)]
         commit_url = ""
         for i, batch in enumerate(batches, 1):
@@ -173,8 +185,14 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "upload":
-        msg = sys.argv[2] if len(sys.argv) > 2 else "model upload"
-        print(upload_all(commit_message=msg))
+        rest = sys.argv[2:]
+        include_models = "--data-only" not in rest
+        include_data = "--models-only" not in rest
+        rest = [a for a in rest if a not in ("--models-only", "--data-only")]
+        msg = rest[0] if rest else "model upload"
+        print(upload_all(commit_message=msg,
+                         include_models=include_models,
+                         include_data=include_data))
     elif cmd == "sync":
         rev = sys.argv[2] if len(sys.argv) > 2 else None
         print(f"{sync_models(revision=rev)} file(s) decrypted" + (f" @ {rev}" if rev else ""))

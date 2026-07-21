@@ -111,17 +111,19 @@ def wait_for_eod_prices(skip: bool = False) -> bool:
     return False
 
 
-def run_retrain(workers: int, resume: bool) -> bool:
-    """Retrain all 499 models. Returns True on success."""
+def run_retrain(workers: int, resume: bool,
+                shard: Optional[Tuple[int, int]] = None) -> bool:
+    """Retrain all 499 models (or one shard of them). Returns True on success."""
     logger.info("")
     logger.info("=" * 70)
     logger.info("🤖 STEP 2 — Model Retraining")
-    logger.info(f"   Workers: {workers}  |  Resume: {resume}")
+    shard_txt = f"  |  Shard: {shard[0] + 1}/{shard[1]}" if shard else ""
+    logger.info(f"   Workers: {workers}  |  Resume: {resume}{shard_txt}")
     logger.info("=" * 70)
     t0 = time.time()
     try:
         from retrain_walk_forward import retrain_all
-        retrain_all(workers=workers, resume=resume)
+        retrain_all(workers=workers, resume=resume, shard=shard)
         elapsed = (time.time() - t0) / 3600
         logger.info(f"✅ Retraining complete in {elapsed:.1f}h")
         return True
@@ -148,7 +150,7 @@ def run_generate_signals() -> bool:
         return False
 
 
-def run_upload_models() -> bool:
+def run_upload_models(include_data: bool = True, label: str = "") -> bool:
     """Encrypt + push the freshly retrained models to the HF Hub store.
 
     Skipped (not failed) when HF_TOKEN/MODEL_KEY are absent — local runs
@@ -160,7 +162,8 @@ def run_upload_models() -> bool:
     try:
         from scripts.model_store import upload_all
         t0 = time.time()
-        upload_all(commit_message=f"weekly retrain {date.today().isoformat()}")
+        msg = f"weekly retrain {date.today().isoformat()}" + (f" {label}" if label else "")
+        upload_all(commit_message=msg, include_data=include_data)
         logger.info(f"✅ Models uploaded to HF Hub in {int(time.time() - t0)}s")
         return True
     except Exception as e:
@@ -168,13 +171,22 @@ def run_upload_models() -> bool:
         return False
 
 
-def run_pipeline(workers: int = 1, resume: bool = False, skip_wait: bool = False):
+def run_pipeline(workers: int = 1, resume: bool = False, skip_wait: bool = False,
+                 shard: Optional[Tuple[int, int]] = None):
+    """Full pipeline, or one shard of it.
+
+    Shard mode (GitHub Actions matrix): retrain only this shard's symbols and
+    push them to the Hub store models-only — signal generation and the data-file
+    push happen once in the finalize job after every shard has finished.
+    """
     start = datetime.now()
     logger.info("")
     logger.info("=" * 70)
     logger.info("🚀 TradeMind AI — Weekly Retrain Pipeline")
     logger.info(f"   Started : {start.strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"   Log     : {LOG_FILE}")
+    if shard:
+        logger.info(f"   Shard   : {shard[0] + 1}/{shard[1]}")
     logger.info("=" * 70)
 
     # ── Step 1: Wait for EOD prices ─────────────────────────────────────────────
@@ -187,10 +199,22 @@ def run_pipeline(workers: int = 1, resume: bool = False, skip_wait: bool = False
         sys.exit(1)
 
     # ── Step 2: Retrain models ───────────────────────────────────────────────────
-    retrain_ok = run_retrain(workers=workers, resume=resume)
+    retrain_ok = run_retrain(workers=workers, resume=resume, shard=shard)
     if not retrain_ok:
         logger.error("Pipeline aborted — retraining failed.")
         sys.exit(1)
+
+    if shard:
+        # Shard mode: the runner's disk is ephemeral, so a failed upload means
+        # the shard's work is lost — fail loudly so the workflow shows it.
+        upload_ok = run_upload_models(
+            include_data=False, label=f"[shard {shard[0] + 1}/{shard[1]}]")
+        logger.info("")
+        logger.info(f"📊 Shard {shard[0] + 1}/{shard[1]} done — "
+                    f"retrain ✅, upload {'✅' if upload_ok else '❌'}")
+        if not upload_ok:
+            sys.exit(1)
+        return
 
     # ── Step 3: Upload models to the HF Hub store ───────────────────────────────
     # Non-fatal: models are still on local disk and signals must be ready for
@@ -225,10 +249,24 @@ if __name__ == "__main__":
                         help="Skip waiting for EOD prices (use existing latest data)")
     parser.add_argument("--no-resume",  action="store_true", default=False,
                         help="Retrain all stocks even if already done today")
+
+    def _parse_shard(value: str) -> Tuple[int, int]:
+        try:
+            i, n = (int(x) for x in value.split("/"))
+        except ValueError:
+            raise argparse.ArgumentTypeError("expected i/n, e.g. 2/4")
+        if not (1 <= i <= n):
+            raise argparse.ArgumentTypeError("shard must satisfy 1 <= i <= n")
+        return (i - 1, n)
+
+    parser.add_argument("--shard", type=_parse_shard, default=None, metavar="I/N",
+                        help="Train only shard I of N (1-based) and upload models "
+                             "only — for parallel CI runners")
     args = parser.parse_args()
 
     run_pipeline(
         workers=args.workers,
         resume=not args.no_resume,
         skip_wait=args.skip_wait or True,  # Friday night — EOD prices already collected
+        shard=args.shard,
     )

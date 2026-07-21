@@ -469,6 +469,56 @@ async def health_check_db():
                             content={"status": "degraded", "database": "unreachable"})
 
 
+@app.get("/api/health/testdb", tags=["Health"])
+async def health_check_test_db():
+    """
+    Keep-alive ping for the TEST Timescale instance — same purpose as
+    /api/health/db, which only covers the primary. Timescale Cloud pauses
+    the idle test instance too, so keepalive.yml pings this route as well.
+
+    Connects directly with credentials from TEST_PG* env vars (Space
+    secrets) or backend/.env.test (local dev) — never through
+    database/db.py, whose pool is bound to the primary instance.
+    """
+    def _probe():
+        import psycopg2
+        from dotenv import dotenv_values
+
+        env_test = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.test")
+        file_cfg = dotenv_values(env_test) if os.path.exists(env_test) else {}
+
+        def cfg(key):
+            return os.environ.get(f"TEST_{key}") or file_cfg.get(key)
+
+        if not cfg("PGHOST"):
+            raise RuntimeError("test DB not configured (no TEST_PG* env or .env.test)")
+        conn = psycopg2.connect(
+            host=cfg("PGHOST"), port=cfg("PGPORT"),
+            dbname=cfg("PGDATABASE"), user=cfg("PGUSER"),
+            password=cfg("PGPASSWORD"),
+            sslmode="require", connect_timeout=25,
+        )
+        # Dedicated one-shot connection, not from database/db.py's pool —
+        # close() (not release_connection) is correct here.
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+            cur.close()
+        finally:
+            conn.close()
+
+    try:
+        await run_in_thread(_probe)
+        return {"status": "ok", "database": "test", "connection": "ok"}
+    except Exception as exc:
+        logger.error(f"Test DB health check failed: {exc}")
+        return JSONResponse(status_code=503,
+                            content={"status": "degraded", "database": "test",
+                                     "connection": "unreachable"})
+
+
 # ==========================================
 # Scheduler Status Endpoint
 # ==========================================

@@ -38,6 +38,10 @@ SECRET_KEYS = [
     "RESEND_API_KEY", "RESEND_FROM_EMAIL",
 ]
 
+# Test-instance credentials, pushed as TEST_PG* from backend/.env.test —
+# /api/health/testdb uses them for the test-DB keep-alive ping.
+TEST_SECRET_KEYS = ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]
+
 # Never uploaded to the Space repo. .env exclusion is non-negotiable.
 IGNORE_PATTERNS = [
     ".env*", "venv/**", "final_models/**", "model_archives/**", "logs/**",
@@ -68,6 +72,21 @@ def push_secrets(api=None) -> None:
             continue
         api.add_space_secret(repo_id, key, value)
         logger.info("secret set: %s", key)
+
+    # .env.test is loaded separately (never into os.environ — it would
+    # shadow the primary credentials) and pushed with a TEST_ prefix.
+    from dotenv import dotenv_values
+    test_cfg = dotenv_values(_BACKEND_DIR / ".env.test")
+    if not test_cfg:
+        logger.warning("skipping TEST_* secrets — backend/.env.test not found")
+        return
+    for key in TEST_SECRET_KEYS:
+        value = test_cfg.get(key)
+        if not value:
+            logger.warning("skipping secret TEST_%s — not set in .env.test", key)
+            continue
+        api.add_space_secret(repo_id, f"TEST_{key}", value)
+        logger.info("secret set: TEST_%s", key)
 
 
 def create() -> str:

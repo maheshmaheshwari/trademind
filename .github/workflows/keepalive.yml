@@ -1,9 +1,11 @@
-# Keep the HF Space awake so APScheduler jobs actually fire.
+# Keep the HF Space and both Timescale Cloud instances awake.
 #
 # Free-tier Spaces pause after ~48h without traffic, and a sleeping Space
-# runs no scheduler — the 15:35 IST EOD chain and the Friday 22:00 IST
-# weekly retrain would silently never start. This ping counts as traffic
-# and also wakes the Space back up if it did go to sleep.
+# runs no scheduler — the 15:35 IST EOD chain would silently never start.
+# This ping counts as traffic and also wakes the Space back up if it did
+# go to sleep. Timescale Cloud pauses idle instances too: /api/health/db
+# keeps the primary DB awake and /api/health/testdb keeps the test DB
+# awake (the Space reaches it via its TEST_PG* secrets).
 #
 # Uses the same HF_TOKEN repo secret as deploy-backend.yml (the Space is
 # private, so the health check needs auth).
@@ -21,7 +23,7 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping /api/health and /api/health/db
+      - name: Ping /api/health, /api/health/db and /api/health/testdb
         run: |
           code=$(curl -s -o /dev/null -w '%{http_code}' -m 60 \
             -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" \
@@ -36,3 +38,13 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" \
             https://maheshmaheshwari-trademind.hf.space/api/health/db)
           echo "health/db: HTTP $dbcode"
+          # Test-instance ping — same idea, different database. A paused
+          # instance can refuse the first attempt while it resumes.
+          for i in 1 2 3; do
+            testcode=$(curl -s -o /dev/null -w '%{http_code}' -m 60 \
+              -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}" \
+              https://maheshmaheshwari-trademind.hf.space/api/health/testdb)
+            echo "health/testdb: HTTP $testcode (attempt $i)"
+            [ "$testcode" = "200" ] && break
+            sleep 30
+          done

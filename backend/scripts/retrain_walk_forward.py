@@ -53,8 +53,23 @@ TRAIN_END   = "2024-12-31"   # last day of training
 TEST_START  = "2025-01-01"   # first day of test (no overlap)
 FINAL_DIR   = "final_models"
 RESULTS_CSV = os.path.join("data", "retrain_results.csv")
-MIN_ACC     = 0.60           # minimum acceptable accuracy to save model
-MIN_PREC    = 0.60           # minimum acceptable precision to save model
+# Quality tiers, NOT a save gate. Every symbol's freshly-trained best model is
+# always saved (100% coverage, no stale leftovers) — the real tradeability gate
+# lives in scripts/generate_trades.py, which already requires acc>=0.70 (BUY) /
+# 0.80 (STRONG BUY) before emitting a buy signal. The tier below is recorded on
+# the artifact so signal generation and the UI can see model quality at a glance.
+QUALITY_HIGH_ACC   = 0.70    # acc>=this (with decent precision) → BUY-eligible
+QUALITY_MED_ACC    = 0.60    # acc>=this → "medium" tier
+QUALITY_MIN_PREC   = 0.60    # precision floor for high/medium tiers
+
+
+def quality_tier(acc: float, prec: float) -> str:
+    """Classify a model by its walk-forward test metrics (informational)."""
+    if acc >= QUALITY_HIGH_ACC and prec >= QUALITY_MIN_PREC:
+        return "high"
+    if acc >= QUALITY_MED_ACC and prec >= QUALITY_MIN_PREC:
+        return "medium"
+    return "low"
 
 os.makedirs(FINAL_DIR, exist_ok=True)
 os.makedirs("data",    exist_ok=True)
@@ -106,17 +121,12 @@ def train_one(symbol: str) -> dict:
         m = art.get("metrics", {})
         acc  = m.get("accuracy",  0.0)
         prec = m.get("precision", 0.0)
+        tier = quality_tier(acc, prec)
 
-        if acc < MIN_ACC or prec < MIN_PREC:
-            result.update({"status": "below_threshold",
-                           "best_model": art.get("model_name",""),
-                           "horizon":    art.get("horizon",""),
-                           "accuracy":   round(acc,4),
-                           "precision":  round(prec,4)})
-            logger.warning(f"{symbol}: below threshold (acc={acc:.1%} prec={prec:.1%}) — not saved")
-            return result
-
+        # No save gate: always persist the fresh best model so every symbol has a
+        # current model. Quality is enforced downstream at signal time.
         # Tag with walk-forward metadata and save
+        art["quality_tier"]    = tier
         art["train_end_date"]  = TRAIN_END
         art["test_start_date"] = TEST_START
         art["retrained_at"]    = datetime.now().isoformat()
@@ -147,6 +157,7 @@ def train_one(symbol: str) -> dict:
 
         joblib.dump(art, out_path)
 
+        # status "ok" = saved (model is on disk); quality_tier carries the grade.
         result.update({
             "status":     "ok",
             "best_model": art.get("model_name", ""),
@@ -155,9 +166,10 @@ def train_one(symbol: str) -> dict:
             "precision":  round(prec, 4),
             "recall":     round(m.get("recall", 0.0), 4),
             "f1":         round(m.get("f1", 0.0), 4),
+            "quality_tier": tier,
         })
-        logger.info(f"✅ {symbol}: {art.get('model_name')} | {art.get('horizon')} "
-                    f"acc={acc:.1%} prec={prec:.1%} ({elapsed}s)")
+        logger.info(f"{'✅' if tier != 'low' else '🟡'} {symbol}: {art.get('model_name')} | "
+                    f"{art.get('horizon')} acc={acc:.1%} prec={prec:.1%} [{tier}] ({elapsed}s)")
     except Exception as e:
         result["error"]   = str(e)
         result["elapsed_s"] = round(time.time() - t0, 1)
@@ -317,12 +329,15 @@ def retrain_all(symbol_filter: Optional[str] = None,
     csv_fh.close()
 
     # Summary
+    from collections import Counter
+    tiers = Counter(r.get("quality_tier") for r in results if r["status"] == "ok")
     logger.info(f"\n{'='*70}")
     logger.info(f"📊 Retraining Complete")
-    logger.info(f"   ✅ Saved  : {ok}")
-    logger.info(f"   ⚠️  Below threshold / no data / timeout: {len(failed)}")
+    logger.info(f"   ✅ Saved  : {ok}   "
+                f"(high={tiers.get('high',0)} medium={tiers.get('medium',0)} low={tiers.get('low',0)})")
+    logger.info(f"   ⚠️  No data / error / timeout (not saved): {len(failed)}")
     if failed:
-        logger.info(f"   Failed: {', '.join(failed[:20])}")
+        logger.info(f"   Not saved: {', '.join(failed[:20])}")
     logger.info(f"   📄 Results: {RESULTS_CSV}")
 
     # Print top 20 by accuracy

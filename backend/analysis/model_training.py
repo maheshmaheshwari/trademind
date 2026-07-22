@@ -1390,10 +1390,13 @@ def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date:
         _short = HORIZON_SHORT.get(_label, _label)
         _bk = max(_candidates, key=lambda k: _selection_score(_candidates[k]))
         _hr = _candidates[_bk]
-        # Skip this horizon if even the best model doesn't clear the quality bar.
-        if _hr['acc'] < MIN_HORIZON_ACC or _hr['prec'] < MIN_HORIZON_PREC:
-            print(f"  [{_short}] dropped — best={_hr['model_name']} acc={_hr['acc']:.1%} prec={_hr['prec']:.1%} below threshold")
-            continue
+        # No quality drop here: keep every horizon's best model so the symbol
+        # always has a usable per-horizon model. Tradeability is enforced later
+        # in generate_trades.py (BUY needs acc>=0.70 & prec>=0.60), so a weak
+        # horizon simply yields HOLD instead of vanishing from the artifact.
+        _below = _hr['acc'] < MIN_HORIZON_ACC or _hr['prec'] < MIN_HORIZON_PREC
+        _tag = "below-bar (HOLD-only)" if _below else "ok"
+        print(f"  [{_short}] kept — best={_hr['model_name']} acc={_hr['acc']:.1%} prec={_hr['prec']:.1%} [{_tag}]")
         horizon_bests[_short] = {
             'model':       _hr.get('model'),
             'sub_models':  _hr.get('sub_models'),
@@ -1411,6 +1414,8 @@ def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date:
             'horizon':      _hr['horizon'],
             'forward_days': _hr['fwd'],
             'target_pct':   _hr['tgt_pct'],
+            # "ok" if BUY-eligible on quality, else "below-bar" (signal → HOLD)
+            'quality_tier': 'below-bar' if _below else 'ok',
         }
 
     # ── Save ──────────────────────────────────────────────────────────────────
@@ -1441,18 +1446,25 @@ def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date:
         'symbol':        symbol,
     }
     joblib.dump(artifact, path)
-    # v2 slot: save raw model (or first sub-model for Ensemble)
-    raw_model = best.get('model') or next(iter(best.get('sub_models', {}).values()), None)
-    if raw_model:
-        joblib.dump(raw_model, f"models/best_{symbol}_v2.pkl")
     print(f"\n✅ Saved to {path}")
 
-    # Also save to final_models/ so retrained models are immediately used by generate_trades.py
+    # Production inference path — save FIRST so nothing below can block it.
     os.makedirs("final_models", exist_ok=True)
     bare = symbol.replace(".NS", "")
     final_path = f"final_models/{bare}_final.pkl"
     joblib.dump(artifact, final_path)
     print(f"✅ Also saved to {final_path} (production inference path)")
+
+    # v2 slot (legacy, best-effort): raw model, or first sub-model for Ensemble.
+    # Never let this optional write abort the function — a missing models/ dir
+    # here previously threw FileNotFoundError and lost the whole retrained model.
+    raw_model = best.get('model') or next(iter(best.get('sub_models', {}).values()), None)
+    if raw_model:
+        try:
+            os.makedirs("models", exist_ok=True)
+            joblib.dump(raw_model, f"models/best_{symbol}_v2.pkl")
+        except Exception as _e:
+            print(f"⚠️  v2 slot save skipped for {symbol}: {_e}")
 
     return artifact
 

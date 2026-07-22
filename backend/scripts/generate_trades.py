@@ -320,9 +320,12 @@ def _infer_one_horizon(symbol: str, name: str, df, X_latest, h_art: dict, timest
     acc  = metrics.get("accuracy",  0.0)
     prec = metrics.get("precision", 0.0)
 
-    if buy_prob >= 0.75 and acc >= 0.80:
+    # Buy signals gate on precision too (of predicted-up days, how many rose) —
+    # the metric that matters most for a trade entry. A model that is now always
+    # saved but weak simply won't clear these bars and yields HOLD.
+    if buy_prob >= 0.75 and acc >= 0.80 and prec >= 0.70:
         signal = "STRONG BUY"
-    elif buy_prob >= 0.60 and acc >= 0.70:
+    elif buy_prob >= 0.60 and acc >= 0.70 and prec >= 0.60:
         signal = "BUY"
     elif buy_prob >= 0.40:
         signal = "HOLD"
@@ -512,9 +515,10 @@ def generate_signals():
                 acc  = metrics["accuracy"]
                 prec = metrics["precision"]
 
-                if buy_prob >= 0.75 and acc >= 0.80:
+                # Buy signals gate on precision too (see calculate_signal above).
+                if buy_prob >= 0.75 and acc >= 0.80 and prec >= 0.70:
                     signal = "STRONG BUY"
-                elif buy_prob >= 0.60 and acc >= 0.70:
+                elif buy_prob >= 0.60 and acc >= 0.70 and prec >= 0.60:
                     signal = "BUY"
                 elif buy_prob >= 0.40:
                     signal = "HOLD"

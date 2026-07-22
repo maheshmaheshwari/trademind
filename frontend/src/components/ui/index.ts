@@ -7,6 +7,8 @@ export { Conf } from './Conf';
 
 export { Delta } from './Delta';
 
+export { RiskReward } from './RiskReward';
+
 export { Card } from './Card';
 
 export { useSort, Th, PlainTh, Td } from './Table';

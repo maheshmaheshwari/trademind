@@ -5,7 +5,7 @@ import { useGetAllSignalsQuery } from '../services/tradeMindApiService';
 import type { AllSignal } from '../services/tradeMindApiService';
 import {
   Card, SignalBadge, SkeletonRows,
-  SymbolCell, Conf, Pager, useSort, Th, PlainTh, Td,
+  SymbolCell, Conf, Pager, useSort, Th, PlainTh, Td, RiskReward,
 } from '../components/ui';
 
 const HORIZONS = ['All', '1W', '2W', '1M', '2M', '3M', '6M'] as const;
@@ -154,13 +154,14 @@ export default function AISignalsPage() {
                 <Th label="Confidence"  sortKey="confidence" sort={sort} onToggle={toggle} />
                 <PlainTh>Horizon</PlainTh>
                 <Th label="Exp. Return" sortKey="expReturn"  sort={sort} onToggle={toggle} align="right" />
+                <Th label="Risk:Reward" sortKey="risk_reward" sort={sort} onToggle={toggle} align="right" />
                 <Th label="Sentiment"   sortKey="sentiment"  sort={sort} onToggle={toggle} align="right" />
                 <Th label="Updated"     sortKey="updatedMin" sort={sort} onToggle={toggle} align="right" />
               </tr>
             </thead>
             <tbody>
-              {loading ? <SkeletonRows cols={8} rows={10} /> : rows.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-[50px] px-5 text-ink-3">
+              {loading ? <SkeletonRows cols={9} rows={10} /> : rows.length === 0 ? (
+                <tr><td colSpan={9} className="text-center py-[50px] px-5 text-ink-3">
                   No signals match your filters. Try lowering the confidence threshold.
                 </td></tr>
               ) : (rows ?? []).map(s => (
@@ -182,6 +183,7 @@ export default function AISignalsPage() {
                       </span>
                     ) : <span className="text-ink-3">—</span>}
                   </Td>
+                  <Td align="right"><RiskReward value={s?.risk_reward} /></Td>
                   <Td align="right">
                     {s?.sentiment != null ? (
                       <span className="font-mono tabular-nums" style={{ color: s.sentiment >= 0 ? 'var(--green)' : 'var(--red)' }}>

@@ -8,7 +8,7 @@ import {
   useGetOrdersQuery, useGetPositionsQuery, useGetMarketOverviewQuery, useRefreshSignalsMutation,
   useAddToWatchlistMutation,
 } from '../services/tradeMindApiService';
-import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell, Conf, DateComponent } from '../components/ui';
+import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell, Conf, DateComponent, RiskReward } from '../components/ui';
 import { AreaChart, Gauge, Sparkline } from '../components/Charts';
 import type { Stock, IndexData, Breadth, Trade } from '../types';
 
@@ -141,6 +141,12 @@ function SignalCard({ s, variant = 'rich', onClick }: { s: Stock; variant?: 'ric
           <span className="font-mono font-bold text-[13.5px]" style={{ color: col }}>{expStr}</span>
         </div>
       </div>
+      {s?.risk_reward != null && (
+        <div className="flex items-center justify-between mt-[9px]">
+          <span className="text-[11px] text-ink-3">Risk : Reward</span>
+          <RiskReward value={s?.risk_reward} size={12.5} />
+        </div>
+      )}
       <div className="flex items-center justify-between mt-[11px] gap-[10px]">
         <span className="text-[11px] text-ink-3 whitespace-nowrap">Confidence</span>
         <div className="flex-1"><Conf value={s?.confidence ?? 0} /></div>
@@ -178,6 +184,7 @@ export default function DashboardPage() {
     sector:       t?.sector                     ?? '',
     target_price: t.trade?.target_price,
     stop_loss:    t.trade?.stop_loss,
+    risk_reward:  t.trade?.risk_reward,
   }));
   const trades: Trade[]  = (ordersData as any)?.data?.slice(0, 6) ?? [];
   const posCount: number = (posData as any)?.total ?? 0;

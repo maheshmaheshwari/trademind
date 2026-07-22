@@ -13,7 +13,7 @@ import {
   useGetStockHistoryQuery,
 } from '../services/tradeMindApiService';
 import { useAuth } from '../AuthContext';
-import { useToast, symColor } from '../components/ui';
+import { useToast, symColor, RiskReward } from '../components/ui';
 import { AreaChart } from '../components/Charts';
 import type { NewsItem, HorizonBreakdown, OpenPosition, Trade } from '../types';
 
@@ -30,6 +30,8 @@ interface StockDetail {
   suggested_qty_per_user?: number;
   target_price?: number;
   stop_loss?: number;
+  risk_reward?: number;
+  buy_price?: number;
   consumed_volume?: number;
   recommended_volume?: number;
   remaining_volume?: number;
@@ -479,6 +481,11 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
             <div style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, fontSize: 12, color: i === 1 ? 'var(--red)' : i === 2 ? 'var(--green)' : 'var(--text)' }}>{v}</div>
           </div>
         ))}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', background: 'var(--surface)', borderRadius: 10, marginBottom: 12 }}>
+        <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>Risk : Reward</span>
+        <RiskReward value={data?.risk_reward} size={13} />
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>

@@ -23,6 +23,7 @@ export interface Stock {
   pe: number;
   target_price?: number;     // from trade signal
   stop_loss?: number;        // from trade signal
+  risk_reward?: number;      // reward:risk ratio from trade signal
 }
 
 export interface Holding extends Stock {

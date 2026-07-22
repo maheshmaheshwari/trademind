@@ -102,6 +102,35 @@ def calculate_trade_levels(df, signal, horizon, model_target_pct):
     }
 
 
+def decide_signal(buy_prob: float, prec: float, risk_reward) -> str:
+    """Expected-value BUY gate.
+
+    A long is profitable over many trades when the win probability beats the
+    breakeven win-rate implied by the trade's reward:risk:
+
+        breakeven = risk / (risk + reward) = 1 / (1 + RR)     (RR = reward:risk)
+        take the long when  P(win) - breakeven > margin
+
+    This replaces the blunt precision floor: a lower-precision signal is allowed
+    through when the payoff justifies it (high RR → low breakeven), and a
+    high-precision one is still blocked when RR is poor. We use the calibrated
+    buy_prob as P(win) and keep a light reliability floor on precision so an
+    unreliable model can't buy on RR alone. SELL/HOLD fall back to buy_prob.
+    """
+    rr = risk_reward if (risk_reward and risk_reward > 0) else 0.0
+    breakeven = 1.0 / (1.0 + rr) if rr > 0 else 1.0
+    edge = buy_prob - breakeven          # >0 ⇒ positive expected value
+    if buy_prob >= 0.60 and edge >= 0.12 and prec >= 0.55:
+        return "STRONG BUY"
+    if buy_prob >= 0.50 and edge >= 0.02 and prec >= 0.50:
+        return "BUY"
+    if buy_prob >= 0.40:
+        return "HOLD"
+    if buy_prob >= 0.25:
+        return "SELL"
+    return "STRONG SELL"
+
+
 def _get_delivery_pct(symbol: str) -> float:
     """Fetch latest delivery % for a symbol from DB. Returns 50.0 if not available."""
     from database.db import get_connection, release_connection, _execute
@@ -320,21 +349,11 @@ def _infer_one_horizon(symbol: str, name: str, df, X_latest, h_art: dict, timest
     acc  = metrics.get("accuracy",  0.0)
     prec = metrics.get("precision", 0.0)
 
-    # Buy signals gate on precision too (of predicted-up days, how many rose) —
-    # the metric that matters most for a trade entry. A model that is now always
-    # saved but weak simply won't clear these bars and yields HOLD.
-    if buy_prob >= 0.75 and acc >= 0.80 and prec >= 0.70:
-        signal = "STRONG BUY"
-    elif buy_prob >= 0.60 and acc >= 0.70 and prec >= 0.60:
-        signal = "BUY"
-    elif buy_prob >= 0.40:
-        signal = "HOLD"
-    elif buy_prob >= 0.25:
-        signal = "SELL"
-    else:
-        signal = "STRONG SELL"
-
-    levels   = calculate_trade_levels(df, signal, horizon, target_pct)
+    # Expected-value gate: price a candidate long first to get its reward:risk,
+    # then decide (see decide_signal). Reuse those levels when the call is a buy.
+    _cand  = calculate_trade_levels(df, "BUY", horizon, target_pct)
+    signal = decide_signal(buy_prob, prec, _cand.get("risk_reward"))
+    levels = _cand if signal in ("STRONG BUY", "BUY") else calculate_trade_levels(df, signal, horizon, target_pct)
     position = calculate_position_sizing(df, signal, levels["buy_price"], symbol=symbol)
 
     top_features = []
@@ -515,19 +534,10 @@ def generate_signals():
                 acc  = metrics["accuracy"]
                 prec = metrics["precision"]
 
-                # Buy signals gate on precision too (see calculate_signal above).
-                if buy_prob >= 0.75 and acc >= 0.80 and prec >= 0.70:
-                    signal = "STRONG BUY"
-                elif buy_prob >= 0.60 and acc >= 0.70 and prec >= 0.60:
-                    signal = "BUY"
-                elif buy_prob >= 0.40:
-                    signal = "HOLD"
-                elif buy_prob >= 0.25:
-                    signal = "SELL"
-                else:
-                    signal = "STRONG SELL"
-
-                levels   = calculate_trade_levels(df, signal, horizon, target_pct)
+                # Expected-value gate (see decide_signal / calculate_signal above).
+                _cand  = calculate_trade_levels(df, "BUY", horizon, target_pct)
+                signal = decide_signal(buy_prob, prec, _cand.get("risk_reward"))
+                levels = _cand if signal in ("STRONG BUY", "BUY") else calculate_trade_levels(df, signal, horizon, target_pct)
                 position = calculate_position_sizing(df, signal, levels["buy_price"], symbol=symbol)
 
                 top_features = []

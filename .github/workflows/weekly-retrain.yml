@@ -53,9 +53,9 @@ jobs:
       MODEL_KEY: ${{ secrets.MODEL_KEY }}
       HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip
@@ -86,7 +86,7 @@ jobs:
 
       - name: Upload shard training stats
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: retrain-results-${{ matrix.shard }}
           path: backend/data/retrain_results.csv
@@ -110,9 +110,9 @@ jobs:
       HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
       HF_SPACE_REPO: MaheshMaheshwari/trademind
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip
@@ -129,7 +129,7 @@ jobs:
         run: python scripts/model_store.py sync
 
       - name: Download shard training stats
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: retrain-results-*
           path: shard-results

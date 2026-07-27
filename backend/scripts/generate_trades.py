@@ -31,6 +31,12 @@ from analysis.model_training import load_data_for_symbol, engineer_features_and_
 FINAL_DIR = "final_models"
 OUTPUT_DIR = "data"
 
+# Trade-level construction (see calculate_trade_levels + decide_signal):
+# the stop is placed to guarantee at least MIN_RR reward:risk, floored at
+# ATR_FLOOR_MULT x ATR so it never sits inside normal price noise.
+MIN_RR = 1.8            # minimum reward:risk for a trade to be worth taking
+ATR_FLOOR_MULT = 1.0    # stop never tighter than this x ATR (whipsaw guard)
+
 
 def calculate_trade_levels(df, signal, horizon, model_target_pct):
     """Calculate buy price, target price, and stop loss based on ATR and model horizon."""
@@ -58,18 +64,29 @@ def calculate_trade_levels(df, signal, horizon, model_target_pct):
     # Target % based on model horizon
     target_pct = model_target_pct  # e.g., 0.5% for 1 week, 5% for 3 months
     
+    # Stop loss is derived from a minimum reward:risk (MIN_RR), not from a flat
+    # ATR multiple. The target stays anchored to the model's horizon expectation
+    # (so buy_prob = P(return >= target_pct) still matches the target and the EV
+    # gate stays valid); we place the stop at reward / MIN_RR to guarantee the
+    # payoff — but never tighter than ATR_FLOOR_MULT x ATR, so it isn't inside
+    # normal noise. When the ATR floor forces a wider stop, RR falls below MIN_RR
+    # and the EV gate in decide_signal() correctly filters the trade to HOLD.
+    atr_floor = atr * ATR_FLOOR_MULT
+
     # Buy/Sell logic
     if signal in ("STRONG BUY", "BUY"):
         buy_price = latest_close
         target_price = round(buy_price * (1 + target_pct / 100), 2)
-        # Stop loss: 1.5x ATR below buy price (tighter for short horizon)
-        sl_multiplier = 1.5 if "Week" in str(horizon) else 2.0
-        stop_loss = round(buy_price - (atr * sl_multiplier), 2)
+        reward = target_price - buy_price
+        stop_dist = max(reward / MIN_RR, atr_floor)
+        stop_loss = round(buy_price - stop_dist, 2)
         trade_type = "LONG"
     elif signal in ("SELL", "STRONG SELL"):
         buy_price = None  # Don't buy
         target_price = round(latest_close * (1 - target_pct / 100), 2)  # Price expected to drop to
-        stop_loss = round(latest_close + (atr * 1.5), 2)  # Stop loss above current for short
+        reward = latest_close - target_price
+        stop_dist = max(reward / MIN_RR, atr_floor)
+        stop_loss = round(latest_close + stop_dist, 2)  # Stop loss above current for short
         trade_type = "SHORT"
     else:  # HOLD
         buy_price = None

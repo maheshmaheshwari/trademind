@@ -999,6 +999,20 @@ def get_scheduler_status() -> dict:
 
     global _bg_scheduler
 
+    # Scheduler switched off for this process (dev.sh sets ENABLE_SCHEDULER=false).
+    # Report that plainly — the lock file and scheduler.log on disk are left over
+    # from the deployed server and would otherwise read as "running".
+    if os.getenv("ENABLE_SCHEDULER", "true").strip().lower() in ("0", "false", "no", "off"):
+        return {
+            "running": False,
+            "disabled": True,
+            "reason": "ENABLE_SCHEDULER is false — scheduler intentionally not started",
+            "owner_pid": None,
+            "this_pid": os.getpid(),
+            "jobs": 0,
+            "job_list": [],
+        }
+
     # If this worker owns the scheduler, return live state
     if _bg_scheduler is not None:
         jobs = []

@@ -33,6 +33,14 @@ _LOG_DIR   = "logs"
 _LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 _setup_logging(log_dir=_LOG_DIR, level=_LOG_LEVEL)
 
+# Background scheduler on/off. Defaults ON so production is unchanged; dev.sh
+# exports ENABLE_SCHEDULER=false because the deployed server already runs the
+# cron jobs — a second scheduler writing to the same Timescale Cloud instance
+# would duplicate collector/signal data.
+_SCHEDULER_ENABLED = os.getenv("ENABLE_SCHEDULER", "true").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+
 # B4: Thread pool for offloading synchronous psycopg2 calls from the async event loop.
 # All blocking DB calls inside async handlers should use:
 #   await run_in_thread(some_sync_db_function, arg1, arg2)
@@ -345,7 +353,12 @@ async def startup_event():
         else:
             logger.info("HF_TOKEN/MODEL_KEY not set — skipping model store sync")
 
-    if is_scheduler_worker:
+    if not _SCHEDULER_ENABLED:
+        logger.warning(
+            "⏸  Background scheduler DISABLED via ENABLE_SCHEDULER — no cron jobs, "
+            "no recovery queue, no watchdog (worker %d)", worker_pid
+        )
+    elif is_scheduler_worker:
         try:
             from scheduler.jobs import start_background_scheduler
             sched = start_background_scheduler()
@@ -394,9 +407,10 @@ async def startup_event():
 async def shutdown_event():
     """Stop background scheduler on shutdown."""
     try:
-        from scheduler.jobs import stop_background_scheduler
-        stop_background_scheduler()
-        logger.info("Background scheduler stopped")
+        if _SCHEDULER_ENABLED:
+            from scheduler.jobs import stop_background_scheduler
+            stop_background_scheduler()
+            logger.info("Background scheduler stopped")
     except Exception as e:
         logger.error(f"Error stopping scheduler: {e}")
 

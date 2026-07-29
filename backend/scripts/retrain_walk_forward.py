@@ -19,6 +19,7 @@ Usage:
 """
 
 import argparse
+import calendar
 import csv
 import json
 import logging
@@ -28,7 +29,7 @@ import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, Tuple
 
 import joblib
@@ -49,8 +50,45 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-TRAIN_END   = "2024-12-31"   # last day of training
-TEST_START  = "2025-01-01"   # first day of test (no overlap)
+# ROLLING training window (was frozen at 2024-12-31). The signal backtester
+# (scripts/backtest_signals.py) showed models decay ~12 months after their
+# training cutoff — a frozen 2024-12-31 model was strongly +alpha through 2025
+# then LOST money in 2026, while a model retrained through 2025-12-31 was +alpha
+# on the same 2026 window (A/B: frozen −15%..−23% CAGR vs rolling +4%..+19%).
+# So TRAIN_END now rolls forward each run: train through the last month-end that
+# is TRAIN_GAP_MONTHS before the current month, test on the recent tail. This
+# keeps every weekly retrain's models fresh instead of re-fitting stale data.
+#
+# Gap = 6 months: this mirrors the validated A/B (train→2025-12-31, tested on
+# the 2026 tail) AND keeps the longest (6-month) horizon testable — a shorter
+# tail would leave the 6M horizon with no complete out-of-sample trades, since
+# it needs ~6 months of forward prices. Models end up ~6 months old at training
+# (vs the old 18+), well inside the fresh/+alpha zone the backtest identified.
+#
+# Overridable via env for pinning/experiments:
+#   TRAIN_END_OVERRIDE=2024-12-31   (force a fixed cutoff)
+#   TRAIN_GAP_MONTHS=6              (months of recent test tail to hold out)
+TRAIN_GAP_MONTHS = int(os.environ.get("TRAIN_GAP_MONTHS", "6"))
+
+
+def _rolling_train_end(gap_months: int = TRAIN_GAP_MONTHS) -> str:
+    """Last day of the month `gap_months` before the current month (ISO date)."""
+    today = date.today()
+    m = today.month - gap_months
+    y = today.year
+    while m <= 0:
+        m += 12
+        y -= 1
+    return date(y, m, calendar.monthrange(y, m)[1]).isoformat()
+
+
+def _next_day(iso: str) -> str:
+    from datetime import timedelta
+    return (datetime.strptime(iso, "%Y-%m-%d").date() + timedelta(days=1)).isoformat()
+
+
+TRAIN_END   = os.environ.get("TRAIN_END_OVERRIDE") or _rolling_train_end()
+TEST_START  = _next_day(TRAIN_END)   # first day of test (no overlap)
 FINAL_DIR   = "final_models"
 RESULTS_CSV = os.path.join("data", "retrain_results.csv")
 # Quality tiers, NOT a save gate. Every symbol's freshly-trained best model is

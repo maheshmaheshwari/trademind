@@ -55,6 +55,9 @@ function IconLock() {
 function IconUser() {
   return <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>;
 }
+function IconMail() {
+  return <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>;
+}
 function IconSun() {
   return <svg width={19} height={19} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>;
 }
@@ -118,6 +121,7 @@ export default function AuthPage() {
   const [username,     setUsername]     = useState('');
   const [pw,           setPw]           = useState('');
   const [name,         setName]         = useState('');
+  const [email,        setEmail]        = useState('');
   const [err,          setErr]          = useState('');
   const [remember,     setRemember]     = useState(true);
   const [showLoginPw,  setShowLoginPw]  = useState(false);
@@ -199,13 +203,24 @@ export default function AuthPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim()) { setErr('Please enter your username'); return; }
+    // Register must match the backend rule (>= 8 chars) or the API rejects with a 400.
+    if (mode === 'register' && pw.length < 8) { setErr('Password must be at least 8 characters'); return; }
     if (pw.length < 4)    { setErr('Password must be at least 4 characters'); return; }
     if (mode === 'register' && !name.trim()) { setErr('Please enter your full name'); return; }
+    if (mode === 'register' && !email.trim()) { setErr('Please enter your email'); return; }
+    if (mode === 'register' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setErr('Please enter a valid email address'); return;
+    }
     setErr('');
     try {
       const storeToken = (t: string) => setToken(t, remember);
       if (mode === 'register') {
-        const data = await registerMutation({ username: username.trim(), password: pw, display_name: name.trim() }).unwrap();
+        const data = await registerMutation({
+          username: username.trim(),
+          password: pw,
+          display_name: name.trim(),
+          email: email.trim().toLowerCase(),
+        }).unwrap();
         storeToken((data as any).token);
         login((data as any).user);
         navigate('/dashboard');
@@ -385,6 +400,23 @@ export default function AuthPage() {
                       value={name} onChange={e => setName(e.target.value)}
                       placeholder="Arjun Kapoor"
                       autoComplete="name"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Email (register only) — required so password reset has somewhere to send the OTP */}
+              {mode === 'register' && (
+                <div className="flex flex-col gap-[7px] mb-[15px]">
+                  <label className="text-[12.5px] font-semibold text-ink-2">Email</label>
+                  <div className="relative">
+                    <span className="absolute left-[13px] top-[14px] text-ink-3 pointer-events-none"><IconMail /></span>
+                    <input
+                      className={inputCls}
+                      type="email"
+                      value={email} onChange={e => setEmail(e.target.value)}
+                      placeholder="arjun@example.com"
+                      autoComplete="email"
                     />
                   </div>
                 </div>

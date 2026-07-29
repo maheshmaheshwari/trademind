@@ -152,14 +152,27 @@ def create_user(username: str, password_hash: str, display_name: str = None, ema
         return dict(zip(cols, user))
     except Exception as e:
         conn.rollback()
+        # users has UNIQUE on BOTH username and email — report which one collided,
+        # otherwise a duplicate email surfaces as a bogus "username taken" error.
+        def _dupe_error(exc) -> ValueError:
+            constraint = ""
+            try:
+                constraint = (exc.diag.constraint_name or "")
+            except Exception:
+                pass
+            haystack = f"{constraint} {exc}".lower()
+            if "email" in haystack:
+                return ValueError(f"Email '{email}' is already registered")
+            return ValueError(f"Username '{username}' already exists")
+
         try:
             import psycopg2.errors
             if isinstance(e, psycopg2.errors.UniqueViolation):
-                raise ValueError(f"Username '{username}' already exists") from e
+                raise _dupe_error(e) from e
         except ImportError:
             pass
         if "UNIQUE" in str(e) or "unique" in str(e):
-            raise ValueError(f"Username '{username}' already exists") from e
+            raise _dupe_error(e) from e
         raise
     finally:
         release_connection(conn)

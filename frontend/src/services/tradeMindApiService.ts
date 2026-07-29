@@ -219,7 +219,7 @@ export const tradeMindApiService = createApi({
     loginMfa: builder.mutation<{ token: string; user: User }, { mfa_token: string; totp_code: string }>({
       query: (data) => ({ url: '/auth/login/mfa', method: 'POST', data }),
     }),
-    register: builder.mutation<{ token: string; user: User }, { username: string; password: string; display_name?: string }>({
+    register: builder.mutation<{ token: string; user: User }, { username: string; password: string; display_name?: string; email?: string }>({
       query: (data) => ({ url: '/api/trading/register', method: 'POST', data }),
     }),
     getMe: builder.query<User, void>({
@@ -523,6 +523,10 @@ export const tradeMindApiService = createApi({
       query: () => ({ url: '/api/backtest/summary' }),
       keepUnusedDataFor: 300,
     }),
+    getStrategyBacktest: builder.query<any, void>({
+      query: () => ({ url: '/api/backtest/strategy' }),
+      keepUnusedDataFor: 600,
+    }),
   }),
 });
 
@@ -578,4 +582,5 @@ export const {
   useGetHealthQuery,
   // Backtest
   useGetBacktestSummaryQuery,
+  useGetStrategyBacktestQuery,
 } = tradeMindApiService;

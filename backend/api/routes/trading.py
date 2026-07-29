@@ -109,8 +109,15 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
 # ==========================================
 
 @router.post("/register", response_model=AuthOut)
-async def api_register(req: RegisterRequest):
-    """Create a new account with hashed password. Returns JWT token."""
+@limiter.limit("5/hour")
+async def api_register(req: RegisterRequest, request: Request):
+    """
+    Create a new account with hashed password. Returns JWT token.
+
+    Rate-limited per IP — registration was previously unlimited, allowing
+    automated account spam against the same endpoint that seeds a
+    ₹10,00,000 paper-trading balance per account.
+    """
     if len(req.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
     try:

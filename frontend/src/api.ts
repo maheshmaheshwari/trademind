@@ -44,11 +44,11 @@ function authHeaders(): Record<string, string> {
 // Auth API
 // ==========================================
 
-export async function registerUser(username: string, password: string, displayName?: string) {
+export async function registerUser(username: string, password: string, displayName?: string, email?: string) {
   const res = await fetch(`${API_BASE}/api/trading/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, display_name: displayName || username }),
+    body: JSON.stringify({ username, password, display_name: displayName || username, email }),
   });
   if (!res.ok) {
     const err = await res.json();

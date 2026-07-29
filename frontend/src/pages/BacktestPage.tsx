@@ -1,7 +1,7 @@
 import ReactApexChart from 'react-apexcharts';
 import type { ApexOptions } from 'apexcharts';
 import { useTheme } from '../ThemeContext';
-import { useGetBacktestSummaryQuery } from '../services/tradeMindApiService';
+import { useGetBacktestSummaryQuery, useGetStrategyBacktestQuery } from '../services/tradeMindApiService';
 import {
   Brain, TrendingUp, Target, Zap, CheckCircle, AlertCircle,
 } from 'lucide-react';
@@ -66,6 +66,136 @@ const SIGNAL_COLORS: Record<string, string> = {
   'SELL':        '#F97316',
   'STRONG SELL': '#EF4444',
 };
+
+// ── Strategy backtest (realized P&L vs buy-and-hold) ────────────────────────────
+
+function inrCompact(n: number) {
+  const a = Math.abs(n);
+  if (a >= 1e7) return '₹' + (n / 1e7).toFixed(2) + ' Cr';
+  if (a >= 1e5) return '₹' + (n / 1e5).toFixed(2) + ' L';
+  return '₹' + Math.round(n).toLocaleString('en-IN');
+}
+
+function StrategyBacktest({ isDark }: { isDark: boolean }) {
+  const { data, isLoading } = useGetStrategyBacktestQuery();
+
+  if (isLoading) return <div className="h-[360px] rounded-[14px] border border-line bg-surface animate-pulse" />;
+  if (!data?.available) {
+    return (
+      <SectionCard title="Strategy Backtest" sub="Realized out-of-sample performance vs buy-and-hold">
+        <div className="text-[13px] text-ink-3 py-6 text-center">
+          No backtest has been run yet. Run <code className="text-ink-2">scripts/backtest_signals.py --portfolio --save</code> to populate this.
+        </div>
+      </SectionCard>
+    );
+  }
+
+  const h = data.headline ?? {};
+  const ew = data.benchmarks?.equal_weight;
+  const nifty = data.benchmarks?.nifty500;
+  const alphaVsNifty = nifty ? (h.cagr_pct - nifty.cagr_pct) : null;
+
+  // build aligned datetime series for the equity chart
+  const toSeries = (name: string, curve?: [string, number][]) => ({
+    name,
+    data: (curve ?? []).map(([d, v]) => ({ x: new Date(d).getTime(), y: Math.round(v) })),
+  });
+  const series = [
+    toSeries('Strategy', h.curve),
+    ew && toSeries(ew.label ?? 'Equal-weight', ew.curve),
+    nifty && toSeries('Nifty 500', nifty.curve),
+  ].filter(Boolean) as { name: string; data: { x: number; y: number }[] }[];
+
+  const opts: ApexOptions = {
+    ...chartBase(isDark),
+    chart: { ...chartBase(isDark).chart, type: 'line', height: 320 },
+    colors: ['#10B981', '#94A3B8', '#F59E0B'],
+    stroke: { width: [2.6, 1.6, 1.6], curve: 'smooth', dashArray: [0, 4, 4] },
+    xaxis: { ...chartBase(isDark).xaxis, type: 'datetime' },
+    yaxis: { ...chartBase(isDark).yaxis, labels: { formatter: (v: number) => inrCompact(v) } },
+    legend: { show: true, position: 'top', horizontalAlign: 'right', labels: { colors: isDark ? '#AEB9CE' : '#4A5670' } },
+    tooltip: { ...chartBase(isDark).tooltip, x: { format: 'dd MMM yyyy' }, y: { formatter: (v: number) => inrCompact(v) } },
+  };
+
+  const subs: [string, number][] = Object.entries(h.subperiods ?? {}) as [string, number][];
+
+  return (
+    <div className="rounded-[14px] border border-line bg-surface p-5 flex flex-col gap-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-[15px] font-bold text-ink">Strategy Backtest — realized, out-of-sample</h3>
+          <p className="text-[12.5px] text-ink-3 mt-0.5">
+            STRONG BUY, conviction-ranked · {data.universe_symbols} stocks · from {data.window_start} · {data.cost_pct}% round-trip cost ·
+            best config: {h.label}
+          </p>
+        </div>
+        <div className="text-[11px] text-ink-3">Simulated on out-of-sample data (models trained through 2024-12-31). Past performance ≠ future results.</div>
+      </div>
+
+      {/* headline metrics */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          ['Strategy CAGR', (h.cagr_pct >= 0 ? '+' : '') + h.cagr_pct + '%', h.cagr_pct >= 0 ? 'var(--green)' : 'var(--red)'],
+          ['Alpha vs Nifty', alphaVsNifty == null ? '—' : (alphaVsNifty >= 0 ? '+' : '') + alphaVsNifty.toFixed(1) + '%', (alphaVsNifty ?? 0) >= 0 ? 'var(--green)' : 'var(--red)'],
+          ['Max Drawdown', h.max_drawdown_pct + '%', 'var(--red)'],
+          ['Trades Taken', String(h.trades_taken ?? 0), 'var(--text)'],
+        ].map(([l, v, c]) => (
+          <div key={l as string} className="rounded-[10px] border border-line bg-surface-2 p-3">
+            <div className="text-[11px] text-ink-3 font-semibold uppercase tracking-[.05em]">{l}</div>
+            <div className="text-[20px] font-bold font-mono mt-1" style={{ color: c as string }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* equity curve */}
+      <ReactApexChart options={opts} series={series} type="line" height={320} />
+
+      {/* benchmark comparison + sub-periods */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <div className="text-[12px] font-semibold text-ink-2 mb-2">vs buy-and-hold ({h.years}y)</div>
+          <table className="w-full text-[12.5px]">
+            <tbody>
+              {[['Strategy', h.cagr_pct, h.max_drawdown_pct, true],
+                ew && [ew.label, ew.cagr_pct, ew.max_drawdown_pct, false],
+                nifty && ['Nifty 500', nifty.cagr_pct, nifty.max_drawdown_pct, false]]
+                .filter(Boolean).map((r: any) => (
+                <tr key={r[0]} className="border-b border-line last:border-0">
+                  <td className="py-1.5 text-ink-2" style={{ fontWeight: r[3] ? 700 : 400 }}>{r[0]}</td>
+                  <td className="py-1.5 text-right font-mono" style={{ color: r[1] >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                    {(r[1] >= 0 ? '+' : '') + r[1]}% CAGR
+                  </td>
+                  <td className="py-1.5 text-right font-mono text-ink-3">{r[2]}% DD</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {subs.length > 0 && (
+          <div>
+            <div className="text-[12px] font-semibold text-ink-2 mb-2">Return by half-year (consistency check)</div>
+            <div className="flex flex-col gap-1.5">
+              {subs.map(([period, ret]) => (
+                <div key={period} className="flex items-center gap-2 text-[12px]">
+                  <span className="w-16 text-ink-3 font-mono">{period}</span>
+                  <div className="flex-1 h-4 bg-surface-3 rounded overflow-hidden relative">
+                    <div className="h-full rounded" style={{
+                      width: Math.min(Math.abs(ret) * 3, 100) + '%',
+                      background: ret >= 0 ? 'var(--green)' : 'var(--red)',
+                    }} />
+                  </div>
+                  <span className="w-14 text-right font-mono" style={{ color: ret >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                    {(ret >= 0 ? '+' : '') + ret}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── main page ─────────────────────────────────────────────────────────────────
 
@@ -221,6 +351,9 @@ export default function BacktestPage() {
           color="#F59E0B"
         />
       </div>
+
+      {/* ── Strategy backtest (realized P&L vs buy-and-hold) ─────────────── */}
+      <StrategyBacktest isDark={isDark} />
 
       {/* ── Charts row 1 ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

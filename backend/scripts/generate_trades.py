@@ -32,9 +32,15 @@ FINAL_DIR = "final_models"
 OUTPUT_DIR = "data"
 
 # Trade-level construction (see calculate_trade_levels + decide_signal):
-# the stop is placed to guarantee at least MIN_RR reward:risk, floored at
-# ATR_FLOOR_MULT x ATR so it never sits inside normal price noise.
-MIN_RR = 1.8            # minimum reward:risk for a trade to be worth taking
+# the stop is placed for at least MIN_RR reward:risk, floored at ATR_FLOOR_MULT
+# x ATR so it never sits inside normal price noise.
+#
+# MIN_RR=1.0 (not the earlier 1.8): the signal backtester
+# (scripts/backtest_signals.py) showed on 2025-2026 out-of-sample data that
+# raising MIN_RR *tightens* the stop and monotonically WORSENS realized results
+# (win 56%->43%, profit factor 1.31->1.17 as MIN_RR 1.0->2.5) — tighter stops
+# just get whipsawed. 1.0 (~1:1, wide stop) was the best tested setting.
+MIN_RR = 1.0            # reward:risk floor for stop placement (backtest-chosen)
 ATR_FLOOR_MULT = 1.0    # stop never tighter than this x ATR (whipsaw guard)
 
 

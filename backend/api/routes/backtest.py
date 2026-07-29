@@ -1,8 +1,10 @@
 """
 Backtest & Model Performance API
-GET /api/backtest/summary — aggregated model stats, signal history, top signals
+GET /api/backtest/summary  — aggregated model stats, signal history, top signals
+GET /api/backtest/strategy — realized strategy backtest (equity curve vs benchmarks)
 """
 import csv
+import json
 from collections import defaultdict
 from pathlib import Path
 
@@ -12,6 +14,25 @@ from database.db import get_connection, release_connection, _execute, _rows_to_d
 router = APIRouter(prefix="/api/backtest", tags=["Backtest"])
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
+
+
+@router.get("/strategy")
+async def get_strategy_backtest():
+    """Realized strategy backtest — equity curve, CAGR/drawdown, and buy-and-hold
+    benchmarks — produced offline by scripts/backtest_signals.py --save.
+
+    Returns {"available": false} when no backtest has been run yet, so the UI
+    can show an empty state instead of erroring."""
+    path = DATA_DIR / "strategy_backtest.json"
+    if not path.exists():
+        return {"available": False}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        data["available"] = True
+        return data
+    except Exception:
+        return {"available": False}
 
 
 def _safe_float(v, default=0.0):

@@ -1040,7 +1040,8 @@ def _build_models(pos_weight: float) -> dict:
     return models
 
 
-def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date: str = None):
+def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date: str = None,
+                       output_dir: str = "final_models"):
     """
     Train and evaluate all models for a symbol.
 
@@ -1449,9 +1450,11 @@ def train_and_evaluate(symbol: str, train_end_date: str = None, test_start_date:
     print(f"\n✅ Saved to {path}")
 
     # Production inference path — save FIRST so nothing below can block it.
-    os.makedirs("final_models", exist_ok=True)
+    # output_dir lets experiments (e.g. the rolling-TRAIN_END A/B) write to a
+    # scratch dir instead of clobbering the live final_models/ set.
+    os.makedirs(output_dir, exist_ok=True)
     bare = symbol.replace(".NS", "")
-    final_path = f"final_models/{bare}_final.pkl"
+    final_path = f"{output_dir}/{bare}_final.pkl"
     joblib.dump(artifact, final_path)
     print(f"✅ Also saved to {final_path} (production inference path)")
 

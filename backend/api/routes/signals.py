@@ -8,12 +8,14 @@ GET /api/signals/all              — all signals across all horizons (flat list
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
-from database.db import get_top_signals, get_connection, release_connection, _execute, _rows_to_dicts
+from database.db import (
+    get_top_signals, get_connection, release_connection, _execute, _rows_to_dicts,
+    get_sector_map,
+)
 from api.rate_limit import limiter
 from api.routes.trading import get_current_user as _get_current_user
 
@@ -25,16 +27,6 @@ _HORIZON_SHORT = {
     "1 Week": "1W", "2 Weeks": "2W", "1 Month": "1M",
     "2 Months": "2M", "3 Months": "3M", "6 Months": "6M",
 }
-
-# Load sector map once at startup from the static tokens file
-_SECTOR_MAP: dict = {}
-_TOKENS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "angel_tokens.json")
-try:
-    with open(_TOKENS_FILE) as _f:
-        _tokens = json.load(_f)
-    _SECTOR_MAP = {f"{sym}.NS": info.get("sector", "Unknown") for sym, info in _tokens.items()}
-except Exception:
-    pass
 
 # In-process cache: rebuilt only when the DB has a newer generated_date or > 5 min old
 _cache: dict = {"date": None, "payload": None, "ts": 0.0}
@@ -59,6 +51,7 @@ def _build_signals_payload() -> dict:
     finally:
         release_connection(conn)
 
+    sector_map = get_sector_map()
     now_utc = datetime.now(timezone.utc)
     out = []
     latest_gen_at = None
@@ -96,7 +89,7 @@ def _build_signals_payload() -> dict:
         out.append({
             "symbol":       r.get("symbol", ""),
             "name":         r.get("name", ""),
-            "sector":       _SECTOR_MAP.get(r.get("symbol", ""), "Unknown"),
+            "sector":       sector_map.get(r.get("symbol", ""), "Unknown"),
             "signal":       signal,
             "raw_signal":   raw_signal,
             "confidence":   round(float(r.get("confidence") or 0)),

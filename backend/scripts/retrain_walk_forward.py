@@ -1,15 +1,20 @@
 """
 TradeMind AI — Walk-Forward Model Retraining
 
-Trains all 499 Nifty 500 stocks using a strict time-based split:
-  Train : Jan 2023 – Dec 2024  (2 years, ~504 trading days)
-  Test  : Jan 2025 – present   (1 year+, ~330 trading days)
+Trains all ~500 Nifty 500 stocks using a strict time-based (walk-forward) split.
+The cutoff is ROLLING, not fixed — TRAIN_END is the last month-end TRAIN_GAP_MONTHS
+(default 6) before the current month, so every run trains on all available history
+up to ~6 months ago and tests on the most recent ~6 months. For a run in Jul 2026:
+  Train : all history through 2026-01-31
+  Test  : 2026-02-01 – present   (held-out, ~6 months)
+(Override with TRAIN_END_OVERRIDE / TRAIN_GAP_MONTHS. See the TRAIN_END config below.)
 
 For each stock, trains 6-7 models × 6 horizons, selects the best
 by harmonic mean of accuracy + precision on the held-out test set,
 and saves it to final_models/{SYMBOL}_final.pkl.
 
-Results logged to data/retrain_results.csv for review.
+Per-symbol metrics are written to the model_training_stats DB table (read by
+/api/backtest/summary) and also logged to data/retrain_results.csv for local review.
 
 Usage:
     PYTHONPATH=. python retrain_walk_forward.py
@@ -365,6 +370,17 @@ def retrain_all(symbol_filter: Optional[str] = None,
             logger.info(f"[{done}/{total} {pct:.0f}%] ETA ~{eta_min:.0f}min")
 
     csv_fh.close()
+
+    # Persist per-symbol metrics to the DB (the source /api/backtest/summary
+    # reads). Each shard upserts its own symbols under the shared RETRAIN_RUN_ID,
+    # so the route sees one coherent run. Non-fatal: the models are already saved
+    # to disk — a DB hiccup here must not fail the retrain.
+    try:
+        from database.db import insert_model_training_stats
+        n = insert_model_training_stats(RUN_ID, results)
+        logger.info(f"📥 Wrote {n} training-stat rows to DB (run_id={RUN_ID})")
+    except Exception as e:
+        logger.error(f"⚠️  Failed to write training stats to DB: {e}")
 
     # Summary
     from collections import Counter

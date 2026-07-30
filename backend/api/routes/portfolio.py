@@ -3,18 +3,17 @@ Nifty 500 AI — Portfolio Management API Routes
 
 AI-driven portfolio creation, sector allocation, and stock picking.
 """
-import json
-import os
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
-from database.db import get_trade_signals_formatted, get_connection, release_connection, _execute
+from database.db import (
+    get_trade_signals_formatted, get_connection, release_connection, _execute,
+    get_sector_map as _db_sector_map,
+)
 from api.routes.trading import get_current_user
 
 router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])
-
-TOKENS_PATH = "data/angel_tokens.json"
 
 
 # ==========================================
@@ -46,15 +45,12 @@ def load_signals():
     return get_trade_signals_formatted()
 
 
-def load_tokens():
-    with open(TOKENS_PATH) as f:
-        return json.load(f)
-
-
 def get_sector_map():
-    """Map symbol → sector from angel_tokens.json"""
-    tokens = load_tokens()
-    return {f"{sym}.NS": info.get("sector", "Unknown") for sym, info in tokens.items()}
+    """Map symbol → sector, from the nifty_constituents DB table.
+
+    Was read from data/angel_tokens.json, which isn't deployed to the HF Space —
+    these routes raised FileNotFoundError in production."""
+    return _db_sector_map()
 
 
 

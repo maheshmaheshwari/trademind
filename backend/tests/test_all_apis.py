@@ -1783,9 +1783,9 @@ class TestServerEndpoints:
 # ===========================================================================
 
 class TestBacktest:
-    def test_summary_returns_expected_shape(self, api_client, monkeypatch, tmp_path):
-        import api.routes.backtest as backtest_module
-        monkeypatch.setattr(backtest_module, "DATA_DIR", tmp_path)
+    def test_summary_returns_expected_shape(self, api_client):
+        # DB-backed: model_training_stats may be empty in the test DB — the route
+        # must still return the full shape (zeros), never error on no data.
         resp = api_client.get("/api/backtest/summary")
         assert resp.status_code == 200
         body = resp.json()

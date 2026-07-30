@@ -6,11 +6,10 @@ Pattern: seed the test DB the same way production data would arrive
 real route through TestClient and assert on the response — mirrors how
 values actually enter the system (collectors/schedulers -> DB -> API).
 
-All signal routes (signals/all, backtest/summary, stocks) are DB-backed —
-they read the trade_signals table. The only remaining file-backed input is
-retrain_results.csv (model-training stats in backtest/summary), which is
-tested by monkeypatching the route module's DATA_DIR to a tmp dir so it
-never touches the real backend/data/ used by the live app.
+All signal routes (signals/all, backtest/summary, stocks) are DB-backed.
+backtest/summary reads trade_signals (signal stats) and model_training_stats
+(per-symbol model metrics, written by scripts/retrain_walk_forward.py) — both
+from the DB, no file inputs (retrain_results.csv is retired; see CLAUDE.md).
 """
 from datetime import datetime
 
@@ -142,10 +141,19 @@ def test_signals_all_route_db_backed(api_client, monkeypatch):
     assert body["signals"][0]["signal"] == "BUY"
 
 
-def test_backtest_summary_route_file_backed(api_client, monkeypatch, tmp_path):
-    """Only the retrain_results.csv part is file-backed — point DATA_DIR at an empty tmp dir; signal stats come from the test DB."""
-    import api.routes.backtest as backtest_module
-    monkeypatch.setattr(backtest_module, "DATA_DIR", tmp_path)
+def test_backtest_summary_route_db_backed(api_client):
+    """Model stats come from model_training_stats (latest run_id only), signal
+    stats from trade_signals — both DB-backed, no file inputs. Seed one run and
+    assert the route surfaces exactly that run's rows."""
+    from database.db import insert_model_training_stats
+    insert_model_training_stats("test_run_1", [
+        {"symbol": "AAA.NS", "status": "ok", "best_model": "XGBoost", "horizon": "1 Month",
+         "accuracy": 0.82, "precision": 0.75, "recall": 0.6, "f1": 0.67, "quality_tier": "high"},
+        {"symbol": "BBB.NS", "status": "ok", "best_model": "RandForest", "horizon": "1 Week",
+         "accuracy": 0.55, "precision": 0.50, "recall": 0.4, "f1": 0.44, "quality_tier": "low"},
+        {"symbol": "CCC.NS", "status": "no_data", "best_model": "", "horizon": "",
+         "accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0, "quality_tier": None},
+    ])
 
     resp = api_client.get("/api/backtest/summary")
     assert resp.status_code == 200
@@ -153,3 +161,10 @@ def test_backtest_summary_route_file_backed(api_client, monkeypatch, tmp_path):
     live_shape = load_fixture("api_backtest_summary")
     assert set(["model_stats", "signal_stats", "history"]) <= set(body.keys())
     assert set(["model_stats", "signal_stats", "history"]) <= set(live_shape.keys())
+
+    ms = body["model_stats"]
+    assert ms["total_models"] == 3          # all rows in the run
+    assert ms["successful_models"] == 2     # status == "ok"
+    assert ms["high_quality_models"] == 1   # AAA (acc>=.70 & prec>=.70)
+    models = {m["model"] for m in ms["by_model_type"]}
+    assert models == {"XGBoost", "RandForest"}

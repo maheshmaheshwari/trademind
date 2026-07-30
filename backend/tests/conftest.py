@@ -30,6 +30,7 @@ _TEST_TABLES = [
     "prices", "technical_indicators", "trade_signals", "news_sentiment",
     "notifications", "notification_preferences", "watchlist", "risk_settings",
     "portfolio_stocks", "portfolio_sectors", "portfolios", "users",
+    "model_training_stats",
 ]
 
 

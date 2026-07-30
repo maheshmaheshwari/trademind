@@ -334,6 +334,32 @@ CREATE TABLE IF NOT EXISTS nifty_constituents (
 );
 """
 
+# Per-symbol model training metrics from scripts/retrain_walk_forward.py. Was
+# logged only to data/retrain_results.csv — a file, and worse, /api/backtest/summary
+# read EVERY row ever appended (all historical runs blended together, inflating
+# total_models and averaging stale metrics). Now one row per (run_id, symbol);
+# the API reads only the latest run_id. Reference/stats data belongs in the DB
+# (see CLAUDE.md). `precision` is a non-reserved keyword in PG — safe as a column.
+SQL_MODEL_TRAINING_STATS = """
+CREATE TABLE IF NOT EXISTS model_training_stats (
+    run_id        TEXT NOT NULL,
+    symbol        TEXT NOT NULL,
+    status        TEXT,
+    best_model    TEXT,
+    horizon       TEXT,
+    accuracy      DOUBLE PRECISION,
+    precision     DOUBLE PRECISION,
+    recall        DOUBLE PRECISION,
+    f1            DOUBLE PRECISION,
+    quality_tier  TEXT,
+    corp_adj      BOOLEAN,
+    error         TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (run_id, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_model_training_stats_run ON model_training_stats (run_id, created_at DESC);
+"""
+
 SQL_PASSWORD_RESET_OTPS = """
 CREATE TABLE IF NOT EXISTS password_reset_otps (
   id         SERIAL PRIMARY KEY,
@@ -753,7 +779,7 @@ def init_timescale(conn) -> None:
         SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS,
         SQL_AUTHORIZED_TRADES, SQL_AUTOPILOT_SETTINGS, SQL_MARKET_OVERVIEW,
         SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG, SQL_STRATEGY_BACKTEST,
-        SQL_NIFTY_CONSTITUENTS,
+        SQL_NIFTY_CONSTITUENTS, SQL_MODEL_TRAINING_STATS,
         SQL_PASSWORD_RESET_OTPS, SQL_USER_SESSIONS,
         SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
         SQL_AV_COVERAGE_TRACKER,

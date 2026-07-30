@@ -1233,6 +1233,25 @@ def get_nifty_constituents() -> List[Dict]:
         release_connection(conn)
 
 
+_sector_map_cache: Dict[str, str] = {}
+
+
+def get_sector_map() -> Dict[str, str]:
+    """symbol (".NS"-suffixed) → sector, from nifty_constituents. Cached in-process.
+
+    Sourced from the DB rather than data/angel_tokens.json: data/ is excluded
+    from the HF Space deploy, so the file-backed map was empty in production and
+    every signal came back sector="Unknown". Empty dict if the table isn't
+    seeded — see scripts/seed_nifty_constituents.py."""
+    global _sector_map_cache
+    if not _sector_map_cache:
+        _sector_map_cache = {
+            c["symbol"]: c["sector"]
+            for c in get_nifty_constituents() if c.get("sector")
+        }
+    return _sector_map_cache
+
+
 def upsert_nifty_constituents(rows: List[Dict]) -> int:
     """Upsert constituent rows [{symbol,name,sector}]. Returns count written."""
     conn = get_connection()
@@ -1244,6 +1263,7 @@ def upsert_nifty_constituents(rows: List[Dict]) -> int:
                        name = EXCLUDED.name, sector = EXCLUDED.sector, updated_at = NOW()""",
                 (r.get("symbol"), r.get("name"), r.get("sector")))
         conn.commit()
+        _sector_map_cache.clear()   # reseeded list must not be masked by the cache
         return len(rows)
     finally:
         release_connection(conn)
@@ -1272,6 +1292,66 @@ def get_market_sentiment() -> Optional[float]:
             "WHERE symbol IS NULL ORDER BY date DESC LIMIT 1")
         row = cur.fetchone()
         return float(row[0]) if row and row[0] is not None else None
+    finally:
+        release_connection(conn)
+
+
+def insert_model_training_stats(run_id: str, rows: List[Dict]) -> int:
+    """Upsert per-symbol training metrics for one retrain run into
+    model_training_stats. Called by scripts/retrain_walk_forward.py (each shard
+    upserts its own symbols under the shared run_id). Replaces the append-only
+    data/retrain_results.csv. Idempotent on (run_id, symbol). Returns row count."""
+    if not rows:
+        return 0
+    conn = get_connection()
+    try:
+        for r in rows:
+            _execute(conn,
+                """INSERT INTO model_training_stats
+                     (run_id, symbol, status, best_model, horizon,
+                      accuracy, precision, recall, f1, quality_tier, corp_adj, error)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT (run_id, symbol) DO UPDATE SET
+                     status=EXCLUDED.status, best_model=EXCLUDED.best_model,
+                     horizon=EXCLUDED.horizon, accuracy=EXCLUDED.accuracy,
+                     precision=EXCLUDED.precision, recall=EXCLUDED.recall,
+                     f1=EXCLUDED.f1, quality_tier=EXCLUDED.quality_tier,
+                     corp_adj=EXCLUDED.corp_adj, error=EXCLUDED.error,
+                     created_at=NOW()""",
+                (run_id, r.get("symbol"), r.get("status"), r.get("best_model"),
+                 r.get("horizon"), _f(r.get("accuracy")), _f(r.get("precision")),
+                 _f(r.get("recall")), _f(r.get("f1")), r.get("quality_tier"),
+                 bool(r.get("corp_adj")), str(r.get("error") or "")))
+        conn.commit()
+        return len(rows)
+    finally:
+        release_connection(conn)
+
+
+def get_latest_model_training_stats() -> List[Dict]:
+    """Per-symbol training metrics from the most recent retrain run only.
+
+    Finds the newest run_id (by created_at) and returns every row for it, so
+    /api/backtest/summary reflects a single run — not the CSV's append-only
+    blend of all historical runs. Returns [] if no run has been recorded."""
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT run_id FROM model_training_stats ORDER BY created_at DESC LIMIT 1")
+        row = cur.fetchone()
+        if not row:
+            return []
+        run_id = row[0]
+        cur = _execute(conn,
+            "SELECT symbol, status, best_model, horizon, accuracy, precision, "
+            "recall, f1, quality_tier, corp_adj FROM model_training_stats "
+            "WHERE run_id = ? ORDER BY symbol", (run_id,))
+        return [
+            {"symbol": r[0], "status": r[1], "best_model": r[2], "horizon": r[3],
+             "accuracy": r[4], "precision": r[5], "recall": r[6], "f1": r[7],
+             "quality_tier": r[8], "corp_adj": r[9]}
+            for r in cur.fetchall()
+        ]
     finally:
         release_connection(conn)
 

@@ -3,17 +3,15 @@ Backtest & Model Performance API
 GET /api/backtest/summary  — aggregated model stats, signal history, top signals
 GET /api/backtest/strategy — realized strategy backtest (equity curve vs benchmarks)
 """
-import csv
-import json
 from collections import defaultdict
-from pathlib import Path
 
 from fastapi import APIRouter
-from database.db import get_connection, release_connection, _execute, _rows_to_dicts
+from database.db import (
+    get_connection, release_connection, _execute, _rows_to_dicts,
+    get_latest_model_training_stats,
+)
 
 router = APIRouter(prefix="/api/backtest", tags=["Backtest"])
-
-DATA_DIR = Path(__file__).parent.parent.parent / "data"
 
 
 @router.get("/strategy")
@@ -42,12 +40,14 @@ def _safe_float(v, default=0.0):
         return default
 
 
-def _load_csv():
-    path = DATA_DIR / "retrain_results.csv"
-    if not path.exists():
+def _load_model_stats():
+    """Per-symbol training metrics for the LATEST retrain run, from the
+    model_training_stats DB table (see CLAUDE.md — no longer the append-only
+    data/retrain_results.csv, which blended every historical run together)."""
+    try:
+        return get_latest_model_training_stats()
+    except Exception:
         return []
-    with open(path) as f:
-        return list(csv.DictReader(f))
 
 
 def _load_latest_from_db() -> dict:
@@ -131,7 +131,7 @@ def _load_history_from_db() -> list:
 
 @router.get("/summary")
 async def get_backtest_summary():
-    rows = _load_csv()
+    rows = _load_model_stats()
     ok_rows = [r for r in rows if r.get("status") == "ok"]
 
     # ── Model stats ───────────────────────────────────────────────────────

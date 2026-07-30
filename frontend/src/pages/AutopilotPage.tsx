@@ -4,9 +4,11 @@ import { BrainCircuit, Settings, CheckCircle, Clock, AlertCircle, Activity, Tren
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/ui';
 import { Card, SignalBadge, SkeletonRows, Skeleton, SymbolCell } from '../components/ui';
+import { RiskReward } from '../components/ui';
 import {
   useGetAutopilotStatusQuery, useToggleAutopilotMutation,
   useGetAuthorizedTradesQuery, useRevokeAuthorizedTradeMutation,
+  useGetAutopilotRecommendationsQuery, useAuthorizeTradeAutoMutation,
   type AuthorizedTrade,
 } from '../services/tradeMindApiService';
 
@@ -69,6 +71,103 @@ function StatCard({ label, value, sub, color, Icon: IconComp }: {
 }
 
 // ── Main Page ────────────────────────────────────────────────────────────────
+
+function RecommendedTrades({ userId }: { userId: number }) {
+  const toast = useToast();
+  const { data, isLoading } = useGetAutopilotRecommendationsQuery(userId, { skip: !userId });
+  const [authorize] = useAuthorizeTradeAutoMutation();
+  const [done, setDone] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const recs: any[] = data?.recommendations ?? [];
+
+  async function authorizeOne(r: any) {
+    setBusy(r.symbol);
+    try {
+      await authorize({
+        user_id: userId, symbol: r.symbol, name: r.name ?? r.symbol,
+        signal: 'BUY', mode: 'PAPER', qty: r.qty, amount: r.investment,
+        entry: r.buy_price, target: r.target_price, sl: r.stop_loss, cmp: r.buy_price,
+        exp_profit: Math.round(((r.target_price - r.buy_price) * r.qty) || 0),
+        max_loss: Math.round(((r.buy_price - r.stop_loss) * r.qty) || 0),
+      } as any).unwrap();
+      setDone(prev => new Set(prev).add(r.symbol));
+      toast({ type: 'success', title: `Authorized ${r.symbol}`, msg: `${r.qty} @ ₹${r.buy_price} · pending mandate` });
+    } catch {
+      toast({ type: 'error', title: `Failed to authorize ${r.symbol}` });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (isLoading) return <Card><SkeletonRows cols={7} rows={4} /></Card>;
+  if (!recs.length) return null;
+
+  return (
+    <Card pad={false}>
+      <div className="flex items-start justify-between gap-3 flex-wrap px-4 pt-4 pb-2">
+        <div>
+          <h3 className="text-[15px] font-bold text-ink m-0">Recommended trades — conviction-ranked</h3>
+          <p className="text-[12.5px] text-ink-3 mt-0.5 m-0">
+            Top STRONG BUY signals from <b>reliable models only</b> (accuracy ≥ {data?.params?.min_accuracy ?? 70}%,
+            precision ≥ {data?.params?.min_precision ?? 60}%), ranked by confidence, capped at {data?.max_concurrent ?? 8} concurrent
+            positions, risk-sized to your paper balance. Review and authorize — nothing is placed automatically.
+            {(data?.filtered_low_quality ?? 0) > 0 && (
+              <> <b className="text-ink-2">{data.filtered_low_quality}</b> confident signal{data.filtered_low_quality !== 1 ? 's' : ''} hidden for low model quality.</>
+            )}
+          </p>
+        </div>
+        <span className="text-[12px] text-ink-3 whitespace-nowrap">
+          {data?.slots_available ?? 0} slot{(data?.slots_available ?? 0) !== 1 ? 's' : ''} open · ₹{Math.round(data?.cash ?? 0).toLocaleString('en-IN')} cash
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="text-ink-3 text-[11px] uppercase tracking-[.05em]">
+              {['#', 'Stock', 'Conf', 'Model acc / prec', 'Horizon', 'Qty', 'Investment', 'R:R', 'Entry / Target / SL', ''].map((h, i) => (
+                <th key={i} className="text-left font-semibold px-4 py-2" style={{ textAlign: i >= 5 && i <= 7 ? 'right' : 'left' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(recs ?? []).map(r => {
+              const authorized = done.has(r?.symbol);
+              return (
+                <tr key={r?.symbol} className="border-t border-line">
+                  <td className="px-4 py-2 font-mono text-ink-3">{r?.rank}</td>
+                  <td className="px-4 py-2"><SymbolCell symbol={r?.symbol} name={r?.name} showSector={false} /></td>
+                  <td className="px-4 py-2 font-mono font-semibold" style={{ color: 'var(--green)' }}>{r?.confidence}%</td>
+                  <td className="px-4 py-2 font-mono text-[12px] text-ink-2 tabular-nums">
+                    {r?.model_accuracy != null ? `${r.model_accuracy}%` : '—'} / {r?.model_precision != null ? `${r.model_precision}%` : '—'}
+                  </td>
+                  <td className="px-4 py-2"><span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{r?.horizon}</span></td>
+                  <td className="px-4 py-2 text-right font-mono tabular-nums">{(r?.qty ?? 0).toLocaleString('en-IN')}</td>
+                  <td className="px-4 py-2 text-right font-mono tabular-nums">₹{Math.round(r?.investment ?? 0).toLocaleString('en-IN')}</td>
+                  <td className="px-4 py-2 text-right"><RiskReward value={r?.risk_reward} size={12.5} /></td>
+                  <td className="px-4 py-2 font-mono text-[12px] text-ink-2 whitespace-nowrap">
+                    {inr(r?.buy_price)} · <span style={{ color: 'var(--green)' }}>{inr(r?.target_price)}</span> · <span style={{ color: 'var(--red)' }}>{inr(r?.stop_loss)}</span>
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <button
+                      disabled={authorized || busy === r?.symbol}
+                      onClick={() => authorizeOne(r)}
+                      className="inline-flex items-center gap-1 h-8 px-3 rounded-[8px] text-[12.5px] font-semibold border cursor-pointer transition-colors disabled:cursor-default"
+                      style={authorized
+                        ? { color: 'var(--green)', borderColor: 'var(--line)', background: 'var(--surface-2)' }
+                        : { color: '#fff', borderColor: 'var(--accent)', background: 'var(--accent)' }}>
+                      {authorized ? <><CheckCircle size={14} /> Authorized</> : busy === r?.symbol ? 'Authorizing…' : 'Authorize'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
 
 export default function AutopilotPage() {
   const { user } = useAuth();
@@ -222,6 +321,9 @@ export default function AutopilotPage() {
           </button>
         </div>
       )}
+
+      {/* ── Recommended trades (conviction-ranked, recommend-only) ── */}
+      {userId ? <RecommendedTrades userId={userId} /> : null}
 
       {/* ── Filters ── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">

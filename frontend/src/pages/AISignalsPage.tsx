@@ -5,7 +5,7 @@ import { useGetAllSignalsQuery } from '../services/tradeMindApiService';
 import type { AllSignal } from '../services/tradeMindApiService';
 import {
   Card, SignalBadge, SkeletonRows,
-  SymbolCell, Conf, Pager, useSort, Th, PlainTh, Td, RiskReward,
+  SymbolCell, Conf, Pager, useSort, Th, PlainTh, Td, RiskReward, ModelQuality,
 } from '../components/ui';
 
 const HORIZONS = ['All', '1W', '2W', '1M', '2M', '3M', '6M'] as const;
@@ -152,6 +152,7 @@ export default function AISignalsPage() {
                 <Th label="Sector"      sortKey="sector"     sort={sort} onToggle={toggle} />
                 <PlainTh>Signal</PlainTh>
                 <Th label="Confidence"  sortKey="confidence" sort={sort} onToggle={toggle} />
+                <Th label="Model"       sortKey="accuracy"   sort={sort} onToggle={toggle} />
                 <PlainTh>Horizon</PlainTh>
                 <Th label="Exp. Return" sortKey="expReturn"  sort={sort} onToggle={toggle} align="right" />
                 <Th label="Risk:Reward" sortKey="risk_reward" sort={sort} onToggle={toggle} align="right" />
@@ -160,8 +161,8 @@ export default function AISignalsPage() {
               </tr>
             </thead>
             <tbody>
-              {loading ? <SkeletonRows cols={9} rows={10} /> : rows.length === 0 ? (
-                <tr><td colSpan={9} className="text-center py-[50px] px-5 text-ink-3">
+              {loading ? <SkeletonRows cols={10} rows={10} /> : rows.length === 0 ? (
+                <tr><td colSpan={10} className="text-center py-[50px] px-5 text-ink-3">
                   No signals match your filters. Try lowering the confidence threshold.
                 </td></tr>
               ) : (rows ?? []).map(s => (
@@ -173,6 +174,7 @@ export default function AISignalsPage() {
                   </Td>
                   <Td><SignalBadge signal={s?.signal} /></Td>
                   <Td><div className="min-w-[130px]"><Conf value={s?.confidence} /></div></Td>
+                  <Td><ModelQuality accuracy={s?.accuracy} precision={s?.precision} size={12} /></Td>
                   <Td>
                     <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s?.horizon}</span>
                   </Td>

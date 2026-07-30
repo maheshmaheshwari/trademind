@@ -503,6 +503,11 @@ export const tradeMindApiService = createApi({
       query: ({ userId, status }) => ({ url: '/api/autopilot/trades', params: { user_id: userId, ...(status && status !== 'All' ? { status } : {}) } }),
       providesTags: ['Autopilot'],
     }),
+    getAutopilotRecommendations: builder.query<any, number>({
+      query: (userId) => ({ url: '/api/autopilot/recommendations', params: { user_id: userId } }),
+      providesTags: ['Autopilot'],
+      keepUnusedDataFor: 60,
+    }),
     authorizeTradeAuto: builder.mutation<{ status: string; data: AuthorizedTrade }, Partial<AuthorizedTrade> & { user_id: number }>({
       query: (data) => ({ url: '/api/autopilot/trades', method: 'POST', data }),
       invalidatesTags: ['Autopilot'],
@@ -576,7 +581,7 @@ export const {
   useGetUserSignalHistoryQuery,
   // Autopilot
   useGetAutopilotStatusQuery, useToggleAutopilotMutation,
-  useGetAuthorizedTradesQuery, useAuthorizeTradeAutoMutation,
+  useGetAuthorizedTradesQuery, useAuthorizeTradeAutoMutation, useGetAutopilotRecommendationsQuery,
   useRevokeAuthorizedTradeMutation,
   // Health
   useGetHealthQuery,

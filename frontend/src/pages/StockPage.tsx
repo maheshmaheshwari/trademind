@@ -32,6 +32,8 @@ interface StockDetail {
   stop_loss?: number;
   risk_reward?: number;
   buy_price?: number;
+  model_accuracy?: number;
+  model_precision?: number;
   consumed_volume?: number;
   recommended_volume?: number;
   remaining_volume?: number;
@@ -471,9 +473,23 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
   }
 
   // BUY / HOLD
+  const mAcc = data?.model_accuracy, mPrec = data?.model_precision;
+  const lowReliability = mAcc != null && mPrec != null && (mAcc < 70 || mPrec < 60);
   return (
     <div style={{ padding: '18px', background: 'var(--surface-2)', borderRadius: 14, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 0 }}>
       {showCapacity && <CapacityMeter consumed={consumed} total={recommended} suggested={suggestedQty} affordable={affordableQty} cantAffordFull={cantAffordFull} extraNeeded={extraNeeded} />}
+
+      {lowReliability && (
+        <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', padding: '10px 12px', marginBottom: 12,
+          borderRadius: 10, background: 'var(--red-soft)', border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)' }}>
+          <AlertTriangle size={16} style={{ color: 'var(--red)', flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.45 }}>
+            <b style={{ color: 'var(--red)' }}>Low model reliability</b> — this stock's model tests at
+            {' '}{mAcc}% accuracy / {mPrec}% precision. The signal may be unreliable regardless of its confidence;
+            it's excluded from AI autopilot recommendations. Trade with caution.
+          </span>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, padding: '12px', background: 'var(--surface)', borderRadius: 10, marginBottom: 12 }}>
         {[['Available', inrCompact(balance)], ['Est. SL', `${inr(estSL)} -7%`], ['Est. Target', `${inr(estTarget)} +12%`]].map(([l, v], i) => (

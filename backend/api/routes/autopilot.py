@@ -248,6 +248,20 @@ async def get_status(user_id: int, user=Depends(_get_current_user)):
         release_connection(conn)
 
 
+@router.get("/recommendations")
+async def get_recommendations(user_id: int, max_concurrent: int = 8,
+                              user=Depends(_get_current_user)):
+    """Conviction-ranked STRONG BUY trades to take now (recommend-only, PAPER).
+
+    Applies the backtest-validated portfolio construction — rank by conviction,
+    cap concurrent positions, risk-size, respect cash — and returns the ordered
+    set. Places NO trades; the user reviews and authorizes via POST /trades."""
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    from trading.signal_selector import recommend_trades
+    return recommend_trades(user_id, max_concurrent=max_concurrent)
+
+
 @router.post("/toggle")
 async def toggle_autopilot(body: ToggleBody, background_tasks: BackgroundTasks, user=Depends(_get_current_user)):
     """Flip autopilot on/off. Turning ON fires all pending mandates in the background."""

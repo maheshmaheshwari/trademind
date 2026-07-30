@@ -9,6 +9,8 @@ export { Delta } from './Delta';
 
 export { RiskReward } from './RiskReward';
 
+export { ModelQuality } from './ModelQuality';
+
 export { Card } from './Card';
 
 export { useSort, Th, PlainTh, Td } from './Table';

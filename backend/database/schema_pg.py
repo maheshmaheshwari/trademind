@@ -297,6 +297,29 @@ CREATE INDEX IF NOT EXISTS idx_sched_log_status ON scheduler_log (status, schedu
 CREATE INDEX IF NOT EXISTS idx_sched_log_job    ON scheduler_log (job_id, scheduled_at DESC);
 """
 
+# Strategy backtest results — realized out-of-sample equity curves + metrics
+# produced by scripts/backtest_signals.py. One row per run (history kept); the
+# API serves the newest. Curves/configs/benchmarks are a document-shaped blob,
+# stored as JSON text in `payload` (in the DB, not a file — see CLAUDE.md). The
+# headline metrics are also flat columns so they're queryable without parsing.
+SQL_STRATEGY_BACKTEST = """
+CREATE TABLE IF NOT EXISTS strategy_backtest_results (
+    id                BIGSERIAL PRIMARY KEY,
+    generated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    window_start      TEXT,
+    universe_symbols  INTEGER,
+    cost_pct          DOUBLE PRECISION,
+    min_rr            DOUBLE PRECISION,
+    capital           DOUBLE PRECISION,
+    risk_frac         DOUBLE PRECISION,
+    headline_label    TEXT,
+    headline_cagr     DOUBLE PRECISION,
+    headline_maxdd    DOUBLE PRECISION,
+    payload           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_strategy_backtest_gen ON strategy_backtest_results (generated_at DESC);
+"""
+
 SQL_PASSWORD_RESET_OTPS = """
 CREATE TABLE IF NOT EXISTS password_reset_otps (
   id         SERIAL PRIMARY KEY,
@@ -715,7 +738,7 @@ def init_timescale(conn) -> None:
         SQL_TRADE_SIGNALS, SQL_RISK_SETTINGS,
         SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS,
         SQL_AUTHORIZED_TRADES, SQL_AUTOPILOT_SETTINGS, SQL_MARKET_OVERVIEW,
-        SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG,
+        SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG, SQL_STRATEGY_BACKTEST,
         SQL_PASSWORD_RESET_OTPS, SQL_USER_SESSIONS,
         SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
         SQL_AV_COVERAGE_TRACKER,

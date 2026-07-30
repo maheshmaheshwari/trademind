@@ -459,10 +459,7 @@ def main():
             portfolio_sim(trades, **base, max_concurrent=5, min_conf=float(bp.quantile(.90)), label="Cap 5 + conf≥p90"),
         ]
         if args.save:
-            import json
-            from datetime import datetime as _dt
             payload = {
-                "generated_at": _dt.now().isoformat(timespec="seconds"),
                 "window_start": str(TEST_START.date()),
                 "universe_symbols": len(raw_cache),
                 "cost_pct": args.cost_pct, "min_rr": mr,
@@ -472,11 +469,12 @@ def main():
                 # headline = best config by CAGR, for the product's summary card
                 "headline": max((c for c in configs if c), key=lambda c: c["cagr_pct"]),
             }
-            path = os.path.join(OUTPUT_DIR, "strategy_backtest.json")
-            os.makedirs(OUTPUT_DIR, exist_ok=True)
-            with open(path, "w") as f:
-                json.dump(payload, f, indent=2)
-            print(f"\n💾 Saved backtest results → {path}")
+            # Stored in the DB (strategy_backtest_results), never a JSON file —
+            # the HF Space never receives data/*, so a file would be invisible
+            # in production (see CLAUDE.md: all app data lives in the database).
+            from database.db import insert_strategy_backtest
+            insert_strategy_backtest(payload)
+            print("\n💾 Saved backtest results → strategy_backtest_results (DB)")
         return
 
     print(f"Round-trip cost = {args.cost_pct:.2f}%/trade")

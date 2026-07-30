@@ -19,20 +19,20 @@ DATA_DIR = Path(__file__).parent.parent.parent / "data"
 @router.get("/strategy")
 async def get_strategy_backtest():
     """Realized strategy backtest — equity curve, CAGR/drawdown, and buy-and-hold
-    benchmarks — produced offline by scripts/backtest_signals.py --save.
+    benchmarks — produced by scripts/backtest_signals.py --save, stored in the
+    strategy_backtest_results DB table (not a file — see CLAUDE.md).
 
     Returns {"available": false} when no backtest has been run yet, so the UI
     can show an empty state instead of erroring."""
-    path = DATA_DIR / "strategy_backtest.json"
-    if not path.exists():
-        return {"available": False}
+    from database.db import get_latest_strategy_backtest
     try:
-        with open(path) as f:
-            data = json.load(f)
-        data["available"] = True
-        return data
+        data = get_latest_strategy_backtest()
     except Exception:
         return {"available": False}
+    if not data:
+        return {"available": False}
+    data["available"] = True
+    return data
 
 
 def _safe_float(v, default=0.0):

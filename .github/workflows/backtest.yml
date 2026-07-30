@@ -1,0 +1,84 @@
+# On-demand strategy backtest → populates the strategy_backtest_results DB table.
+#
+# Syncs the current production models from the encrypted HF store, runs
+# scripts/backtest_signals.py over the models' OUT-OF-SAMPLE window, and saves
+# the result to the database (never a JSON file — see CLAUDE.md). The Strategy
+# Backtest page (/api/backtest/strategy) reads the latest row.
+#
+# Out-of-sample window: models are trained through a rolling cutoff
+# (retrain_walk_forward.TRAIN_END), so the backtest must start the day AFTER
+# that cutoff — otherwise it would test models on data they trained on and
+# inflate the numbers. We read the actual train_end_date from a synced model
+# artifact so the window always matches whatever is deployed.
+#
+# Secrets: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, HF_TOKEN, MODEL_KEY,
+# HF_MODELS_REPO (optional).
+name: Strategy backtest
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: strategy-backtest
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PGHOST: ${{ secrets.PGHOST }}
+      PGPORT: ${{ secrets.PGPORT }}
+      PGDATABASE: ${{ secrets.PGDATABASE }}
+      PGUSER: ${{ secrets.PGUSER }}
+      PGPASSWORD: ${{ secrets.PGPASSWORD }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      MODEL_KEY: ${{ secrets.MODEL_KEY }}
+      HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Sync production models from the store
+        run: python scripts/model_store.py sync
+
+      - name: Run backtest over the out-of-sample window and save to DB
+        run: |
+          TS=$(python - <<'PY'
+          import glob, joblib
+          from datetime import datetime, timedelta
+          f = sorted(glob.glob("final_models/*.NS_final.pkl"))[0]
+          te = joblib.load(f).get("train_end_date")            # e.g. 2026-01-31
+          oos = datetime.strptime(te, "%Y-%m-%d").date() + timedelta(days=1)
+          print(oos.isoformat())
+          PY
+          )
+          echo "Models train through the day before $TS — backtesting out-of-sample from $TS"
+          python scripts/backtest_signals.py \
+            --symbols 500 --every 2 --portfolio \
+            --min-rr 1.0 --cost-pct 0.4 --test-start "$TS" --save
+
+      - name: Confirm the DB row landed
+        run: |
+          python - <<'PY'
+          from database.db import get_latest_strategy_backtest
+          d = get_latest_strategy_backtest()
+          if not d:
+              raise SystemExit("no backtest row saved")
+          h = d["headline"]
+          print(f"saved: {d['universe_symbols']} symbols, window from {d['window_start']}, "
+                f"headline {h['label']} CAGR {h['cagr_pct']}%  maxDD {h['max_drawdown_pct']}%")
+          PY

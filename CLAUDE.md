@@ -163,6 +163,7 @@ Key routes:
 
 ## Coding Conventions
 
+- **All persisted/application data MUST live in the database (TimescaleDB), never in JSON/CSV files on disk.** This is a hard rule. Signals are in `trade_signals`, prices in `prices`, etc. — anything a route serves or the app reads back must come from a DB table. Do NOT introduce file-backed data stores (e.g. `data/*.json`, `data/*.csv`) for app data, and do NOT add API endpoints that read/write such files. Reasons: the HF Space has ephemeral disk and never receives `data/**` (see `deploy_space.py` IGNORE_PATTERNS), so any JSON/CSV is invisible in production; and there is no durability, concurrency safety, or multi-instance consistency. Known legacy violations to migrate when touched, not extend: `retrain_results.csv` (model-training stats) and any `strategy_backtest.json`. `data/angel_tokens.json` is config (instrument-token map), not app data — that one's fine.
 - Python: all DB queries use `?` placeholders — `db.py`'s `_execute()` auto-translates to `%s` for PG
 - Never use `pd.read_sql_query` with a psycopg2 connection — use `_query_to_df()` in model_training.py instead
 - All collectors import `get_connection` from `database.db` — never open DB connections directly

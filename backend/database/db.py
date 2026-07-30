@@ -1179,3 +1179,44 @@ def _format_trade_signal(row: Dict) -> Dict:
         "generated_date": str(row.get("generated_date") or ""),
         "generated_at": str(row.get("generated_at") or ""),
     }
+
+
+def insert_strategy_backtest(payload: Dict) -> None:
+    """Store one strategy-backtest run in strategy_backtest_results.
+
+    `payload` is the full result dict (benchmarks, configs, headline, curves)
+    produced by scripts/backtest_signals.py. Headline metrics are also written
+    to flat columns; the full document goes in `payload` as JSON text. One row
+    per run — the API reads the newest via get_latest_strategy_backtest()."""
+    h = payload.get("headline") or {}
+    conn = get_connection()
+    try:
+        _execute(conn,
+            """INSERT INTO strategy_backtest_results
+                 (window_start, universe_symbols, cost_pct, min_rr, capital, risk_frac,
+                  headline_label, headline_cagr, headline_maxdd, payload)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (payload.get("window_start"), payload.get("universe_symbols"),
+             payload.get("cost_pct"), payload.get("min_rr"), payload.get("capital"),
+             payload.get("risk_frac"), h.get("label"), h.get("cagr_pct"),
+             h.get("max_drawdown_pct"), json.dumps(payload)))
+        conn.commit()
+    finally:
+        release_connection(conn)
+
+
+def get_latest_strategy_backtest() -> Optional[Dict]:
+    """Return the most recent strategy-backtest result, or None if none run yet."""
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT payload, generated_at FROM strategy_backtest_results "
+            "ORDER BY generated_at DESC LIMIT 1")
+        row = cur.fetchone()
+    finally:
+        release_connection(conn)
+    if not row:
+        return None
+    data = json.loads(row[0])
+    data["generated_at"] = str(row[1])
+    return data

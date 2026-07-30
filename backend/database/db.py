@@ -1181,6 +1181,21 @@ def _format_trade_signal(row: Dict) -> Dict:
     }
 
 
+def _to_native(o):
+    """json.dumps default: coerce numpy scalars (np.float64 etc.) to native
+    Python so backtest payloads serialize (pandas/numpy leak np.float64)."""
+    if hasattr(o, "item"):
+        return o.item()
+    raise TypeError(f"not JSON-serializable: {type(o)}")
+
+
+def _f(v):
+    """Coerce a numpy/None scalar to a plain float (or None) for a DB column."""
+    if v is None:
+        return None
+    return float(v.item() if hasattr(v, "item") else v)
+
+
 def insert_strategy_backtest(payload: Dict) -> None:
     """Store one strategy-backtest run in strategy_backtest_results.
 
@@ -1197,10 +1212,66 @@ def insert_strategy_backtest(payload: Dict) -> None:
                   headline_label, headline_cagr, headline_maxdd, payload)
                VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (payload.get("window_start"), payload.get("universe_symbols"),
-             payload.get("cost_pct"), payload.get("min_rr"), payload.get("capital"),
-             payload.get("risk_frac"), h.get("label"), h.get("cagr_pct"),
-             h.get("max_drawdown_pct"), json.dumps(payload)))
+             _f(payload.get("cost_pct")), _f(payload.get("min_rr")), _f(payload.get("capital")),
+             _f(payload.get("risk_frac")), h.get("label"), _f(h.get("cagr_pct")),
+             _f(h.get("max_drawdown_pct")), json.dumps(payload, default=_to_native)))
         conn.commit()
+    finally:
+        release_connection(conn)
+
+
+def get_nifty_constituents() -> List[Dict]:
+    """Nifty 500 constituent list (symbol/name/sector) from the DB.
+
+    Replaces the undeployed data.nifty500_full module — seed with
+    scripts/seed_nifty_constituents.py. Returns [] if the table isn't seeded."""
+    conn = get_connection()
+    try:
+        cur = _execute(conn, "SELECT symbol, name, sector FROM nifty_constituents ORDER BY symbol")
+        return [{"symbol": r[0], "name": r[1], "sector": r[2]} for r in cur.fetchall()]
+    finally:
+        release_connection(conn)
+
+
+def upsert_nifty_constituents(rows: List[Dict]) -> int:
+    """Upsert constituent rows [{symbol,name,sector}]. Returns count written."""
+    conn = get_connection()
+    try:
+        for r in rows:
+            _execute(conn,
+                """INSERT INTO nifty_constituents (symbol, name, sector) VALUES (?,?,?)
+                   ON CONFLICT (symbol) DO UPDATE SET
+                       name = EXCLUDED.name, sector = EXCLUDED.sector, updated_at = NOW()""",
+                (r.get("symbol"), r.get("name"), r.get("sector")))
+        conn.commit()
+        return len(rows)
+    finally:
+        release_connection(conn)
+
+
+def get_recent_fii_dii(days: int = 5) -> List[Dict]:
+    """Last `days` trading days of FII/DII net flows from fii_dii_daily (the
+    complete source — market_overview's fii/dii columns are sparsely filled)."""
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT date, fii_net, dii_net FROM fii_dii_daily ORDER BY date DESC LIMIT ?",
+            (days,))
+        return [{"date": r[0], "fii_net": r[1], "dii_net": r[2]} for r in cur.fetchall()]
+    finally:
+        release_connection(conn)
+
+
+def get_market_sentiment() -> Optional[float]:
+    """Latest market-wide daily sentiment from news_daily_sentiment (symbol IS
+    NULL) — market_overview.overall_sentiment_score is never populated."""
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT avg_sentiment FROM news_daily_sentiment "
+            "WHERE symbol IS NULL ORDER BY date DESC LIMIT 1")
+        row = cur.fetchone()
+        return float(row[0]) if row and row[0] is not None else None
     finally:
         release_connection(conn)
 

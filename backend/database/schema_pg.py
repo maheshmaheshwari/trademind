@@ -320,6 +320,20 @@ CREATE TABLE IF NOT EXISTS strategy_backtest_results (
 CREATE INDEX IF NOT EXISTS idx_strategy_backtest_gen ON strategy_backtest_results (generated_at DESC);
 """
 
+# Nifty 500 constituent list (symbol → name → sector). Was a Python module in
+# data/ (data.nifty500_full), but data/ is gitignored and excluded from the
+# Space deploy, so /api/market/sectors crashed in production with
+# ModuleNotFoundError. Reference data belongs in the DB (see CLAUDE.md); seed
+# it with scripts/seed_nifty_constituents.py.
+SQL_NIFTY_CONSTITUENTS = """
+CREATE TABLE IF NOT EXISTS nifty_constituents (
+    symbol      TEXT PRIMARY KEY,
+    name        TEXT,
+    sector      TEXT,
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
 SQL_PASSWORD_RESET_OTPS = """
 CREATE TABLE IF NOT EXISTS password_reset_otps (
   id         SERIAL PRIMARY KEY,
@@ -739,6 +753,7 @@ def init_timescale(conn) -> None:
         SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS,
         SQL_AUTHORIZED_TRADES, SQL_AUTOPILOT_SETTINGS, SQL_MARKET_OVERVIEW,
         SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG, SQL_STRATEGY_BACKTEST,
+        SQL_NIFTY_CONSTITUENTS,
         SQL_PASSWORD_RESET_OTPS, SQL_USER_SESSIONS,
         SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
         SQL_AV_COVERAGE_TRACKER,

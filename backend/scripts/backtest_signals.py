@@ -285,9 +285,11 @@ def benchmark(raw_cache, capital):
     try:
         from database.db import get_connection, release_connection, _execute
         conn = get_connection()
+        # Use TEST_START so the Nifty benchmark spans the SAME window as the
+        # strategy/equal-weight (was hardcoded 2025-01-01 → mismatched window).
         rows = _execute(conn, "SELECT date, nifty500_close FROM market_overview "
-                              "WHERE date >= '2025-01-01' AND nifty500_close IS NOT NULL "
-                              "ORDER BY date").fetchall()
+                              "WHERE date >= ? AND nifty500_close IS NOT NULL "
+                              "ORDER BY date", (str(TEST_START.date()),)).fetchall()
         release_connection(conn)
         if rows and len(rows) > 20:
             s = pd.Series([float(r[1]) for r in rows], index=pd.to_datetime([r[0] for r in rows]))

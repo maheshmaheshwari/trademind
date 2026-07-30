@@ -745,8 +745,12 @@ async def market_overview():
     today = nifty50_row or vix_row or (rows[0] if rows else {})
 
     # ── FII/DII — last 5 trading days ─────────────────────────────────────────
+    # Source from fii_dii_daily (complete), NOT market_overview.fii_net/dii_net,
+    # which is sparsely populated (different collectors fill different columns on
+    # different days) and showed 0 on days it was NULL.
+    from database.db import get_recent_fii_dii, get_market_sentiment
     fii_dii = []
-    for r in reversed(rows[:5]):
+    for r in reversed(get_recent_fii_dii(days=5)):
         d = r.get("date")
         day_label = calendar.day_abbr[d.weekday()] if hasattr(d, "weekday") else str(d)
         fii_dii.append({
@@ -773,7 +777,11 @@ async def market_overview():
     # ── Sector heatmap (reuse cached result from /api/market/sectors) ─────────
     heatmap = get_cached("market_sectors", "overview") or []
 
-    sentiment_val, _ = _coalesce("overall_sentiment_score", rows)
+    # Market sentiment from news_daily_sentiment (market-wide row); the
+    # market_overview.overall_sentiment_score column is never populated.
+    # news sentiment is roughly [-1, 1]; map to a 0-100 score for the UI.
+    news_sent = get_market_sentiment()
+    sentiment_val = round((news_sent + 1) * 50, 1) if news_sent is not None else None
     fear_greed_val, _ = _coalesce("fear_greed_label", rows)
     result = {
         "indices":  indices,
@@ -806,11 +814,11 @@ async def market_sectors():
     if cached:
         return cached
 
-    from database.db import get_trade_signals_formatted
-    from data.nifty500_full import NIFTY_500_STOCKS
+    from database.db import get_trade_signals_formatted, get_nifty_constituents
 
-    # Build symbol → sector lookup
-    sym_to_sector = {s["symbol"]: s["sector"] for s in NIFTY_500_STOCKS}
+    # Build symbol → sector lookup from the DB (was data.nifty500_full, which
+    # isn't deployed to the Space — see CLAUDE.md: reference data in the DB).
+    sym_to_sector = {s["symbol"]: s["sector"] for s in get_nifty_constituents()}
 
     raw = get_trade_signals_formatted()
     all_signals = raw.get("actionable_trades", []) + raw.get("hold_list", []) + raw.get("avoid_list", [])

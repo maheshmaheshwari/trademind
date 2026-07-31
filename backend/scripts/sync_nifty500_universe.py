@@ -701,6 +701,8 @@ def step_report(nse: List[Dict]) -> Dict:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    global RATE_LIMIT_SECS
+
     p = argparse.ArgumentParser(description="Sync tracked universe to the NSE Nifty 500 list")
     p.add_argument("--steps", default=",".join(ALL_STEPS),
                    help=f"comma-separated subset of: {','.join(ALL_STEPS)}")
@@ -709,6 +711,10 @@ def main():
                    help="minimum daily bars on/before TRAIN_END to train (default 100)")
     p.add_argument("--symbols", nargs="+", default=None,
                    help="restrict prices/indicators/train to these symbols")
+    p.add_argument("--rate-limit", type=float, default=RATE_LIMIT_SECS,
+                   help=f"seconds between Angel historical calls (default {RATE_LIMIT_SECS}). "
+                        "Angel's quota tightens under sustained load — raise this for a "
+                        "retry pass over symbols that failed with 'exceeding access rate'")
     p.add_argument("--retire-remote", action="store_true",
                    help="step 6: also delete retired models from the HF model repo "
                         "(without this, retirement is local-only and production keeps them)")
@@ -728,6 +734,11 @@ def main():
     logger.info(f"  steps      : {steps}")
     logger.info(f"  dry-run    : {args.dry_run}")
     logger.info(f"  log file   : {LOG_PATH}")
+
+    if args.rate_limit != RATE_LIMIT_SECS:
+        logger.info(f"  rate limit : {args.rate_limit}s between historical calls "
+                    f"(default {RATE_LIMIT_SECS}s)")
+        RATE_LIMIT_SECS = args.rate_limit
 
     nse = read_nse_csv()
     non_eq = [s["base"] for s in nse if s["series"] != "EQ"]

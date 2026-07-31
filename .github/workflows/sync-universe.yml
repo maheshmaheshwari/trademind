@@ -1,0 +1,149 @@
+# Re-sync the tracked stock universe to the current NSE Nifty 500 list.
+#
+# Manual only (workflow_dispatch) — run it when NSE publishes an index review
+# and the constituent list actually changes, typically twice a year plus
+# ad-hoc replacements. There is no schedule: the index does not change on a
+# cadence worth polling, and every run costs Angel One historical-API quota.
+#
+# BEFORE RUNNING: update ind_nifty500list.csv at the repo root and commit it.
+# That file is the source of truth this workflow syncs *to*. It is downloaded
+# manually from the NSE Nifty 500 index page rather than fetched here on
+# purpose — NSE serves 403 to unattended datacentre clients, so a fetch step
+# would fail in CI in a way that looks like "the index is unchanged".
+#
+# What it does (scripts/sync_nifty500_universe.py, 7 steps):
+#   tokens -> constituents -> prices -> indicators -> train -> retire -> report
+#
+# Models are pulled from the encrypted HF store first and pushed back after,
+# because the script decides what to train and what to retire by looking at
+# final_models/ — on a bare runner that directory is empty, which would make
+# step 5 try to train all 500 symbols and step 6 find nothing to retire.
+#
+# Secrets required: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD,
+# ANGEL_API_KEY, ANGEL_CLIENT_ID, ANGEL_MPIN (or ANGEL_PASSWORD),
+# ANGEL_TOTP_SECRET, HF_TOKEN (write), MODEL_KEY, HF_MODELS_REPO (optional).
+name: Sync Nifty 500 universe
+
+on:
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: 'Steps to run (comma-separated)'
+        required: false
+        default: 'tokens,constituents,prices,indicators,train,retire,report'
+      dry_run:
+        description: 'Plan only — no DB writes, no Angel calls, no uploads'
+        type: boolean
+        required: false
+        default: false
+      min_train_rows:
+        description: 'Minimum daily bars on/before TRAIN_END to train a symbol'
+        required: false
+        default: '100'
+      rate_limit:
+        description: 'Seconds between Angel historical calls (raise if rate-limited)'
+        required: false
+        default: '3.0'
+      retire_remote:
+        description: 'Also delete de-indexed models from the HF store (real retirement)'
+        type: boolean
+        required: false
+        default: false
+      regenerate_signals:
+        description: 'Regenerate trade signals after the sync'
+        type: boolean
+        required: false
+        default: true
+
+# Never overlap with the Friday retrain — both write final_models/ and the
+# encrypted store, and an interleaved upload would mix two model sets.
+concurrency:
+  group: model-store-write
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PGHOST: ${{ secrets.PGHOST }}
+      PGPORT: ${{ secrets.PGPORT }}
+      PGDATABASE: ${{ secrets.PGDATABASE }}
+      PGUSER: ${{ secrets.PGUSER }}
+      PGPASSWORD: ${{ secrets.PGPASSWORD }}
+      ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+      ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
+      ANGEL_MPIN: ${{ secrets.ANGEL_MPIN }}
+      ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
+      ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      MODEL_KEY: ${{ secrets.MODEL_KEY }}
+      HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+      HF_SPACE_REPO: MaheshMaheshwari/trademind
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      # Populates final_models/ and data/angel_tokens.json. Without this the
+      # train step sees zero existing models and the retire step sees nothing
+      # to archive — see the header note.
+      - name: Sync model set from the encrypted store
+        run: python scripts/model_store.py sync
+
+      - name: Show current universe drift (dry-run report)
+        run: python scripts/sync_nifty500_universe.py --steps report
+
+      - name: Sync universe
+        run: |
+          python scripts/sync_nifty500_universe.py \
+            --steps '${{ inputs.steps }}' \
+            --min-train-rows '${{ inputs.min_train_rows }}' \
+            --rate-limit '${{ inputs.rate_limit }}' \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            ${{ inputs.retire_remote && '--retire-remote' || '' }}
+
+      # Models the runner just trained, plus the regenerated 500-symbol token
+      # map, only exist on this runner until they are pushed. data/** and
+      # final_models/** are excluded from the Space deploy, so the store is the
+      # only path to production.
+      - name: Push models + token map to the store
+        if: ${{ !inputs.dry_run }}
+        run: python scripts/model_store.py upload "nifty 500 universe sync (run ${{ github.run_id }})"
+
+      - name: Regenerate trade signals
+        if: ${{ !inputs.dry_run && inputs.regenerate_signals }}
+        run: python scripts/generate_trades.py
+
+      - name: Restart the Space to pick up the new universe
+        if: ${{ !inputs.dry_run }}
+        run: |
+          python -c "
+          import os
+          from huggingface_hub import HfApi
+          HfApi(token=os.environ['HF_TOKEN']).restart_space(os.environ['HF_SPACE_REPO'])
+          print('Space restart requested')
+          "
+
+      # The run log is the record of what changed: which symbols were
+      # backfilled and how deep, which were gated out of training and on how
+      # few bars, and which models were retired.
+      - name: Upload sync log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sync-universe-log-${{ github.run_id }}
+          path: backend/logs/sync_universe_*.log
+          if-no-files-found: warn

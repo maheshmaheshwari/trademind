@@ -20,7 +20,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
 # Initialise date-rotating file logging as early as possible.
@@ -52,7 +52,7 @@ async def run_in_thread(func, *args, **kwargs):
     return await loop.run_in_executor(_DB_THREAD_POOL, partial(func, *args, **kwargs))
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -554,7 +554,10 @@ async def market_status():
     """
     Returns current NSE/BSE market session status in IST.
 
-    session values: "pre-market" | "open" | "post-market" | "closed"
+    session values: "pre-market" | "open" | "post-market" | "closed" | "holiday"
+
+    "holiday" is a weekday the exchange has closed, per the `market_holidays`
+    calendar; "closed" is a weekend or an out-of-hours weekday.
     """
     import pytz
     tz_ist = pytz.timezone("Asia/Kolkata")
@@ -562,6 +565,17 @@ async def market_status():
 
     weekday = now_ist.weekday()  # 0=Mon, 6=Sun
     is_weekday = weekday < 5
+
+    # A weekday is not automatically a trading day — NSE closes ~20 of them a
+    # year. Fall back to weekday-only logic if the calendar isn't seeded yet.
+    holiday = None
+    try:
+        from analysis.trading_calendar import holiday_name, next_trading_day
+        holiday = holiday_name(now_ist.date())
+    except Exception as exc:
+        logger.warning(f"market_status: holiday lookup failed: {exc}")
+        next_trading_day = None
+    is_trading_day = is_weekday and holiday is None
 
     h = now_ist.hour
     m = now_ist.minute
@@ -573,9 +587,9 @@ async def market_status():
     MARKET_CLOSE     = 15 * 60 + 30    # 15:30
     POST_MARKET_END  = 16 * 60         # 16:00
 
-    if not is_weekday:
+    if not is_trading_day:
         is_open = False
-        session = "closed"
+        session = "holiday" if holiday else "closed"
     elif time_minutes < PRE_MARKET_OPEN:
         is_open = False
         session = "closed"
@@ -597,13 +611,74 @@ async def market_status():
         "current_time": now_ist.strftime("%H:%M:%S"),
         "timezone": "IST",
         "session": session,
+        "is_trading_day": is_trading_day,
+        "holiday": holiday,
     }
     if is_open:
         result["next_close"] = "15:30"
     else:
         result["next_open"] = "09:15"
+    if not is_trading_day and next_trading_day:
+        try:
+            result["next_trading_day"] = str(next_trading_day(now_ist.date()))
+        except Exception as exc:
+            logger.warning(f"market_status: next_trading_day failed: {exc}")
 
     return result
+
+
+# ==========================================
+# Trading Calendar (NSE holidays) Endpoints
+# ==========================================
+@app.get("/api/market/holidays", tags=["Market"])
+async def market_holidays(year: Optional[int] = None, upcoming: int = 6):
+    """
+    NSE trading holidays from the `market_holidays` table.
+
+    Sourced from nseindia.com's exchange-communication-holidays calendar by
+    collectors/nse_holidays_collector.py. `year` filters to one calendar year
+    (default: every stored year); `upcoming` caps the look-ahead list that the
+    holiday banner renders.
+    """
+    from database.db import get_market_holidays, get_holiday_years
+    from analysis.trading_calendar import upcoming_holidays, market_day_status, today_ist
+
+    start = f"{year}-01-01" if year else None
+    end = f"{year}-12-31" if year else None
+    rows = get_market_holidays(start=start, end=end)
+
+    today = today_ist()
+    for r in rows:
+        r["is_weekend"] = datetime.strptime(r["date"], "%Y-%m-%d").weekday() >= 5
+        r["is_past"] = r["date"] < str(today)
+
+    ahead = upcoming_holidays(limit=max(upcoming, 0))
+    return {
+        "holidays": rows,
+        "total": len(rows),
+        "years_covered": get_holiday_years(),
+        "upcoming": ahead,
+        "next_holiday": ahead[0] if ahead else None,
+        "today": market_day_status(),
+    }
+
+
+@app.get("/api/market/data-freshness", tags=["Market"])
+async def market_data_freshness(days: int = 60):
+    """
+    Verify stored price dates against the NSE trading calendar.
+
+    Answers "is any trading day missing from `prices`?" — which is only
+    answerable with the holiday calendar, since ~20 weekdays a year are
+    legitimately empty. Also flags partially-collected days and bars dated on
+    a non-trading day (a misdated candle from the source).
+    """
+    from analysis.trading_calendar import verify_price_dates
+    try:
+        return verify_price_dates(days=days)
+    except Exception as exc:
+        logger.error(f"data freshness check failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"freshness check failed: {exc}")
 
 
 # ==========================================
@@ -1013,6 +1088,8 @@ async def root():
         "endpoints": {
             "health": "/api/health",
             "market_overview": "/api/market/overview",
+            "market_holidays": "/api/market/holidays",
+            "data_freshness": "/api/market/data-freshness?days=60",
             "prices": "/api/prices/{symbol}?days=90&interval=1d",
             "indicators": "/api/indicators/{symbol}",
             "sentiment_market": "/api/sentiment/market",

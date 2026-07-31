@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { PanelLeft, Search, Bell, Sun, Moon, User, Settings, Shield, LogOut } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useTheme } from '../ThemeContext';
-import { useGetNotificationsQuery, useMarkNotificationsReadMutation } from '../services/tradeMindApiService';
+import {
+  useGetNotificationsQuery, useMarkNotificationsReadMutation, useGetMarketHolidaysQuery,
+} from '../services/tradeMindApiService';
 
 function relativeTime(isoStr: string): string {
   const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
@@ -28,6 +30,7 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
   const menuRef  = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
 
+  const { data: cal } = useGetMarketHolidaysQuery({ upcoming: 8 });
   const { data: notifData } = useGetNotificationsQuery(undefined, { pollingInterval: 60000 });
   const [markRead] = useMarkNotificationsReadMutation();
   const unread: number = (notifData as any)?.unread ?? 0;
@@ -58,11 +61,14 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
     ? user.display_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
     : 'U';
 
-  // Market open: 9:15 AM – 3:30 PM IST Mon–Fri
+  // Market open: 9:15 AM – 3:30 PM IST Mon–Fri, and not an NSE holiday.
+  // The holiday comes from the server's trading calendar (shared cache with
+  // MarketBanner) — a weekday alone doesn't mean the exchange is trading.
   const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
   const day  = nowIST.getDay();
   const mins = nowIST.getHours() * 60 + nowIST.getMinutes();
-  const marketOpen = day >= 1 && day <= 5 && mins >= 555 && mins <= 930;
+  const holidayName = cal?.today?.is_holiday ? cal?.today?.holiday_name : null;
+  const marketOpen = day >= 1 && day <= 5 && mins >= 555 && mins <= 930 && !holidayName;
 
   function goSettings(tab: string) {
     setMenuOpen(false);
@@ -120,9 +126,18 @@ export default function Navbar({ collapsed, onToggle }: NavbarProps) {
       <div className="flex items-center gap-2.5">
 
         {/* Market status + live clock */}
-        <div className={`flex items-center gap-2 h-9 px-3 rounded-full text-[12.5px] font-semibold border ${marketOpen ? 'text-gain bg-gain-soft border-line' : 'text-loss bg-loss-soft border-line'}`}>
-          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${marketOpen ? 'bg-gain animate-pulse-dot' : 'bg-loss'}`} />
-          {marketOpen ? 'MARKET OPEN' : 'MARKET CLOSED'}
+        <div
+          title={holidayName ? `NSE holiday — ${holidayName}` : undefined}
+          className={`flex items-center gap-2 h-9 px-3 rounded-full text-[12.5px] font-semibold border ${
+            marketOpen ? 'text-gain bg-gain-soft border-line'
+              : holidayName ? 'text-gold bg-gold-soft border-line'
+              : 'text-loss bg-loss-soft border-line'
+          }`}
+        >
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+            marketOpen ? 'bg-gain animate-pulse-dot' : holidayName ? 'bg-gold' : 'bg-loss'
+          }`} />
+          {marketOpen ? 'MARKET OPEN' : holidayName ? 'MARKET HOLIDAY' : 'MARKET CLOSED'}
           <span className="hidden sm:inline text-ink-3 font-normal font-mono text-[11.5px]">
             NSE · {clock}
           </span>

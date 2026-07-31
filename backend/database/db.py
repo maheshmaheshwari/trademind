@@ -11,6 +11,7 @@ Usage:
 import json
 import logging
 import os
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -1371,3 +1372,136 @@ def get_latest_strategy_backtest() -> Optional[Dict]:
     data = json.loads(row[0])
     data["generated_at"] = str(row[1])
     return data
+
+
+# ---------------------------------------------------------------------------
+# Market holidays / trading calendar
+# ---------------------------------------------------------------------------
+#
+# The NSE trading calendar lives in `market_holidays` (seeded by
+# collectors/nse_holidays_collector.py). Everything below reads from that
+# table — a trading day is a weekday that is not in it. The whole table is
+# tiny (~20 rows/year) so it's cached wholesale in-process, invalidated by
+# upsert_market_holidays() and expired by a TTL for the workers that didn't
+# do the writing.
+
+_holiday_cache: Optional[Dict[Any, str]] = None
+_holiday_cache_at: float = 0.0
+# The weekly refresh job runs in one worker only, so the other workers' caches
+# would never see an unscheduled closure NSE adds mid-year. A short TTL makes
+# every worker self-heal without adding cross-process invalidation.
+_HOLIDAY_CACHE_TTL_SEC = 3600
+
+
+def upsert_market_holidays(rows: List[Dict], segment: str = "CM",
+                           exchange: str = "NSE", source: str = "nseindia") -> int:
+    """Upsert holiday rows [{date, weekday, description}]. Returns count written.
+
+    `date` may be a `datetime.date` or an ISO 'YYYY-MM-DD' string. Idempotent —
+    re-running the collector refreshes descriptions without losing prior years.
+    """
+    if not rows:
+        return 0
+    conn = get_connection()
+    try:
+        for r in rows:
+            _execute(conn,
+                """INSERT INTO market_holidays
+                       (holiday_date, segment, exchange, weekday, description, source)
+                   VALUES (?,?,?,?,?,?)
+                   ON CONFLICT (exchange, segment, holiday_date) DO UPDATE SET
+                       weekday     = EXCLUDED.weekday,
+                       description = EXCLUDED.description,
+                       source      = EXCLUDED.source,
+                       updated_at  = NOW()""",
+                (r.get("date"), segment, exchange, r.get("weekday"), r.get("description"), source))
+        conn.commit()
+    finally:
+        release_connection(conn)
+    global _holiday_cache
+    _holiday_cache = None
+    return len(rows)
+
+
+def get_market_holidays(start: Optional[str] = None, end: Optional[str] = None,
+                        segment: str = "CM", exchange: str = "NSE") -> List[Dict]:
+    """Holidays in [start, end] (ISO dates, both optional) ordered ascending."""
+    sql = ("SELECT holiday_date, weekday, description FROM market_holidays "
+           "WHERE exchange = ? AND segment = ?")
+    params: List[Any] = [exchange, segment]
+    if start:
+        sql += " AND holiday_date >= ?"
+        params.append(start)
+    if end:
+        sql += " AND holiday_date <= ?"
+        params.append(end)
+    sql += " ORDER BY holiday_date"
+
+    conn = get_connection()
+    try:
+        cur = _execute(conn, sql, tuple(params))
+        return [{"date": str(r[0]), "weekday": r[1], "description": r[2]}
+                for r in cur.fetchall()]
+    finally:
+        release_connection(conn)
+
+
+def get_holiday_map(segment: str = "CM", exchange: str = "NSE") -> Dict[Any, str]:
+    """date → description for every stored holiday. Cached in-process.
+
+    Returns {} when the table has never been seeded — callers must treat an
+    empty map as "no calendar", not as "no holidays" (see
+    analysis/trading_calendar.py, which refuses to report gaps for years it
+    has no holiday coverage for).
+    """
+    global _holiday_cache, _holiday_cache_at
+    if _holiday_cache is None or (time.time() - _holiday_cache_at) > _HOLIDAY_CACHE_TTL_SEC:
+        conn = get_connection()
+        try:
+            cur = _execute(conn,
+                "SELECT holiday_date, description FROM market_holidays "
+                "WHERE exchange = ? AND segment = ?", (exchange, segment))
+            _holiday_cache = {r[0]: (r[1] or "Holiday") for r in cur.fetchall()}
+            _holiday_cache_at = time.time()
+        finally:
+            release_connection(conn)
+    return _holiday_cache
+
+
+def clear_holiday_cache() -> None:
+    """Drop the in-process holiday cache — call after changing the table."""
+    global _holiday_cache
+    _holiday_cache = None
+
+
+def get_holiday_years(segment: str = "CM", exchange: str = "NSE") -> List[int]:
+    """Calendar years the holiday table actually covers (ascending).
+
+    NSE's API serves only the current year, so coverage builds up over time;
+    verification must not claim a missing trading day in an uncovered year.
+    """
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT DISTINCT EXTRACT(YEAR FROM holiday_date)::int FROM market_holidays "
+            "WHERE exchange = ? AND segment = ? ORDER BY 1", (exchange, segment))
+        return [int(r[0]) for r in cur.fetchall()]
+    finally:
+        release_connection(conn)
+
+
+def get_price_dates(start: str, end: str, interval: str = "1d") -> Dict[Any, int]:
+    """date → number of symbols with a daily bar, for dates in [start, end].
+
+    Drives the price-date verification: a date present for only a handful of
+    symbols is a partial collection, which is as much a gap as a missing date.
+    """
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT date, COUNT(DISTINCT symbol) FROM prices "
+            "WHERE interval = ? AND date >= ? AND date <= ? GROUP BY date",
+            (interval, start, end))
+        return {r[0]: int(r[1]) for r in cur.fetchall()}
+    finally:
+        release_connection(conn)

@@ -145,6 +145,52 @@ export interface MarketOverviewResponse {
   fear_greed:      string | null;
 }
 
+// NSE trading calendar — /api/market/holidays. Sourced from nseindia.com's
+// exchange-communication-holidays list and stored in `market_holidays`.
+export interface MarketHoliday {
+  date:        string;   // ISO 'YYYY-MM-DD'
+  weekday:     string | null;
+  description: string | null;
+  is_weekend?: boolean;  // holiday that falls on a Sat/Sun — market shut anyway
+  is_past?:    boolean;
+  days_away?:  number;
+}
+
+export interface MarketHolidaysResponse {
+  holidays:      MarketHoliday[];
+  total:         number;
+  years_covered: number[];
+  upcoming:      MarketHoliday[];
+  next_holiday:  MarketHoliday | null;
+  today: {
+    date:             string;
+    is_trading_day:   boolean;
+    is_holiday:       boolean;
+    is_weekend:       boolean;
+    holiday_name:     string | null;
+    reason:           'holiday' | 'weekend' | null;
+    next_trading_day: string;
+    last_trading_day: string;
+    calendar_loaded:  boolean;
+  };
+}
+
+// /api/market/data-freshness — trading days the calendar expects vs the dates
+// actually present in `prices`.
+export interface DataFreshnessResponse {
+  status:             'ok' | 'stale' | 'gaps' | 'no_calendar' | 'no_data';
+  message?:           string;
+  last_trading_day:   string;
+  latest_price_date:  string | null;
+  stale_by_days:      number | null;
+  trading_days_expected?: number;
+  trading_days_present?:  number;
+  missing_dates:      string[];
+  partial_dates:      Array<{ date: string; symbols: number; expected_symbols: number }>;
+  unexpected_dates:   Array<{ date: string; symbols: number; reason: string; holiday: string | null }>;
+  uncovered_years:    number[];
+}
+
 export interface SectorPerformance {
   sector:      string;
   change:      number;
@@ -400,6 +446,17 @@ export const tradeMindApiService = createApi({
       providesTags: ['Sectors'],
       keepUnusedDataFor: 300,
     }),
+    // The calendar changes ~once a year — cache it hard.
+    getMarketHolidays: builder.query<MarketHolidaysResponse, { year?: number; upcoming?: number } | void>({
+      query: (args) => ({ url: '/api/market/holidays', params: args || undefined }),
+      providesTags: ['Market'],
+      keepUnusedDataFor: 3600,
+    }),
+    getDataFreshness: builder.query<DataFreshnessResponse, number | void>({
+      query: (days = 60) => ({ url: '/api/market/data-freshness', params: { days } }),
+      providesTags: ['Market'],
+      keepUnusedDataFor: 600,
+    }),
 
     // ── GTT ───────────────────────────────────────────────────────────────
     getGTTOrders: builder.query<{ data: GTTOrder[]; total: number }, number>({
@@ -564,6 +621,7 @@ export const {
   useGetStockPricesQuery, useGetStockIndicatorsQuery,
   // Market
   useGetMarketOverviewQuery, useGetMarketSectorsQuery,
+  useGetMarketHolidaysQuery, useGetDataFreshnessQuery,
   // GTT
   useGetGTTOrdersQuery, useSyncGTTMutation,
   // Analytics

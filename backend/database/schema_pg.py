@@ -214,6 +214,33 @@ CREATE TABLE IF NOT EXISTS delivery_data (
 CREATE INDEX IF NOT EXISTS idx_delivery_symbol ON delivery_data (symbol, date DESC);
 """
 
+# NSE trading holidays, scraped from the exchange-communication-holidays page's
+# backing API (https://www.nseindia.com/api/holiday-master?type=trading) by
+# collectors/nse_holidays_collector.py. This is the trading calendar the whole
+# app reasons about: "is the market open today", "what was the last trading
+# day", and — most importantly — which dates the `prices` table is *expected*
+# to have rows for, so a genuinely missed EOD collection can be told apart from
+# a legitimate exchange holiday.
+#
+# NSE's API only ever returns the current calendar year, so rows accumulate
+# year by year as the collector re-runs (upsert, never truncate) — dropping the
+# table loses the history that the price-date verification needs. `segment` is
+# the NSE segment code ('CM' = capital market / equity, the one we trade);
+# holidays are stored per-segment so a future F&O calendar can coexist.
+SQL_MARKET_HOLIDAYS = """
+CREATE TABLE IF NOT EXISTS market_holidays (
+    holiday_date DATE NOT NULL,
+    segment      TEXT NOT NULL DEFAULT 'CM',
+    exchange     TEXT NOT NULL DEFAULT 'NSE',
+    weekday      TEXT,
+    description  TEXT,
+    source       TEXT,
+    updated_at   TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (exchange, segment, holiday_date)
+);
+CREATE INDEX IF NOT EXISTS idx_market_holidays_date ON market_holidays (holiday_date);
+"""
+
 SQL_NOTIFICATIONS = """
 CREATE TABLE IF NOT EXISTS notifications (
     id         BIGSERIAL PRIMARY KEY,
@@ -783,7 +810,7 @@ def init_timescale(conn) -> None:
         SQL_PASSWORD_RESET_OTPS, SQL_USER_SESSIONS,
         SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
         SQL_AV_COVERAGE_TRACKER,
-        SQL_CORPORATE_ACTIONS, SQL_DELIVERY_DATA,
+        SQL_CORPORATE_ACTIONS, SQL_DELIVERY_DATA, SQL_MARKET_HOLIDAYS,
     ]:
         cur.execute(sql)
 

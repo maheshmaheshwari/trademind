@@ -6,6 +6,7 @@ import {
   TrendingUp, BrainCircuit, FlaskConical,
 } from 'lucide-react';
 import Navbar from './Navbar';
+import MarketBanner from './MarketBanner';
 import { useAuth } from '../AuthContext';
 
 const NAV = [
@@ -136,6 +137,7 @@ export default function Layout() {
         <Navbar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
           <div className="dp dgap max-w-[1480px] mx-auto">
+            <MarketBanner />
             <Suspense fallback={<div className="py-20 text-center text-[var(--text-2)]">Loading…</div>}>
               <Outlet />
             </Suspense>

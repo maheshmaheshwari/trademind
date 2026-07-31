@@ -222,7 +222,21 @@ def collect_eod_data_job():
     Daily job: EOD prices → indicators → trade signals (chained in order).
     Guarantees each step only starts after the previous one completes,
     regardless of how long each step takes.
+
+    Skipped entirely on NSE holidays — the cron is mon-fri, but ~20 weekdays a
+    year the exchange is shut, and running the chain then produces no bars and
+    a spurious failure (see analysis/trading_calendar.py).
     """
+    try:
+        from analysis.trading_calendar import holiday_name, today_ist
+        holiday = holiday_name(today_ist())
+        if holiday:
+            logger.info(f"⏭️  EOD pipeline skipped — NSE holiday ({holiday})")
+            return
+    except Exception as e:
+        # No calendar is not a reason to skip collection — carry on.
+        logger.warning(f"Holiday check failed, running EOD anyway: {e}")
+
     # ── Step 1: EOD prices ───────────────────────────────────────────────────
     logger.info("⏰ [1/3] EOD price collection starting...")
     try:
@@ -489,6 +503,23 @@ def cleanup_old_data_job():
         logger.error(f"Data cleanup failed: {e}")
 
 
+def refresh_market_holidays_job():
+    """Weekly job: refresh the NSE trading calendar in `market_holidays`.
+
+    NSE publishes the next year's calendar late in the current one and
+    occasionally adds an unscheduled closure mid-year, so this re-fetches
+    rather than being a one-off seed. Upsert-only — prior years are kept,
+    because the price-date verification needs them.
+    """
+    logger.info("⏰ Refreshing NSE trading holidays...")
+    try:
+        from collectors.nse_holidays_collector import collect_holidays
+        result = collect_holidays()
+        logger.info(f"NSE holidays: {result}")
+    except Exception as e:
+        logger.error(f"NSE holiday refresh failed: {e}")
+
+
 def verify_data_integrity_job():
     """Weekly job: check for data gaps and report issues."""
     logger.info("⏰ Running data integrity check...")
@@ -504,6 +535,29 @@ def verify_data_integrity_job():
             logger.warning("⚠️ No indicators calculated!")
     except Exception as e:
         logger.error(f"Data integrity check failed: {e}")
+
+    # Calendar-based date verification — the only way to tell a missed EOD
+    # collection apart from an exchange holiday.
+    try:
+        from analysis.trading_calendar import verify_price_dates
+        report = verify_price_dates(days=90)
+        status = report.get("status")
+        if status == "ok":
+            logger.info(
+                "✅ Price dates verified — %s trading days present through %s",
+                report.get("trading_days_present"), report.get("last_trading_day"))
+        elif status == "no_calendar":
+            logger.warning("⚠️ Price-date check skipped: %s", report.get("message"))
+        else:
+            logger.warning(
+                "⚠️ Price-date check [%s] — latest=%s expected=%s stale_by=%s "
+                "missing=%s partial=%s unexpected=%s",
+                status, report.get("latest_price_date"), report.get("last_trading_day"),
+                report.get("stale_by_days"), report.get("missing_dates"),
+                [p.get("date") for p in report.get("partial_dates", [])],
+                [u.get("date") for u in report.get("unexpected_dates", [])])
+    except Exception as e:
+        logger.error(f"Price-date verification failed: {e}")
 
 
 def generate_trade_signals_job(force: bool = False):
@@ -974,6 +1028,8 @@ def _add_all_jobs(scheduler):
 
     # WEEKLY JOBS — Sunday 8 PM IST
     scheduler.add_job(cleanup_old_data_job, CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="Asia/Kolkata"), id="cleanup", name="Weekly Data Cleanup", misfire_grace_time=7200, replace_existing=True)
+    # Refresh the NSE trading calendar before the integrity check reads it
+    scheduler.add_job(refresh_market_holidays_job, CronTrigger(day_of_week="sun", hour=19, minute=30, timezone="Asia/Kolkata"), id="market_holidays", name="NSE Trading Holidays Refresh", misfire_grace_time=7200, replace_existing=True)
     scheduler.add_job(verify_data_integrity_job, CronTrigger(day_of_week="sun", hour=20, minute=30, timezone="Asia/Kolkata"), id="integrity", name="Weekly Data Integrity Check", misfire_grace_time=7200, replace_existing=True)
     # Friday 22:00 — Retrain all 502 models → regenerate signals so Monday has fresh predictions
     # misfire_grace_time=28800 (8h) allows a delayed start if server was down at 22:00

@@ -23,6 +23,7 @@ Usage:
     python scripts/model_store.py upload            # encrypt + push everything (bootstrap / post-retrain)
     python scripts/model_store.py upload "<msg>" --models-only   # only final_models/ (retrain shard)
     python scripts/model_store.py upload "<msg>" --data-only     # only data files (finalize step)
+    python scripts/model_store.py delete SYM.NS ... # retire models dropped from the index
     python scripts/model_store.py sync              # pull + decrypt latest (server boot)
     python scripts/model_store.py history           # list commits (date, hash, message)
     python scripts/model_store.py sync <commit>     # restore the model set as of that commit
@@ -71,6 +72,33 @@ BATCH_SIZE = 75          # files per commit — one big commit 504s on HF's comm
 COMMIT_RETRIES = 3
 
 
+def _commit_batched(api, repo_id, ops: list, commit_message: str) -> str:
+    """Commit `ops` in BATCH_SIZE chunks, retrying each batch on failure."""
+    import time
+
+    batches = [ops[i : i + BATCH_SIZE] for i in range(0, len(ops), BATCH_SIZE)]
+    commit_url = ""
+    for i, batch in enumerate(batches, 1):
+        msg = f"{commit_message} [{i}/{len(batches)}]"
+        for attempt in range(1, COMMIT_RETRIES + 1):
+            try:
+                info = api.create_commit(
+                    repo_id=repo_id, operations=batch, commit_message=msg
+                )
+                commit_url = getattr(info, "commit_url", "") or commit_url
+                logger.info("committed batch %d/%d (%d files)", i, len(batches), len(batch))
+                break
+            except Exception as e:
+                if attempt == COMMIT_RETRIES:
+                    raise
+                wait = 10 * attempt
+                logger.warning(
+                    "batch %d attempt %d failed (%s) — retrying in %ds", i, attempt, e, wait
+                )
+                time.sleep(wait)
+    return commit_url
+
+
 def upload_all(commit_message: str = "model upload",
                include_models: bool = True,
                include_data: bool = True) -> str:
@@ -116,38 +144,58 @@ def upload_all(commit_message: str = "model upload",
         files = sorted(staging.rglob("*.enc"))
         if not files:
             raise RuntimeError("nothing to upload")
-        batches = [files[i : i + BATCH_SIZE] for i in range(0, len(files), BATCH_SIZE)]
-        commit_url = ""
-        for i, batch in enumerate(batches, 1):
-            ops = [
-                CommitOperationAdd(
-                    path_in_repo=p.relative_to(staging).as_posix(),
-                    path_or_fileobj=str(p),
-                )
-                for p in batch
-            ]
-            msg = f"{commit_message} [{i}/{len(batches)}]"
-            for attempt in range(1, COMMIT_RETRIES + 1):
-                try:
-                    info = api.create_commit(
-                        repo_id=repo_id, operations=ops, commit_message=msg
-                    )
-                    commit_url = getattr(info, "commit_url", "") or commit_url
-                    logger.info("committed batch %d/%d (%d files)", i, len(batches), len(batch))
-                    break
-                except Exception as e:
-                    if attempt == COMMIT_RETRIES:
-                        raise
-                    wait = 10 * attempt
-                    logger.warning(
-                        "batch %d attempt %d failed (%s) — retrying in %ds", i, attempt, e, wait
-                    )
-                    import time
-
-                    time.sleep(wait)
+        ops = [
+            CommitOperationAdd(
+                path_in_repo=p.relative_to(staging).as_posix(),
+                path_or_fileobj=str(p),
+            )
+            for p in files
+        ]
+        commit_url = _commit_batched(api, repo_id, ops, commit_message)
 
     logger.info("Uploaded %d models to %s (%s)", len(models), repo_id, commit_message)
     return commit_url
+
+
+def delete_models(symbols, commit_message: str = "retire de-indexed models") -> int:
+    """Remove models from the Hub for symbols that left the tracked universe.
+
+    upload_all() is add-only — the Hub keeps every file a commit doesn't touch —
+    so archiving a .pkl out of local final_models/ does NOT retire it in
+    production: sync_models() re-downloads it and generate_trades.py, which
+    enumerates final_models/*.pkl, keeps emitting signals for a stock that is no
+    longer in the index. This is the other half of that retirement.
+
+    Deletion is a commit like any other, so the model set stays recoverable —
+    `sync_models(revision=<pre-delete commit>)` restores it.
+
+    Returns the number of files deleted.
+    """
+    from huggingface_hub import CommitOperationDelete
+
+    api = _api()
+    repo_id = _repo_id(api)
+    present = set(api.list_repo_files(repo_id))
+
+    ops, deleted, absent = [], [], []
+    for s in symbols:
+        base = s if s.endswith(".NS") else f"{s}.NS"
+        path = f"models/{base}_final.pkl.enc"
+        if path in present:
+            ops.append(CommitOperationDelete(path_in_repo=path))
+            deleted.append(base)
+        else:
+            absent.append(base)
+
+    if absent:
+        logger.info("not on the Hub, nothing to delete: %s", absent)
+    if not ops:
+        logger.info("delete_models: nothing to do")
+        return 0
+
+    _commit_batched(api, repo_id, ops, commit_message)
+    logger.info("Deleted %d model(s) from %s: %s", len(deleted), repo_id, deleted)
+    return len(deleted)
 
 
 def sync_models(revision: Optional[str] = None) -> int:
@@ -193,6 +241,12 @@ if __name__ == "__main__":
         print(upload_all(commit_message=msg,
                          include_models=include_models,
                          include_data=include_data))
+    elif cmd == "delete":
+        syms = sys.argv[2:]
+        if not syms:
+            print("usage: model_store.py delete SYMBOL [SYMBOL ...]")
+            sys.exit(1)
+        print(f"{delete_models(syms)} model(s) deleted")
     elif cmd == "sync":
         rev = sys.argv[2] if len(sys.argv) > 2 else None
         print(f"{sync_models(revision=rev)} file(s) decrypted" + (f" @ {rev}" if rev else ""))

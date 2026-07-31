@@ -50,64 +50,21 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def _rules_signal(df: pd.DataFrame) -> Tuple[str, float, List[str]]:
-    """Rules-based fallback using RSI, MACD, BB, ADX, and delivery %."""
-    latest = df.iloc[-1]
-    reasons = ["Using rules-based fallback (no final model found)."]
-    bull, bear = 0, 0
-
-    rsi = latest.get("rsi_14")
-    if rsi is not None and not pd.isna(rsi):
-        if rsi < 30:   bull += 2; reasons.append(f"RSI oversold ({rsi:.1f})")
-        elif rsi > 70: bear += 2; reasons.append(f"RSI overbought ({rsi:.1f})")
-
-    macd_v = latest.get("macd")
-    macd_s = latest.get("macd_signal")
-    if macd_v is not None and macd_s is not None and not pd.isna(macd_v):
-        if macd_v > macd_s: bull += 1; reasons.append("MACD bullish crossover")
-        else:               bear += 1; reasons.append("MACD bearish crossover")
-
-    bb_pos = None
-    bb_u, bb_l = latest.get("bb_upper"), latest.get("bb_lower")
-    cl = latest.get("close")
-    if bb_u and bb_l and cl and (bb_u - bb_l) > 0:
-        bb_pos = (cl - bb_l) / (bb_u - bb_l)
-        if bb_pos < 0.2:  bull += 1; reasons.append(f"Price near BB lower ({bb_pos:.2f})")
-        elif bb_pos > 0.8: bear += 1; reasons.append(f"Price near BB upper ({bb_pos:.2f})")
-
-    adx = latest.get("adx_14")
-    trend_confirmed = adx is not None and not pd.isna(adx) and adx > 20
-
-    # Delivery % confirmation — institutional conviction filter
-    delivery_pct = latest.get("delivery_pct", 50.0)
-    if delivery_pct is not None and not pd.isna(delivery_pct):
-        delivery_ma5 = df["delivery_pct"].rolling(5).mean().iloc[-1] if "delivery_pct" in df.columns else 50.0
-        delivery_spike = delivery_pct > (delivery_ma5 * 1.3) if not pd.isna(delivery_ma5) else False
-        if delivery_pct > 65:
-            bull += 1
-            spike_note = " + spike" if delivery_spike else ""
-            reasons.append(f"High institutional delivery {delivery_pct:.1f}%{spike_note} (bullish conviction)")
-        elif delivery_pct < 30:
-            bear += 1
-            reasons.append(f"Low delivery {delivery_pct:.1f}% — speculative/distribution activity")
-        elif delivery_spike:
-            reasons.append(f"Delivery spike {delivery_pct:.1f}% vs 5d avg {delivery_ma5:.1f}% — watch for breakout")
-
-    net = bull - bear
-    strength = min(100.0, abs(net) / max(bull + bear, 1) * 100)
-    if net >= 2:   signal = "STRONG BUY" if (net >= 3 and trend_confirmed) else "BUY"
-    elif net <= -2: signal = "STRONG SELL" if (net <= -3 and trend_confirmed) else "SELL"
-    else:           signal = "HOLD"
-    return signal, round(strength, 1), reasons
-
-
 def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str]]:
     """
     Generate a trading signal for `symbol`.
 
-    Preferred path: load the final production artifact from final_models/,
-    run the full v4 feature pipeline, and predict. Falls back to a
-    rules-based system when no trained model is available.
+    Model-only: load the final production artifact from final_models/, run the
+    full v4 feature pipeline, and predict. There is deliberately NO rules-based
+    fallback — a symbol with no usable model returns HOLD.
+
+    The old fallback scored RSI/MACD/Bollinger/delivery votes whenever the .pkl
+    was missing, which meant a brand-new listing with a handful of bars produced
+    a real-looking BUY/SELL indistinguishable in the UI from a model signal. Its
+    strength figure was also misleading: strength = |bull-bear| / (bull+bear),
+    so a single indicator firing alone scored 100 — unanimity among one voter,
+    not confidence. Symbols without a model now stay HOLD until the weekly
+    retrain gives them one.
     """
     if df.empty or len(df) < 14:
         return "HOLD", 0.0, ["Insufficient data for analysis"]
@@ -204,9 +161,14 @@ def generate_signal(df: pd.DataFrame, symbol: str) -> Tuple[str, float, List[str
 
         except Exception as e:
             logger.error(f"Final model inference failed for {symbol}: {e}")
+            return "HOLD", 0.0, [f"Model inference failed for {symbol} — no signal"]
 
-    # ── 2. Rules-based fallback ────────────────────────────────────────────────
-    return _rules_signal(df)
+    # ── 2. No model → no signal ───────────────────────────────────────────────
+    # Not an error: newly added constituents sit here until the weekly retrain
+    # trains them. Strength is 0.0 so nothing downstream can read it as
+    # conviction.
+    logger.info("No final model for %s — returning HOLD (no rules fallback)", symbol)
+    return "HOLD", 0.0, ["No trained model available — awaiting weekly retrain"]
 
 
 def process_stock(symbol: str, days: int = 400, conn: Optional[Any] = None) -> Optional[Dict]:

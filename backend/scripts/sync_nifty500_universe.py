@@ -12,15 +12,25 @@ orphan rows with no token/price/model at all.
 
 This script re-syncs every layer of the universe from the NSE CSV, in order:
 
-    1. tokens        NSE CSV  -> data/angel_tokens.json   (Angel scrip master)
-    2. constituents  NSE CSV  -> nifty_constituents table (names + sectors)
-    3. prices        Angel One -> prices table            (chunked backfill)
-    4. indicators    prices    -> technical_indicators
-    5. train         prices    -> final_models/*.pkl      (gated, see below)
-    6. retire        archive models for names dropped from the index
-    7. report        final coverage summary
+    1. compare       what has to be ADDED and REMOVED, before touching anything
+    2. tokens        NSE CSV  -> data/angel_tokens.json   (Angel scrip master)
+    3. constituents  NSE CSV  -> nifty_constituents table (names + sectors)
+    4. prices        Angel One -> prices table            (chunked backfill)
+    5. indicators    prices    -> technical_indicators
+    6. news          GDELT     -> news_sentiment + FinBERT scoring
+    7. retire        archive dropped names AND delete them from the HF store
+    8. report        final coverage + add/remove reconciliation
 
 Steps are independent and re-runnable; use --steps to run a subset.
+
+It deliberately STOPS BEFORE MODEL TRAINING. Everything here prepares the
+inputs a model needs — tokens, prices, indicators, news/sentiment — and the
+weekly retrain (.github/workflows/weekly-retrain.yml) is what trains them.
+That workflow enumerates `SELECT DISTINCT symbol FROM prices`, so any symbol
+this script backfills is picked up on the next Friday run with no extra
+wiring, and model_training already skips symbols with < 100 training rows.
+Training here as well would just fit the same models twice, on the same data,
+by two different code paths.
 
 Angel One quirks this script works around
 -----------------------------------------
@@ -41,21 +51,31 @@ Angel One quirks this script works around
   model_training.apply_corporate_action_adjustments() detects the ex-date price
   ratio and skips symbols Angel already fixed, so adjustment stays in one place.
 
-Training gate
+News backfill
 -------------
-A symbol is only trained if it has >= --min-train-rows (default 100) daily bars
-at or before TRAIN_END. That mirrors model_training's own `len(Xtr) < 100`
-skip, but applied up-front so recent IPOs don't burn a training slot to fail.
-Many of the 35 new names are 2025-26 listings with far less than that.
+New constituents have no news history, so their sentiment features are empty
+until GDELT is backfilled. bootstrap_gdelt(only_missing=True) targets exactly
+the symbols with no news rows, and score_pending_news() then runs FinBERT over
+whatever is unscored. GDELT is rate-limited to one request per 12s per
+(symbol, month), so this is the slowest step by far — budget hours, not
+minutes, and tune the window with --news-from-year.
+
+Note historical_news_collector.backfill_stock_sentiment() is NOT used: it
+calls conn.execute() with INSERT OR REPLACE (SQLite syntax, and psycopg2
+connections have no .execute()) and targets news_daily_sentiment, which is a
+continuous aggregate and cannot be inserted into. The GDELT collector writes
+through insert_news() into the news_sentiment hypertable, and the aggregate
+refreshes itself hourly.
 
 Usage
 -----
     cd backend && source venv/bin/activate
 
     python scripts/sync_nifty500_universe.py --dry-run          # plan only
+    python scripts/sync_nifty500_universe.py --steps compare    # just the diff
     python scripts/sync_nifty500_universe.py                    # all steps
     python scripts/sync_nifty500_universe.py --steps prices,indicators
-    python scripts/sync_nifty500_universe.py --steps train --min-train-rows 150
+    python scripts/sync_nifty500_universe.py --steps news --news-from-year 2023
 
 Writes to the DB in .env (prod) unless APP_ENV=test is set.
 """
@@ -106,7 +126,12 @@ RATE_LIMIT_SECS = 3.0          # historical API; see module docstring
 MAX_RETRIES = 5
 BACKOFF_BASE_SECS = 10
 
-ALL_STEPS = ["tokens", "constituents", "prices", "indicators", "train", "retire", "report"]
+ALL_STEPS = ["compare", "tokens", "constituents", "prices", "indicators",
+             "news", "retire", "report"]
+
+# GDELT: 1 request per (symbol, month). Two years keeps a full-universe news
+# backfill inside a CI job's 6h cap; older news barely moves a sentiment feature.
+NEWS_FROM_YEAR_DEFAULT = date.today().year - 2
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -278,11 +303,113 @@ def db_row_count_before(symbol: str, cutoff: str) -> int:
         release_connection(conn)
 
 
-# ── Step 1: tokens ────────────────────────────────────────────────────────────
+# ── Step 1: compare ───────────────────────────────────────────────────────────
+
+def _norm(sym: str) -> str:
+    """Canonical '.NS' form. final_models holds BOTH conventions on disk
+    ({SYM}_final.pkl and {SYM}.NS_final.pkl — see the dedup note in
+    generate_trades.py), so comparing raw filenames reports every bare-named
+    model as a stranger that must be removed."""
+    return sym if sym.endswith(".NS") else f"{sym}.NS"
+
+
+def _is_stock(sym: str) -> bool:
+    """False for the non-stock rows that legitimately live in these tables:
+    index symbols (^NSEI, ^BSESN, ^INDIAVIX, ^CRSLDX) in prices, and the
+    market-wide news buckets (MARKET:RBI, MARKET:SEBI, ...) in news_sentiment.
+    Treating them as constituents would flag them for removal forever."""
+    return not sym.startswith("^") and not sym.startswith("MARKET:")
+
+
+def _universe_layers() -> List[Tuple[str, set, bool]]:
+    """(layer name, symbols it holds, whether extras are actually removed).
+
+    `enforced=False` layers keep history for de-indexed names on purpose —
+    prices/indicators/news cost little and stay useful for backtests, so their
+    "to REMOVE" count is informational, not a to-do list. Only the constituent
+    list, the token map and the model set are trimmed to the index.
+    """
+    tokens = {_norm(k) for k in load_tokens()} if os.path.exists(TOKENS_FILE) else set()
+    models = {_norm(f.replace("_final.pkl", "")) for f in os.listdir(FINAL_DIR)
+              if f.endswith("_final.pkl")} if os.path.isdir(FINAL_DIR) else set()
+
+    conn = get_connection()
+    try:
+        cur = _execute(conn, "SELECT symbol FROM nifty_constituents")
+        consts = {r[0] for r in cur.fetchall()}
+        cur = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d'")
+        px = {r[0] for r in cur.fetchall()}
+        cur = _execute(conn, "SELECT DISTINCT symbol FROM technical_indicators")
+        inds = {r[0] for r in cur.fetchall()}
+        cur = _execute(conn, "SELECT DISTINCT symbol FROM news_sentiment WHERE symbol IS NOT NULL")
+        news = {r[0] for r in cur.fetchall()}
+    finally:
+        release_connection(conn)
+
+    return [
+        ("nifty_constituents", consts, True),
+        ("angel_tokens.json", tokens, True),
+        ("final_models", models, True),
+        ("prices", px, False),
+        ("technical_indicators", inds, False),
+        ("news_sentiment", news, False),
+    ]
+
+
+def step_compare(nse: List[Dict], label: str = "before") -> Dict:
+    """What has to be ADDED and what has to be REMOVED, per layer.
+
+    Run before any writes so the plan is on record, and again at the end so the
+    two can be diffed - a clean second pass is the proof the sync worked.
+    """
+    n = 1 if label == "before" else len(ALL_STEPS)
+    step_banner(n, "compare", f"NSE list vs tracked universe ({label})")
+
+    csv_syms = {s["symbol"] for s in nse}
+    layers = _universe_layers()
+
+    logger.info(f"NSE Nifty 500 list: {len(csv_syms)} symbols")
+    logger.info("")
+    logger.info(f"  {'layer':<22} {'have':>6} {'to ADD':>8} {'to REMOVE':>10}   {'action'}")
+    logger.info(f"  {'-' * 64}")
+
+    out = {}
+    for name, have, enforced in layers:
+        have_stocks = {_norm(s) for s in have if _is_stock(s)}
+        to_add = sorted(csv_syms - have_stocks)
+        to_remove = sorted(have_stocks - csv_syms)
+        out[name] = {"to_add": to_add, "to_remove": to_remove,
+                     "have": len(have_stocks), "enforced": enforced}
+        note = "trimmed to index" if enforced else "history kept"
+        logger.info(f"  {name:<22} {len(have_stocks):>6} {len(to_add):>8} "
+                    f"{len(to_remove):>10}   {note}")
+
+    for name, d in out.items():
+        if d["to_add"]:
+            logger.info("")
+            logger.info(f"  {name} — ADD ({len(d['to_add'])}): "
+                        f"{[s.replace('.NS', '') for s in d['to_add']]}")
+        if d["to_remove"] and d["enforced"]:
+            logger.info(f"  {name} — REMOVE ({len(d['to_remove'])}): "
+                        f"{[s.replace('.NS', '') for s in d['to_remove']]}")
+
+    # Only enforced layers count toward "in sync" — de-indexed price/indicator/
+    # news history is retained on purpose and would otherwise never reach zero.
+    enf = [d for d in out.values() if d["enforced"]]
+    total_add = len(set().union(*[set(d["to_add"]) for d in enf]) or set())
+    total_remove = len(set().union(*[set(d["to_remove"]) for d in enf]) or set())
+    logger.info("")
+    logger.info(f"  enforced layers — to add: {total_add}  ·  to remove: {total_remove}")
+    if label == "after" and total_add == 0 and total_remove == 0:
+        logger.info("  universe is fully in sync")
+    return out
+
+
+# ── Step 2: tokens ────────────────────────────────────────────────────────────
 
 def step_tokens(nse: List[Dict], dry_run: bool) -> Dict:
     """Resolve every CSV symbol to an Angel instrument token, rewrite angel_tokens.json."""
-    step_banner(1, "tokens", "NSE CSV -> data/angel_tokens.json")
+    step_banner(2, "tokens", "NSE CSV -> data/angel_tokens.json")
 
     logger.info("Downloading Angel One scrip master...")
     resp = requests.get(SCRIP_MASTER_URL, timeout=180, headers={"User-Agent": "Mozilla/5.0"})
@@ -336,11 +463,11 @@ def step_tokens(nse: List[Dict], dry_run: bool) -> Dict:
     return {"resolved": len(token_map), "missing": missing, "added": added, "removed": removed}
 
 
-# ── Step 2: constituents ──────────────────────────────────────────────────────
+# ── Step 3: constituents ──────────────────────────────────────────────────────
 
 def step_constituents(nse: List[Dict], dry_run: bool) -> Dict:
     """Make nifty_constituents exactly match the NSE list (fixes sectors/names, drops orphans)."""
-    step_banner(2, "constituents", "NSE CSV -> nifty_constituents")
+    step_banner(3, "constituents", "NSE CSV -> nifty_constituents")
 
     conn = get_connection()
     try:
@@ -406,11 +533,11 @@ def step_constituents(nse: List[Dict], dry_run: bool) -> Dict:
     return {"added": to_add, "dropped": to_drop, "sector_fix": sector_fix, "name_fix": name_fix}
 
 
-# ── Step 3: prices ────────────────────────────────────────────────────────────
+# ── Step 4: prices ────────────────────────────────────────────────────────────
 
 def step_prices(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None) -> Dict:
     """Backfill full available history for constituents with no price data."""
-    step_banner(3, "prices", "Angel One -> prices")
+    step_banner(4, "prices", "Angel One -> prices")
 
     tokens = load_tokens()
     have = db_symbols_with_prices()
@@ -469,11 +596,11 @@ def step_prices(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None
     return {"backfilled": results, "failed": failed}
 
 
-# ── Step 4: indicators ────────────────────────────────────────────────────────
+# ── Step 5: indicators ────────────────────────────────────────────────────────
 
 def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None) -> Dict:
     """Compute technical indicators for constituents that don't have any yet."""
-    step_banner(4, "indicators", "prices -> technical_indicators")
+    step_banner(5, "indicators", "prices -> technical_indicators")
 
     conn = get_connection()
     try:
@@ -519,81 +646,82 @@ def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = 
     return {"ok": ok, "failed": failed}
 
 
-# ── Step 5: train ─────────────────────────────────────────────────────────────
+# ── Step 6: news ──────────────────────────────────────────────────────────────
 
-def step_train(nse: List[Dict], dry_run: bool, min_rows: int,
-               only: Optional[List[str]] = None) -> Dict:
-    """Train models for constituents that have none — gated on history depth."""
-    from scripts.retrain_walk_forward import TRAIN_END, TEST_START, train_one
+def step_news(nse: List[Dict], dry_run: bool, from_year: int,
+              score_only: bool = False) -> Dict:
+    """Backfill GDELT news for constituents with none, then score it with FinBERT.
 
-    step_banner(5, "train", f"gate: >= {min_rows} daily bars on/before {TRAIN_END}")
-    logger.info(f"Walk-forward split: train -> {TRAIN_END} | test {TEST_START} -> present")
+    Sentiment is one of the 96 model features, so a symbol with no news trains
+    on a hole. bootstrap_gdelt(only_missing=True) reads angel_tokens.json (which
+    step 2 has already rewritten to the current 500) and skips any symbol that
+    already has news rows - so it naturally targets exactly the new names.
 
-    have_px = db_symbols_with_prices()
-    existing_models = {f.replace("_final.pkl", "") for f in os.listdir(FINAL_DIR)
-                       if f.endswith("_final.pkl")}
-    targets = [s["symbol"] for s in nse
-               if s["symbol"] in have_px and s["symbol"] not in existing_models]
-    if only:
-        targets = [t for t in targets if t in only or t.replace(".NS", "") in only]
+    Slow by construction: GDELT is throttled to one request per 12s per
+    (symbol, month), so cost is roughly symbols x months x 12s. --news-from-year
+    is the knob that keeps that bounded.
+    """
+    step_banner(6, "news", f"GDELT from {from_year} -> news_sentiment + FinBERT")
 
-    logger.info(f"Constituents without a model: {len(targets)}")
-    if not targets:
-        logger.info("Nothing to train")
-        return {"trained": [], "skipped": [], "failed": []}
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+                       "SELECT DISTINCT symbol FROM news_sentiment WHERE symbol IS NOT NULL")
+        have_news = {r[0] for r in cur.fetchall()}
+        cur = _execute(conn, "SELECT COUNT(*) FROM news_sentiment WHERE sentiment IS NULL")
+        unscored = cur.fetchone()[0]
+    finally:
+        release_connection(conn)
 
-    eligible, skipped = [], []
-    for sym in sorted(targets):
-        n = db_row_count_before(sym, TRAIN_END)
-        (eligible if n >= min_rows else skipped).append((sym, n))
+    missing = sorted({s["symbol"] for s in nse} - have_news)
+    months = max(0, (date.today().year - from_year) * 12 + date.today().month)
+    est_hours = len(missing) * months * 12 / 3600
 
-    logger.info(f"  eligible ({len(eligible)}):")
-    for sym, n in eligible:
-        logger.info(f"      {sym:18} {n:5} bars <= {TRAIN_END}")
-    logger.info(f"  skipped — insufficient history ({len(skipped)}):")
-    for sym, n in skipped:
-        logger.info(f"      {sym:18} {n:5} bars <= {TRAIN_END}  (need {min_rows})")
+    logger.info(f"Constituents with news : {len(have_news & {s['symbol'] for s in nse})}")
+    logger.info(f"Constituents missing   : {len(missing)}")
+    logger.info(f"Unscored headlines     : {unscored:,}")
+    if missing:
+        logger.info(f"  {[s.replace('.NS', '') for s in missing]}")
+        logger.info(f"  estimated GDELT time: ~{est_hours:.1f}h "
+                    f"({len(missing)} symbols x ~{months} months x 12s)")
 
     if dry_run:
-        logger.info("DRY-RUN: no training")
-        return {"trained": [], "skipped": skipped, "failed": []}
+        logger.info("DRY-RUN: no GDELT fetch, no scoring")
+        return {"collected": [], "scored": 0}
 
-    trained, failed, results = [], [], []
-    for idx, (sym, n) in enumerate(eligible, 1):
-        logger.info(f"[{idx}/{len(eligible)}] training {sym} ({n} bars)...")
+    collected = []
+    if missing and not score_only:
+        from collectors.gdelt_collector import bootstrap_gdelt
         try:
-            r = train_one(sym)
-            results.append(r)
-            if r.get("status") == "ok":
-                trained.append(sym)
-                logger.info(f"    OK  {r.get('best_model')} {r.get('horizon')} "
-                            f"acc={r.get('accuracy', 0):.1%} prec={r.get('precision', 0):.1%} "
-                            f"[{r.get('quality_tier')}]")
-            else:
-                failed.append(sym)
-                logger.warning(f"    {r.get('status')}: {str(r.get('error', ''))[:100]}")
+            bootstrap_gdelt(from_year=from_year, from_month=1, only_missing=True)
+            collected = missing
         except Exception as e:
-            failed.append(sym)
-            logger.error(f"    FAILED: {str(e)[:120]}")
+            logger.error(f"GDELT bootstrap failed: {str(e)[:150]}")
+    elif score_only:
+        logger.info("--news-score-only: skipping GDELT fetch")
 
-    # Metrics belong in the DB, not retrain_results.csv (see CLAUDE.md).
-    if results:
+    # FinBERT over everything still unscored, in batches until drained.
+    from collectors.gdelt_collector import score_pending_news
+    total_scored = 0
+    while True:
         try:
-            from database.db import insert_model_training_stats
-            run_id = f"universe_sync_{datetime.now():%Y%m%d_%H%M%S}"
-            written = insert_model_training_stats(run_id, results)
-            logger.info(f"Recorded {written} training rows in model_training_stats (run {run_id})")
+            n = score_pending_news(batch_limit=2000)
         except Exception as e:
-            logger.warning(f"Could not record training stats: {str(e)[:100]}")
+            logger.error(f"Scoring failed: {str(e)[:150]}")
+            break
+        if not n:
+            break
+        total_scored += n
+        logger.info(f"  scored {n} headlines (running total {total_scored:,})")
 
-    logger.info(f"Training complete: {len(trained)} trained, {len(skipped)} gated out, "
-                f"{len(failed)} failed")
-    return {"trained": trained, "skipped": skipped, "failed": failed}
+    logger.info(f"News step complete: {len(collected)} symbols fetched, "
+                f"{total_scored:,} headlines scored")
+    return {"collected": collected, "scored": total_scored}
 
 
-# ── Step 6: retire ────────────────────────────────────────────────────────────
+# ── Step 7: retire ────────────────────────────────────────────────────────────
 
-def step_retire(nse: List[Dict], dry_run: bool, push_remote: bool = False) -> Dict:
+def step_retire(nse: List[Dict], dry_run: bool, push_remote: bool = True) -> Dict:
     """Archive models for symbols no longer in the index.
 
     generate_trades.py enumerates final_models/*.pkl, so a leftover .pkl keeps a
@@ -601,13 +729,13 @@ def step_retire(nse: List[Dict], dry_run: bool, push_remote: bool = False) -> Di
     it locally. Price history is intentionally left in the DB - it costs little
     and stays available for backtests.
 
-    LOCAL ARCHIVING IS ONLY HALF THE JOB. model_store.upload_all() is add-only,
-    so the encrypted copies stay on the Hub and sync_models() re-downloads them
-    onto production. --retire-remote also deletes them from the Hub (recoverable
-    - it's a commit, so sync_models(revision=...) restores). Without that flag
-    this step warns and leaves production untouched.
+    LOCAL ARCHIVING IS ONLY HALF THE JOB, so remote deletion is the DEFAULT.
+    model_store.upload_all() is add-only, so an encrypted copy left on the Hub
+    is re-downloaded by sync_models() and production keeps trading a stock that
+    left the index. Deletion is a commit, so it stays recoverable via
+    sync_models(revision=<pre-delete>). --no-retire-remote opts out.
     """
-    step_banner(6, "retire", "archive models for de-indexed names")
+    step_banner(7, "retire", "archive + delete de-indexed models from the HF store")
 
     csv_syms = {s["symbol"] for s in nse}
     pkls = [f for f in os.listdir(FINAL_DIR) if f.endswith("_final.pkl")]
@@ -638,64 +766,44 @@ def step_retire(nse: List[Dict], dry_run: bool, push_remote: bool = False) -> Di
         n = delete_models(symbols, commit_message="retire names dropped from Nifty 500")
         logger.info(f"Deleted {n} model(s) from the HF model repo")
     elif stale:
-        logger.warning("LOCAL ONLY — these models remain on the HF Hub and will be "
-                       "re-synced onto production, which will keep generating signals "
-                       "for them. Re-run with --retire-remote (or: python "
-                       f"scripts/model_store.py delete {' '.join(symbols[:3])} ...) to "
-                       "complete retirement.")
+        logger.warning("--no-retire-remote: LOCAL ONLY — these models remain on the "
+                       "HF Hub and will be re-synced onto production, which will keep "
+                       "generating signals for them. Finish with: python "
+                       f"scripts/model_store.py delete {' '.join(symbols[:3])} ...")
 
     return {"retired": stale, "remote_deleted": bool(stale and push_remote)}
 
 
-# ── Step 7: report ────────────────────────────────────────────────────────────
+# ── Step 8: report ────────────────────────────────────────────────────────────
 
 def step_report(nse: List[Dict]) -> Dict:
-    """Final coverage across every layer of the universe."""
-    step_banner(7, "report", "coverage")
+    """Closing comparison — the same add/remove diff as step 1, run again.
 
-    csv_syms = {s["symbol"] for s in nse}
-    tokens = {f"{k}.NS" for k in load_tokens()} if os.path.exists(TOKENS_FILE) else set()
-    have_px = db_symbols_with_prices()
-    models = {f.replace("_final.pkl", "") for f in os.listdir(FINAL_DIR) if f.endswith("_final.pkl")}
-    models |= {m + ".NS" for m in models if not m.endswith(".NS")}
+    Deliberately the identical calculation rather than a separate "coverage"
+    view: if step 1 said ADD 35 / REMOVE 33 and step 8 says ADD 0 / REMOVE 0,
+    that pair IS the proof the sync did what it set out to do. A differently
+    computed summary could agree while the underlying sets still disagreed.
+    """
+    out = step_compare(nse, label="after")
 
-    conn = get_connection()
-    try:
-        cur = _execute(conn, "SELECT symbol FROM nifty_constituents")
-        consts = {r[0] for r in cur.fetchall()}
-        cur = _execute(conn, "SELECT DISTINCT symbol FROM technical_indicators")
-        inds = {r[0] for r in cur.fetchall()}
-    finally:
-        release_connection(conn)
+    enf = [d for d in out.values() if d["enforced"]]
+    leftover_add = sorted(set().union(*[set(d["to_add"]) for d in enf]) or set())
+    leftover_rm = sorted(set().union(*[set(d["to_remove"]) for d in enf]) or set())
 
-    layers = [
-        ("nifty_constituents", consts),
-        ("angel_tokens.json", tokens),
-        ("prices", have_px),
-        ("technical_indicators", inds),
-        ("final_models", models),
-    ]
-
-    logger.info(f"NSE Nifty 500 list: {len(csv_syms)} symbols")
     logger.info("")
-    logger.info(f"  {'layer':<22} {'covered':>9} {'missing':>9} {'extra':>7}")
-    logger.info(f"  {'-' * 50}")
-    summary = {}
-    for name, have in layers:
-        covered = len(csv_syms & have)
-        missing = sorted(csv_syms - have)
-        extra = sorted(have - csv_syms)
-        # indices (^NSEI etc.) are legitimately outside the constituent list
-        extra = [e for e in extra if not e.startswith("^")]
-        summary[name] = {"covered": covered, "missing": missing, "extra": extra}
-        logger.info(f"  {name:<22} {covered:>4}/{len(csv_syms):<4} {len(missing):>9} {len(extra):>7}")
-
-    for name, d in summary.items():
-        if d["missing"]:
-            logger.info("")
-            logger.info(f"  {name} missing ({len(d['missing'])}): "
-                        f"{[m.replace('.NS', '') for m in d['missing']]}")
-    return summary
+    if not leftover_add and not leftover_rm:
+        logger.info("RESULT: every layer matches the NSE Nifty 500 list exactly.")
+    else:
+        logger.warning(f"RESULT: {len(leftover_add)} symbol(s) still to add, "
+                       f"{len(leftover_rm)} still to remove.")
+        if leftover_add:
+            logger.warning(f"  still missing somewhere: "
+                           f"{[s.replace('.NS', '') for s in leftover_add]}")
+        if leftover_rm:
+            logger.warning(f"  still present somewhere: "
+                           f"{[s.replace('.NS', '') for s in leftover_rm]}")
+        logger.info("  (final_models gaps are expected until the weekly retrain runs)")
+    return out
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -707,17 +815,23 @@ def main():
     p.add_argument("--steps", default=",".join(ALL_STEPS),
                    help=f"comma-separated subset of: {','.join(ALL_STEPS)}")
     p.add_argument("--dry-run", action="store_true", help="plan only, no writes")
-    p.add_argument("--min-train-rows", type=int, default=100,
-                   help="minimum daily bars on/before TRAIN_END to train (default 100)")
     p.add_argument("--symbols", nargs="+", default=None,
-                   help="restrict prices/indicators/train to these symbols")
+                   help="restrict prices/indicators to these symbols")
     p.add_argument("--rate-limit", type=float, default=RATE_LIMIT_SECS,
                    help=f"seconds between Angel historical calls (default {RATE_LIMIT_SECS}). "
                         "Angel's quota tightens under sustained load — raise this for a "
                         "retry pass over symbols that failed with 'exceeding access rate'")
-    p.add_argument("--retire-remote", action="store_true",
-                   help="step 6: also delete retired models from the HF model repo "
-                        "(without this, retirement is local-only and production keeps them)")
+    p.add_argument("--news-from-year", type=int, default=NEWS_FROM_YEAR_DEFAULT,
+                   help=f"first year of GDELT news to backfill (default "
+                        f"{NEWS_FROM_YEAR_DEFAULT}). Cost is symbols x months x 12s, "
+                        "so an earlier year gets expensive fast")
+    p.add_argument("--news-score-only", action="store_true",
+                   help="step 6: skip the GDELT fetch, only run FinBERT over "
+                        "headlines already collected but unscored")
+    p.add_argument("--no-retire-remote", action="store_true",
+                   help="step 7: keep retired models on the HF store. Retirement is "
+                        "then LOCAL ONLY and production will re-sync and keep trading "
+                        "the de-indexed stocks")
     args = p.parse_args()
 
     steps = [s.strip() for s in args.steps.split(",") if s.strip()]
@@ -747,6 +861,8 @@ def main():
 
     t0 = time.time()
     out = {}
+    if "compare" in steps:
+        out["compare_before"] = step_compare(nse, label="before")
     if "tokens" in steps:
         out["tokens"] = step_tokens(nse, args.dry_run)
     if "constituents" in steps:
@@ -755,10 +871,11 @@ def main():
         out["prices"] = step_prices(nse, args.dry_run, args.symbols)
     if "indicators" in steps:
         out["indicators"] = step_indicators(nse, args.dry_run, args.symbols)
-    if "train" in steps:
-        out["train"] = step_train(nse, args.dry_run, args.min_train_rows, args.symbols)
+    if "news" in steps:
+        out["news"] = step_news(nse, args.dry_run, args.news_from_year,
+                                args.news_score_only)
     if "retire" in steps:
-        out["retire"] = step_retire(nse, args.dry_run, args.retire_remote)
+        out["retire"] = step_retire(nse, args.dry_run, not args.no_retire_remote)
     if "report" in steps:
         out["report"] = step_report(nse)
 

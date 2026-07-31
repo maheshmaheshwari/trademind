@@ -11,13 +11,23 @@
 # purpose — NSE serves 403 to unattended datacentre clients, so a fetch step
 # would fail in CI in a way that looks like "the index is unchanged".
 #
-# What it does (scripts/sync_nifty500_universe.py, 7 steps):
-#   tokens -> constituents -> prices -> indicators -> train -> retire -> report
+# What it does (scripts/sync_nifty500_universe.py, 8 steps):
+#   compare -> tokens -> constituents -> prices -> indicators -> news
+#           -> retire -> report
 #
-# Models are pulled from the encrypted HF store first and pushed back after,
-# because the script decides what to train and what to retire by looking at
-# final_models/ — on a bare runner that directory is empty, which would make
-# step 5 try to train all 500 symbols and step 6 find nothing to retire.
+# It STOPS BEFORE TRAINING. This workflow only prepares model inputs; the
+# Friday weekly-retrain job trains them. That job enumerates
+# `SELECT DISTINCT symbol FROM prices`, so anything backfilled here is picked
+# up on the next run with no extra wiring.
+#
+# Models are pulled from the encrypted HF store first because the retire step
+# decides what to archive by looking at final_models/ — on a bare runner that
+# directory is empty and it would find nothing to retire. Retirement then
+# deletes those models from the store too, so production stops trading names
+# that left the index.
+#
+# The news step is the long pole: GDELT allows one request per 12s per
+# (symbol, month), so a large intake can run for hours. news_from_year bounds it.
 #
 # Secrets required: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD,
 # ANGEL_API_KEY, ANGEL_CLIENT_ID, ANGEL_MPIN (or ANGEL_PASSWORD),
@@ -30,30 +40,25 @@ on:
       steps:
         description: 'Steps to run (comma-separated)'
         required: false
-        default: 'tokens,constituents,prices,indicators,train,retire,report'
+        default: 'compare,tokens,constituents,prices,indicators,news,retire,report'
       dry_run:
         description: 'Plan only — no DB writes, no Angel calls, no uploads'
         type: boolean
         required: false
         default: false
-      min_train_rows:
-        description: 'Minimum daily bars on/before TRAIN_END to train a symbol'
-        required: false
-        default: '100'
       rate_limit:
         description: 'Seconds between Angel historical calls (raise if rate-limited)'
         required: false
         default: '3.0'
-      retire_remote:
-        description: 'Also delete de-indexed models from the HF store (real retirement)'
+      news_from_year:
+        description: 'First year of GDELT news to backfill (blank = 2 years back)'
+        required: false
+        default: ''
+      no_retire_remote:
+        description: 'Keep de-indexed models on the HF store (retire locally only)'
         type: boolean
         required: false
         default: false
-      regenerate_signals:
-        description: 'Regenerate trade signals after the sync'
-        type: boolean
-        required: false
-        default: true
 
 # Never overlap with the Friday retrain — both write final_models/ and the
 # encrypted store, and an interleaved upload would mix two model sets.
@@ -98,35 +103,32 @@ jobs:
           pip install -r requirements.txt
 
       # Populates final_models/ and data/angel_tokens.json. Without this the
-      # train step sees zero existing models and the retire step sees nothing
-      # to archive — see the header note.
+      # retire step sees nothing to archive — see the header note.
       - name: Sync model set from the encrypted store
         run: python scripts/model_store.py sync
-
-      - name: Show current universe drift (dry-run report)
-        run: python scripts/sync_nifty500_universe.py --steps report
 
       - name: Sync universe
         run: |
           python scripts/sync_nifty500_universe.py \
             --steps '${{ inputs.steps }}' \
-            --min-train-rows '${{ inputs.min_train_rows }}' \
             --rate-limit '${{ inputs.rate_limit }}' \
+            ${{ inputs.news_from_year && format('--news-from-year {0}', inputs.news_from_year) || '' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }} \
-            ${{ inputs.retire_remote && '--retire-remote' || '' }}
+            ${{ inputs.no_retire_remote && '--no-retire-remote' || '' }}
 
-      # Models the runner just trained, plus the regenerated 500-symbol token
-      # map, only exist on this runner until they are pushed. data/** and
-      # final_models/** are excluded from the Space deploy, so the store is the
-      # only path to production.
-      - name: Push models + token map to the store
+      # Only the token map needs pushing — no models are trained here, and the
+      # retire step already deleted the de-indexed ones from the store.
+      # data/** is excluded from the Space deploy, so this is the only path
+      # by which production sees the regenerated 500-symbol map.
+      - name: Push token map to the store
         if: ${{ !inputs.dry_run }}
-        run: python scripts/model_store.py upload "nifty 500 universe sync (run ${{ github.run_id }})"
+        run: python scripts/model_store.py upload "nifty 500 universe sync (run ${{ github.run_id }})" --data-only
 
-      - name: Regenerate trade signals
-        if: ${{ !inputs.dry_run && inputs.regenerate_signals }}
-        run: python scripts/generate_trades.py
-
+      # Signals are deliberately NOT regenerated here — weekly-retrain.yml's
+      # finalize job runs generate_trades.py after training, and that is the
+      # single place signals are produced. Consequence to be aware of: rows for
+      # the retired names stay in trade_signals until that Friday run, even
+      # though their models are already gone from the store.
       - name: Restart the Space to pick up the new universe
         if: ${{ !inputs.dry_run }}
         run: |

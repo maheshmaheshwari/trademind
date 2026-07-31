@@ -30,7 +30,7 @@ _TEST_TABLES = [
     "prices", "technical_indicators", "trade_signals", "news_sentiment",
     "notifications", "notification_preferences", "watchlist", "risk_settings",
     "portfolio_stocks", "portfolio_sectors", "portfolios", "users",
-    "model_training_stats",
+    "model_training_stats", "market_holidays",
 ]
 
 
@@ -58,6 +58,10 @@ def clean_db():
         conn.commit()
     finally:
         release_connection(conn)
+    # market_holidays is cached in-process; truncating the table behind the
+    # cache's back would leak one test's calendar into the next.
+    from database.db import clear_holiday_cache
+    clear_holiday_cache()
     yield
 
 

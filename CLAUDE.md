@@ -90,6 +90,41 @@ Key functions: `get_connection()`, `init_database()`, `get_db_stats()`, `get_tra
 
 ---
 
+## Trading Calendar (NSE holidays)
+
+`market_holidays` holds the NSE trading calendar, loaded by
+`collectors/nse_holidays_collector.py` from the API behind
+[nseindia.com/resources/exchange-communication-holidays](https://www.nseindia.com/resources/exchange-communication-holidays)
+(`/api/holiday-master?type=trading`, segment `CM` = equity). Refreshed weekly by
+the `market_holidays` scheduler job (Sun 19:30 IST).
+
+**The feed only ever returns the current calendar year**, so rows accumulate
+year by year — the upsert never deletes, and nothing else should either:
+prior years are what let the price-date check tell a missed EOD collection
+apart from a genuine exchange holiday.
+
+`analysis/trading_calendar.py` is the single source of truth for "was the
+market open on date X":
+
+- `is_trading_day()` / `previous_trading_day()` / `next_trading_day()` — a
+  trading day is a weekday not in `market_holidays`.
+- `last_expected_trading_day()` — the newest date `prices` should already have
+  a bar for; today only counts after the 15:35 IST EOD window.
+- `verify_price_dates(days=N)` — expected trading days vs dates actually in
+  `prices`. Reports `missing_dates`, `partial_dates` (day collected for far
+  fewer symbols than usual), `unexpected_dates` (bars dated on a holiday/weekend
+  → the source misdated a candle), and `stale_by_days`. Years with no holiday
+  rows are reported as `uncovered_years` and deliberately **not** judged —
+  without the calendar every real holiday reads as a false gap.
+
+Consumers: `GET /api/market/holidays` and `GET /api/market/data-freshness`
+(banner + drawer in `frontend/src/components/MarketBanner.tsx`),
+`GET /api/market/status` (`session: "holiday"`), the weekly
+`verify_data_integrity_job`, and `collect_eod_data_job`, which skips the whole
+chain on a holiday.
+
+---
+
 ## Data Sources
 
 **All price data (OHLCV) comes exclusively from Angel One SmartAPI** — never Yahoo Finance, NSE direct, or any other provider.
@@ -157,6 +192,8 @@ Key routes:
 - `GET /api/portfolio` — portfolios
 - `POST /api/trades/execute` — place paper/live trade
 - `GET /api/market` — market overview
+- `GET /api/market/holidays` — NSE trading calendar (+ next holiday, today's status)
+- `GET /api/market/data-freshness` — price dates verified against that calendar
 - `POST /auth/login` / `POST /auth/register`
 
 ---

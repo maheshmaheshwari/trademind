@@ -25,6 +25,7 @@ Usage:
     python scripts/model_store.py upload "<msg>" --data-only     # only data files (finalize step)
     python scripts/model_store.py delete SYM.NS ... # retire models dropped from the index
     python scripts/model_store.py sync              # pull + decrypt latest (server boot)
+    python scripts/model_store.py sync --data-only  # just data/ — skips ~250MB of models
     python scripts/model_store.py history           # list commits (date, hash, message)
     python scripts/model_store.py sync <commit>     # restore the model set as of that commit
                                                     # (pin final-batch commits, i.e. "[N/N]")
@@ -198,13 +199,18 @@ def delete_models(symbols, commit_message: str = "retire de-indexed models") -> 
     return len(deleted)
 
 
-def sync_models(revision: Optional[str] = None) -> int:
+def sync_models(revision: Optional[str] = None, only: Optional[str] = None) -> int:
     """Download the encrypted store and decrypt into final_models/ and data/.
 
     Idempotent and incremental: snapshot_download reuses its local cache, and
     a file is only decrypted when the target is missing or the ciphertext is
     newer. Pass `revision` (a commit hash) to restore a past model set.
     Returns the number of files decrypted.
+
+    `only="data"` fetches just data/ (~KB) instead of the whole store (~250MB
+    of models). Sharded CI jobs need nothing but angel_tokens.json, and there
+    can be a dozen-plus of them per run — pulling every model into each one is
+    pure transfer cost. `only="models"` is the mirror case.
     """
     from huggingface_hub import snapshot_download
 
@@ -212,8 +218,10 @@ def sync_models(revision: Optional[str] = None) -> int:
     api = _api()
     repo_id = _repo_id(api)
 
+    allow = {"data": ["data/*"], "models": ["models/*"]}.get(only)
     snapshot = Path(
-        snapshot_download(repo_id, revision=revision, token=os.environ["HF_TOKEN"])
+        snapshot_download(repo_id, revision=revision, token=os.environ["HF_TOKEN"],
+                          allow_patterns=allow)
     )
 
     FINAL_DIR.mkdir(exist_ok=True)
@@ -248,8 +256,17 @@ if __name__ == "__main__":
             sys.exit(1)
         print(f"{delete_models(syms)} model(s) deleted")
     elif cmd == "sync":
-        rev = sys.argv[2] if len(sys.argv) > 2 else None
-        print(f"{sync_models(revision=rev)} file(s) decrypted" + (f" @ {rev}" if rev else ""))
+        rest = sys.argv[2:]
+        only = None
+        if "--data-only" in rest:
+            only = "data"
+        elif "--models-only" in rest:
+            only = "models"
+        rest = [a for a in rest if a not in ("--data-only", "--models-only")]
+        rev = rest[0] if rest else None
+        n = sync_models(revision=rev, only=only)
+        print(f"{n} file(s) decrypted" + (f" [{only} only]" if only else "")
+              + (f" @ {rev}" if rev else ""))
     elif cmd == "history":
         api = _api()
         for c in api.list_repo_commits(_repo_id(api)):

@@ -11,23 +11,39 @@
 # purpose — NSE serves 403 to unattended datacentre clients, so a fetch step
 # would fail in CI in a way that looks like "the index is unchanged".
 #
-# What it does (scripts/sync_nifty500_universe.py, 8 steps):
-#   compare -> tokens -> constituents -> prices -> indicators -> news
-#           -> retire -> report
+# Four jobs (scripts/sync_nifty500_universe.py, 8 steps):
+#
+#   prepare   compare -> tokens -> constituents, pushes the regenerated token
+#             map, then plans how many shards the two slow steps need
+#   backfill  matrix — prices + indicators for its slice (steps 4-5)
+#   news      matrix — GDELT fetch for its slice (step 6, fetch only)
+#   finalize  scores headlines once, retires de-indexed models, re-runs
+#             compare (step 8), restarts the Space
+#
+# BOTH MATRICES ARE SIZED AT RUN TIME, not hardcoded. Cost scales with the
+# intake and the intake is only known once the CSV is diffed against the DB:
+#   * prices  ~45s/symbol (chunked requests + rate limit + retries + a ~4k-row
+#     insert; measured 26 min for 35 symbols). A first run against an empty DB
+#     is all 500 -> ~6.3h in one process, past the 6h job cap. 60/shard.
+#   * news    GDELT allows 1 request per 12s per (symbol, month), so 35 symbols
+#     over 2 years is ~3.6h serially. 6/shard, ~40 min a job.
+# Empty matrix -> the job skips entirely, so a 3-stock review does not spin up
+# a fixed fleet of runners.
 #
 # It STOPS BEFORE TRAINING. This workflow only prepares model inputs; the
-# Friday weekly-retrain job trains them. That job enumerates
-# `SELECT DISTINCT symbol FROM prices`, so anything backfilled here is picked
-# up on the next run with no extra wiring.
+# Friday weekly-retrain job trains them and is the single place signals are
+# generated. That job enumerates `SELECT DISTINCT symbol FROM prices`, so
+# anything backfilled here is picked up on the next run with no extra wiring.
+# Consequence: rows for retired names stay in trade_signals until that run,
+# even though their models are deleted from the store here.
 #
-# Models are pulled from the encrypted HF store first because the retire step
-# decides what to archive by looking at final_models/ — on a bare runner that
-# directory is empty and it would find nothing to retire. Retirement then
-# deletes those models from the store too, so production stops trading names
-# that left the index.
-#
-# The news step is the long pole: GDELT allows one request per 12s per
-# (symbol, month), so a large intake can run for hours. news_from_year bounds it.
+# Why sharded steps need no artifacts: prices and GDELT articles both go
+# straight into the DB (insert_prices_batch / insert_news), so shards write
+# independently and there is nothing to merge — unlike the retrain shards,
+# which produce .pkl files. News shards must not score, though:
+# score_pending_news() claims globally-unscored rows, so concurrent scoring
+# would process the same headlines repeatedly. Hence --news-fetch-only in the
+# shards and --news-score-only once in finalize.
 #
 # Secrets required: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD,
 # ANGEL_API_KEY, ANGEL_CLIENT_ID, ANGEL_MPIN (or ANGEL_PASSWORD),
@@ -37,10 +53,6 @@ name: Sync Nifty 500 universe
 on:
   workflow_dispatch:
     inputs:
-      steps:
-        description: 'Steps to run (comma-separated)'
-        required: false
-        default: 'compare,tokens,constituents,prices,indicators,news,retire,report'
       dry_run:
         description: 'Plan only — no DB writes, no Angel calls, no uploads'
         type: boolean
@@ -54,39 +66,217 @@ on:
         description: 'First year of GDELT news to backfill (blank = 2 years back)'
         required: false
         default: ''
+      skip_news:
+        description: 'Skip the news backfill entirely (it is the slow part)'
+        type: boolean
+        required: false
+        default: false
       no_retire_remote:
         description: 'Keep de-indexed models on the HF store (retire locally only)'
         type: boolean
         required: false
         default: false
 
-# Never overlap with the Friday retrain — both write final_models/ and the
-# encrypted store, and an interleaved upload would mix two model sets.
+# Never overlap with the Friday retrain — both write the encrypted store, and
+# an interleaved upload would mix two model sets.
 concurrency:
   group: model-store-write
   cancel-in-progress: false
 
+env:
+  PGHOST: ${{ secrets.PGHOST }}
+  PGPORT: ${{ secrets.PGPORT }}
+  PGDATABASE: ${{ secrets.PGDATABASE }}
+  PGUSER: ${{ secrets.PGUSER }}
+  PGPASSWORD: ${{ secrets.PGPASSWORD }}
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+  MODEL_KEY: ${{ secrets.MODEL_KEY }}
+  HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+
 jobs:
-  sync:
+  # ── 1. Diff, tokens, constituents, and shard planning ─────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      price_matrix: ${{ steps.plan_prices.outputs.matrix }}
+      price_count: ${{ steps.plan_prices.outputs.count }}
+      price_shards: ${{ steps.plan_prices.outputs.shards }}
+      news_matrix: ${{ steps.plan_news.outputs.matrix }}
+      news_count: ${{ steps.plan_news.outputs.count }}
+      news_shards: ${{ steps.plan_news.outputs.shards }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Sync token map from the encrypted store
+        run: python scripts/model_store.py sync
+
+      - name: Compare, tokens, constituents
+        run: |
+          python scripts/sync_nifty500_universe.py \
+            --steps compare,tokens,constituents \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      # data/** is excluded from the Space deploy, so the store is the only
+      # route by which production — and the shard jobs below — see the
+      # regenerated 500-symbol token map.
+      - name: Push token map to the store
+        if: ${{ !inputs.dry_run }}
+        run: python scripts/model_store.py upload "nifty 500 universe sync (run ${{ github.run_id }})" --data-only
+
+      # Planned AFTER the token map is written so both counts reflect the
+      # current constituent list.
+      - id: plan_prices
+        name: Plan price shards
+        run: python scripts/sync_nifty500_universe.py --plan prices >> "$GITHUB_OUTPUT"
+
+      - id: plan_news
+        name: Plan news shards
+        run: python scripts/sync_nifty500_universe.py --plan news >> "$GITHUB_OUTPUT"
+
+      - name: Show plan
+        run: |
+          echo "prices: ${{ steps.plan_prices.outputs.count }} symbols -> ${{ steps.plan_prices.outputs.shards }} shard(s)"
+          echo "news:   ${{ steps.plan_news.outputs.count }} symbols -> ${{ steps.plan_news.outputs.shards }} shard(s)"
+
+      - name: Upload prepare log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sync-log-prepare-${{ github.run_id }}
+          path: backend/logs/sync_universe_*.log
+          if-no-files-found: warn
+
+  # ── 2. Price + indicator backfill, sharded ────────────────────────────────
+  backfill:
+    needs: prepare
+    if: ${{ !inputs.dry_run && needs.prepare.outputs.price_count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      # Angel's quota is per-account, not per-runner, so too many concurrent
+      # shards trip "exceeding access rate" no matter how each one paces itself.
+      max-parallel: 3
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.price_matrix) }}
     defaults:
       run:
         working-directory: backend
     env:
-      PGHOST: ${{ secrets.PGHOST }}
-      PGPORT: ${{ secrets.PGPORT }}
-      PGDATABASE: ${{ secrets.PGDATABASE }}
-      PGUSER: ${{ secrets.PGUSER }}
-      PGPASSWORD: ${{ secrets.PGPASSWORD }}
       ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
       ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
       ANGEL_MPIN: ${{ secrets.ANGEL_MPIN }}
       ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
       ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      MODEL_KEY: ${{ secrets.MODEL_KEY }}
-      HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Sync token map from the store
+        run: python scripts/model_store.py sync
+
+      - name: Prices + indicators, shard ${{ matrix.shard }}
+        run: |
+          python scripts/sync_nifty500_universe.py \
+            --steps prices,indicators \
+            --shard ${{ matrix.shard }}/${{ needs.prepare.outputs.price_shards }} \
+            --rate-limit '${{ inputs.rate_limit }}'
+
+      - name: Upload shard log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sync-log-backfill-${{ matrix.shard }}-${{ github.run_id }}
+          path: backend/logs/sync_universe_*.log
+          if-no-files-found: warn
+
+  # ── 3. GDELT fetch, sharded (independent of prices) ───────────────────────
+  news:
+    needs: prepare
+    if: >-
+      ${{ !inputs.skip_news && !inputs.dry_run
+          && needs.prepare.outputs.news_count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.news_matrix) }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      # bootstrap_gdelt reads company names from the token map to build queries.
+      - name: Sync token map from the store
+        run: python scripts/model_store.py sync
+
+      - name: GDELT fetch, shard ${{ matrix.shard }}
+        run: |
+          python scripts/sync_nifty500_universe.py \
+            --steps news \
+            --shard ${{ matrix.shard }}/${{ needs.prepare.outputs.news_shards }} \
+            --news-fetch-only \
+            ${{ inputs.news_from_year && format('--news-from-year {0}', inputs.news_from_year) || '' }}
+
+      - name: Upload shard log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sync-log-news-${{ matrix.shard }}-${{ github.run_id }}
+          path: backend/logs/sync_universe_*.log
+          if-no-files-found: warn
+
+  # ── 4. Score once, retire, verify ─────────────────────────────────────────
+  finalize:
+    needs: [prepare, backfill, news]
+    # always() so a failed or skipped shard still gets its headlines scored,
+    # models retired, and the closing comparison produced — a partial intake is
+    # worth finishing, and the report is what shows what is still outstanding.
+    if: ${{ always() && needs.prepare.result == 'success' && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: backend
+    env:
       HF_SPACE_REPO: MaheshMaheshwari/trademind
     steps:
       - uses: actions/checkout@v7
@@ -102,35 +292,29 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
-      # Populates final_models/ and data/angel_tokens.json. Without this the
-      # retire step sees nothing to archive — see the header note.
-      - name: Sync model set from the encrypted store
+      - name: Score all pending headlines (FinBERT)
+        if: ${{ !inputs.skip_news }}
+        run: python scripts/sync_nifty500_universe.py --steps news --news-score-only
+
+      # Needs the full model set on disk to know what to archive, so it syncs
+      # first. Deletion from the store is the default — a model left there is
+      # re-downloaded and production keeps trading a de-indexed stock.
+      - name: Sync model set from the store
         run: python scripts/model_store.py sync
 
-      - name: Sync universe
+      - name: Retire de-indexed models
         run: |
           python scripts/sync_nifty500_universe.py \
-            --steps '${{ inputs.steps }}' \
-            --rate-limit '${{ inputs.rate_limit }}' \
-            ${{ inputs.news_from_year && format('--news-from-year {0}', inputs.news_from_year) || '' }} \
-            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            --steps retire \
             ${{ inputs.no_retire_remote && '--no-retire-remote' || '' }}
 
-      # Only the token map needs pushing — no models are trained here, and the
-      # retire step already deleted the de-indexed ones from the store.
-      # data/** is excluded from the Space deploy, so this is the only path
-      # by which production sees the regenerated 500-symbol map.
-      - name: Push token map to the store
-        if: ${{ !inputs.dry_run }}
-        run: python scripts/model_store.py upload "nifty 500 universe sync (run ${{ github.run_id }})" --data-only
+      # Same add/remove diff as step 1. If prepare reported ADD n / REMOVE m and
+      # this reports 0/0 for the enforced layers, that pair is the proof the
+      # sync landed. final_models gaps are expected until the Friday retrain.
+      - name: Closing comparison
+        run: python scripts/sync_nifty500_universe.py --steps report
 
-      # Signals are deliberately NOT regenerated here — weekly-retrain.yml's
-      # finalize job runs generate_trades.py after training, and that is the
-      # single place signals are produced. Consequence to be aware of: rows for
-      # the retired names stay in trade_signals until that Friday run, even
-      # though their models are already gone from the store.
       - name: Restart the Space to pick up the new universe
-        if: ${{ !inputs.dry_run }}
         run: |
           python -c "
           import os
@@ -139,13 +323,10 @@ jobs:
           print('Space restart requested')
           "
 
-      # The run log is the record of what changed: which symbols were
-      # backfilled and how deep, which were gated out of training and on how
-      # few bars, and which models were retired.
-      - name: Upload sync log
+      - name: Upload finalize log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: sync-universe-log-${{ github.run_id }}
+          name: sync-log-finalize-${{ github.run_id }}
           path: backend/logs/sync_universe_*.log
           if-no-files-found: warn

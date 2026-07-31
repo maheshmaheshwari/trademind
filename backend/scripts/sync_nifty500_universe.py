@@ -133,6 +133,21 @@ ALL_STEPS = ["compare", "tokens", "constituents", "prices", "indicators",
 # backfill inside a CI job's 6h cap; older news barely moves a sentiment feature.
 NEWS_FROM_YEAR_DEFAULT = date.today().year - 2
 
+# Shard sizing for --news-plan. At ~31 months x 12s a symbol costs ~6 min, so 6
+# symbols is ~37 min of GDELT per shard — well inside a job's 6h cap with room
+# for a much deeper --news-from-year. MAX_NEWS_SHARDS keeps a big index review
+# from fanning out to hundreds of runners (GitHub caps a matrix at 256 anyway).
+SYMBOLS_PER_NEWS_SHARD = 6
+MAX_NEWS_SHARDS = 20
+
+# Price backfill needs the same treatment. Measured on the 2026-07 intake:
+# 35 symbols took 26 minutes, i.e. ~45s each (up to 4 chunked requests at
+# RATE_LIMIT_SECS apart, plus retries, plus inserting ~4k rows). A first run on
+# an empty DB would be all 500 symbols -> ~6.3h, past a GitHub job's 6h cap. At
+# 60 per shard a shard is ~45 min and 500 symbols fan out to 9 shards.
+SYMBOLS_PER_PRICE_SHARD = 60
+MAX_PRICE_SHARDS = 12
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -535,15 +550,26 @@ def step_constituents(nse: List[Dict], dry_run: bool) -> Dict:
 
 # ── Step 4: prices ────────────────────────────────────────────────────────────
 
-def step_prices(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None) -> Dict:
-    """Backfill full available history for constituents with no price data."""
-    step_banner(4, "prices", "Angel One -> prices")
+def step_prices(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None,
+                shard: Optional[Tuple[int, int]] = None) -> Dict:
+    """Backfill full available history for constituents with no price data.
+
+    Shardable: at ~45s a symbol (chunked requests + rate limit + retries + a
+    ~4k-row insert), a first run against an empty DB is ~500 symbols and would
+    run past a CI job's 6h cap in one process. Each symbol is independent and
+    writes straight to the DB, so round-robin splitting needs no merge step.
+    """
+    tag = f" shard {shard[0]}/{shard[1]}" if shard else ""
+    step_banner(4, "prices", f"Angel One -> prices{tag}")
 
     tokens = load_tokens()
     have = db_symbols_with_prices()
     targets = [s for s in nse if s["symbol"] not in have]
     if only:
         targets = [s for s in targets if s["base"] in only or s["symbol"] in only]
+    if shard:
+        idx, total = shard
+        targets = targets[idx - 1::total]
 
     logger.info(f"Constituents with price data : {len(nse) - len([s for s in nse if s['symbol'] not in have])}")
     logger.info(f"Constituents to backfill     : {len(targets)}")
@@ -598,9 +624,16 @@ def step_prices(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None
 
 # ── Step 5: indicators ────────────────────────────────────────────────────────
 
-def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None) -> Dict:
-    """Compute technical indicators for constituents that don't have any yet."""
-    step_banner(5, "indicators", "prices -> technical_indicators")
+def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None,
+                    shard: Optional[Tuple[int, int]] = None) -> Dict:
+    """Compute technical indicators for constituents that don't have any yet.
+
+    Cheap next to the price backfill (~2.5s a symbol, so ~21 min for a full
+    500), but it takes the same shard so it can run in the same job as the
+    prices slice it depends on.
+    """
+    tag = f" shard {shard[0]}/{shard[1]}" if shard else ""
+    step_banner(5, "indicators", f"prices -> technical_indicators{tag}")
 
     conn = get_connection()
     try:
@@ -613,6 +646,9 @@ def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = 
     targets = [s["symbol"] for s in nse if s["symbol"] in have_px and s["symbol"] not in have_ind]
     if only:
         targets = [t for t in targets if t in only or t.replace(".NS", "") in only]
+    if shard:
+        idx, total = shard
+        targets = targets[idx - 1::total]
 
     logger.info(f"Constituents missing indicators: {len(targets)}")
     if not targets:
@@ -646,22 +682,67 @@ def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = 
     return {"ok": ok, "failed": failed}
 
 
+# ── News shard planning ───────────────────────────────────────────────────────
+
+def shard_plan(nse: List[Dict], what: str, per_shard: Optional[int] = None) -> Dict:
+    """How many shards a step needs, given how much work it actually has.
+
+    Printed as GitHub Actions output lines so a matrix can size itself. Both
+    sharded steps scale with the intake, which is only known at run time: a
+    3-stock review should not spin up a fixed 6 runners, and a first run against
+    an empty DB (500 symbols) must not be crammed into one job that then blows
+    the 6h cap. Emits an empty matrix when there is no work, so the job skips.
+    """
+    csv_syms = {s["symbol"] for s in nse}
+    conn = get_connection()
+    try:
+        if what == "news":
+            cur = _execute(conn,
+                           "SELECT DISTINCT symbol FROM news_sentiment WHERE symbol IS NOT NULL")
+            cap, default_per = MAX_NEWS_SHARDS, SYMBOLS_PER_NEWS_SHARD
+        else:
+            cur = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d'")
+            cap, default_per = MAX_PRICE_SHARDS, SYMBOLS_PER_PRICE_SHARD
+        have = {r[0] for r in cur.fetchall()}
+    finally:
+        release_connection(conn)
+
+    per_shard = per_shard or default_per
+    missing = sorted(csv_syms - have)
+    n = len(missing)
+    shards = min(cap, max(1, -(-n // per_shard))) if n else 0
+    return {
+        "count": n,
+        "shards": shards,
+        "matrix": list(range(1, shards + 1)),
+        "symbols": [s.replace(".NS", "") for s in missing],
+    }
+
+
 # ── Step 6: news ──────────────────────────────────────────────────────────────
 
 def step_news(nse: List[Dict], dry_run: bool, from_year: int,
-              score_only: bool = False) -> Dict:
+              score_only: bool = False, fetch_only: bool = False,
+              shard: Optional[Tuple[int, int]] = None) -> Dict:
     """Backfill GDELT news for constituents with none, then score it with FinBERT.
 
     Sentiment is one of the 96 model features, so a symbol with no news trains
-    on a hole. bootstrap_gdelt(only_missing=True) reads angel_tokens.json (which
-    step 2 has already rewritten to the current 500) and skips any symbol that
-    already has news rows - so it naturally targets exactly the new names.
+    on a hole. Targets exactly the symbols that have no news rows yet.
 
     Slow by construction: GDELT is throttled to one request per 12s per
-    (symbol, month), so cost is roughly symbols x months x 12s. --news-from-year
-    is the knob that keeps that bounded.
+    (symbol, month), so cost is roughly symbols x months x 12s. Two knobs bound
+    it - --news-from-year narrows the window, and --shard i/N splits the symbol
+    list across parallel jobs.
+
+    Sharding is safe because every article goes straight into the DB through
+    insert_news() - there are no per-shard artifacts to merge afterwards, unlike
+    the model retrain where each shard produces .pkl files. Shards do NOT score,
+    though: score_pending_news() claims globally-unscored rows, so concurrent
+    shards would score the same headlines repeatedly. Fetch in parallel
+    (--news-fetch-only), score once at the end (--news-score-only).
     """
-    step_banner(6, "news", f"GDELT from {from_year} -> news_sentiment + FinBERT")
+    tag = f" shard {shard[0]}/{shard[1]}" if shard else ""
+    step_banner(6, "news", f"GDELT from {from_year} -> news_sentiment + FinBERT{tag}")
 
     conn = get_connection()
     try:
@@ -673,12 +754,19 @@ def step_news(nse: List[Dict], dry_run: bool, from_year: int,
     finally:
         release_connection(conn)
 
-    missing = sorted({s["symbol"] for s in nse} - have_news)
-    months = max(0, (date.today().year - from_year) * 12 + date.today().month)
+    csv_syms = {s["symbol"] for s in nse}
+    missing = sorted(csv_syms - have_news)
+
+    if shard:
+        idx, total = shard
+        # Round-robin so shards stay balanced however long the list is.
+        missing = missing[idx - 1::total]
+
+    months = max(1, (date.today().year - from_year) * 12 + date.today().month)
     est_hours = len(missing) * months * 12 / 3600
 
-    logger.info(f"Constituents with news : {len(have_news & {s['symbol'] for s in nse})}")
-    logger.info(f"Constituents missing   : {len(missing)}")
+    logger.info(f"Constituents with news : {len(have_news & csv_syms)}")
+    logger.info(f"Constituents missing   : {len(missing)}{tag}")
     logger.info(f"Unscored headlines     : {unscored:,}")
     if missing:
         logger.info(f"  {[s.replace('.NS', '') for s in missing]}")
@@ -687,36 +775,46 @@ def step_news(nse: List[Dict], dry_run: bool, from_year: int,
 
     if dry_run:
         logger.info("DRY-RUN: no GDELT fetch, no scoring")
-        return {"collected": [], "scored": 0}
+        return {"collected": [], "failed": [], "scored": 0}
 
-    collected = []
+    collected, failed = [], []
     if missing and not score_only:
         from collectors.gdelt_collector import bootstrap_gdelt
-        try:
-            bootstrap_gdelt(from_year=from_year, from_month=1, only_missing=True)
-            collected = missing
-        except Exception as e:
-            logger.error(f"GDELT bootstrap failed: {str(e)[:150]}")
+        # Per-symbol rather than only_missing=True so one symbol's failure
+        # cannot abort the rest of the shard, and progress is logged per symbol.
+        for i, sym in enumerate(missing, 1):
+            base = sym.replace(".NS", "")
+            logger.info(f"[{i}/{len(missing)}] GDELT {base} from {from_year}-01 ...")
+            try:
+                bootstrap_gdelt(from_year=from_year, from_month=1, only_symbol=base)
+                collected.append(sym)
+            except Exception as e:
+                failed.append(sym)
+                logger.error(f"    {base} FAILED: {str(e)[:120]}")
     elif score_only:
         logger.info("--news-score-only: skipping GDELT fetch")
 
-    # FinBERT over everything still unscored, in batches until drained.
-    from collectors.gdelt_collector import score_pending_news
     total_scored = 0
-    while True:
-        try:
-            n = score_pending_news(batch_limit=2000)
-        except Exception as e:
-            logger.error(f"Scoring failed: {str(e)[:150]}")
-            break
-        if not n:
-            break
-        total_scored += n
-        logger.info(f"  scored {n} headlines (running total {total_scored:,})")
+    if fetch_only:
+        logger.info("--news-fetch-only: leaving scoring to the finalize pass")
+    else:
+        from collectors.gdelt_collector import score_pending_news
+        while True:
+            try:
+                n = score_pending_news(batch_limit=2000)
+            except Exception as e:
+                logger.error(f"Scoring failed: {str(e)[:150]}")
+                break
+            if not n:
+                break
+            total_scored += n
+            logger.info(f"  scored {n} headlines (running total {total_scored:,})")
 
     logger.info(f"News step complete: {len(collected)} symbols fetched, "
-                f"{total_scored:,} headlines scored")
-    return {"collected": collected, "scored": total_scored}
+                f"{len(failed)} failed, {total_scored:,} headlines scored")
+    if failed:
+        logger.warning(f"  FAILED: {[s.replace('.NS', '') for s in failed]}")
+    return {"collected": collected, "failed": failed, "scored": total_scored}
 
 
 # ── Step 7: retire ────────────────────────────────────────────────────────────
@@ -828,16 +926,50 @@ def main():
     p.add_argument("--news-score-only", action="store_true",
                    help="step 6: skip the GDELT fetch, only run FinBERT over "
                         "headlines already collected but unscored")
+    p.add_argument("--news-fetch-only", action="store_true",
+                   help="step 6: fetch from GDELT but do not score — use in "
+                        "parallel shards, then score once with --news-score-only")
+    p.add_argument("--shard", default=None, metavar="i/N",
+                   help="step 6: process only shard i of N (round-robin over the "
+                        "symbols needing news), e.g. --shard 3/6")
+    p.add_argument("--plan", choices=["prices", "news"], default=None,
+                   help="print how many shards this step needs as GitHub Actions "
+                        "output lines (count/shards/matrix) and exit — lets the "
+                        "workflow matrix size itself to the actual intake")
+    p.add_argument("--symbols-per-shard", type=int, default=None,
+                   help=f"--plan: symbols per shard (default "
+                        f"{SYMBOLS_PER_PRICE_SHARD} for prices, "
+                        f"{SYMBOLS_PER_NEWS_SHARD} for news)")
     p.add_argument("--no-retire-remote", action="store_true",
                    help="step 7: keep retired models on the HF store. Retirement is "
                         "then LOCAL ONLY and production will re-sync and keep trading "
                         "the de-indexed stocks")
     args = p.parse_args()
 
+    # Plan mode short-circuits: it emits machine-readable output only, so the
+    # usual banner/logging would corrupt $GITHUB_OUTPUT.
+    if args.plan:
+        plan = shard_plan(read_nse_csv(), args.plan, args.symbols_per_shard)
+        print(f"count={plan['count']}")
+        print(f"shards={plan['shards']}")
+        print(f"matrix={json.dumps(plan['matrix'])}")
+        print(f"symbols={json.dumps(plan['symbols'])}")
+        return
+
     steps = [s.strip() for s in args.steps.split(",") if s.strip()]
     bad = [s for s in steps if s not in ALL_STEPS]
     if bad:
         p.error(f"unknown step(s): {bad}. valid: {ALL_STEPS}")
+
+    shard = None
+    if args.shard:
+        try:
+            i, n = (int(x) for x in args.shard.split("/", 1))
+        except ValueError:
+            p.error(f"--shard must look like i/N, got {args.shard!r}")
+        if not 1 <= i <= n:
+            p.error(f"--shard i must be within 1..N, got {args.shard}")
+        shard = (i, n)
 
     target_db = os.getenv("PGHOST", "sqlite")
     logger.info("=" * 78)
@@ -868,12 +1000,12 @@ def main():
     if "constituents" in steps:
         out["constituents"] = step_constituents(nse, args.dry_run)
     if "prices" in steps:
-        out["prices"] = step_prices(nse, args.dry_run, args.symbols)
+        out["prices"] = step_prices(nse, args.dry_run, args.symbols, shard)
     if "indicators" in steps:
-        out["indicators"] = step_indicators(nse, args.dry_run, args.symbols)
+        out["indicators"] = step_indicators(nse, args.dry_run, args.symbols, shard)
     if "news" in steps:
         out["news"] = step_news(nse, args.dry_run, args.news_from_year,
-                                args.news_score_only)
+                                args.news_score_only, args.news_fetch_only, shard)
     if "retire" in steps:
         out["retire"] = step_retire(nse, args.dry_run, not args.no_retire_remote)
     if "report" in steps:

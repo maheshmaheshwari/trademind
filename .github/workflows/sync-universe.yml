@@ -248,6 +248,12 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      # Timescale Cloud memory is the binding constraint, as it is for the
+      # retrain shards. Ten shards each running the gap anti-join concurrently
+      # OOM'd the instance in run 30808272331 and killed 4 of them. The sort is
+      # gone from that query now, but cap concurrency anyway — these shards are
+      # minutes each, so serialising a few costs almost nothing.
+      max-parallel: 4
       matrix:
         shard: ${{ fromJSON(needs.prepare.outputs.indicator_matrix) }}
     defaults:

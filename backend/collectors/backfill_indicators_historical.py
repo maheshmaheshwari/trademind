@@ -67,6 +67,15 @@ def find_missing_indicator_dates(symbols=None, conn=None):
     if own:
         conn = get_connection()
     try:
+        # Deliberately NOT ordered in SQL. This anti-join used to end in
+        # `ORDER BY p.symbol, p.date`, and ten concurrent shards each sorting it
+        # exhausted the Timescale instance —
+        #   psycopg2.errors.OutOfMemory
+        #   DETAIL: Failed on request of size 32 in memory context "Caller tuples"
+        # which killed 4 of 10 shards in run 30808272331. It is the same sort
+        # node that had to be removed from model_training.prefetch_all_data for
+        # the same reason. Grouping into a dict does not care about row order,
+        # and sorting each symbol's handful of dates in Python is free.
         sql = """SELECT p.symbol, p.date
                    FROM prices p
                    LEFT JOIN technical_indicators t
@@ -76,11 +85,12 @@ def find_missing_indicator_dates(symbols=None, conn=None):
         if symbols:
             sql += " AND p.symbol = ANY(?)"
             params = (list(symbols),)
-        sql += " ORDER BY p.symbol, p.date"
 
         out = {}
         for sym, d in _execute(conn, sql, params).fetchall():
             out.setdefault(sym, []).append(d)
+        for dates in out.values():
+            dates.sort()
         return out
     finally:
         if own:

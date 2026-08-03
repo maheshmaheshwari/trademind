@@ -49,10 +49,93 @@ def _safe_float(value):
         return None
 
 
-def backfill_symbol(symbol: str, conn=None) -> int:
+def find_missing_indicator_dates(symbols=None, conn=None):
+    """Map symbol -> sorted price dates that have NO technical_indicators row.
+
+    Every price date is expected to have one: indicators are stored from a
+    symbol's very first bar (NULL-valued where the lookback isn't satisfied
+    yet), so a price date without a row is a genuine gap, never warmup.
+
+    The gaps are not what they look like from row counts alone. RELIANCE and TCS
+    were each short by 15 rows, and the missing dates are identical between them
+    (2026-06-09, 06-12, 06-29 ... 07-14, 07-15, 07-20) — universe-wide days when
+    calculate_indicators_job did not run, not anything symbol-specific. A count
+    or ratio comparison would call a symbol "close enough" and leave those days
+    permanently empty, which is why this compares dates.
+    """
+    own = conn is None
+    if own:
+        conn = get_connection()
+    try:
+        sql = """SELECT p.symbol, p.date
+                   FROM prices p
+                   LEFT JOIN technical_indicators t
+                          ON t.symbol = p.symbol AND t.date = p.date
+                  WHERE p.interval = '1d' AND t.date IS NULL"""
+        params = ()
+        if symbols:
+            sql += " AND p.symbol = ANY(?)"
+            params = (list(symbols),)
+        sql += " ORDER BY p.symbol, p.date"
+
+        out = {}
+        for sym, d in _execute(conn, sql, params).fetchall():
+            out.setdefault(sym, []).append(d)
+        return out
+    finally:
+        if own:
+            release_connection(conn)
+
+
+def backfill_missing_indicators(symbols=None, conn=None) -> dict:
+    """Compute indicators for exactly the dates that are missing them.
+
+    Symbols already complete are skipped without computing anything — the point
+    is that a routine run costs nothing when there is nothing wrong.
+
+    Indicators are still computed over the symbol's FULL price history, because
+    every one of them is a lookback (sma_200 needs 200 prior bars); only the
+    missing dates are then written back. Computing just the gap dates in
+    isolation would produce wrong values.
+
+    Returns symbol -> rows written.
+    """
+    own = conn is None
+    if own:
+        conn = get_connection()
+    try:
+        missing = find_missing_indicator_dates(symbols, conn=conn)
+        if not missing:
+            logger.info("Indicators: every price date already has a row — nothing to do")
+            return {}
+
+        total_dates = sum(len(v) for v in missing.values())
+        logger.info(f"Indicators: {len(missing)} symbol(s) with gaps, "
+                    f"{total_dates} missing date(s) — backfilling")
+
+        written = {}
+        for sym, dates in missing.items():
+            want = {d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+                    for d in dates}
+            n = backfill_symbol(sym, conn=conn, only_dates=want)
+            if n:
+                written[sym] = n
+                logger.info(f"   {sym:16} filled {n}/{len(want)} missing date(s)")
+        return written
+    finally:
+        if own:
+            release_connection(conn)
+
+
+def backfill_symbol(symbol: str, conn=None, only_dates=None) -> int:
     """
     Compute and store indicators for every date in prices for one symbol.
     Returns number of rows inserted/updated.
+
+    only_dates: optional set of 'YYYY-MM-DD' strings. Indicators are still
+    computed across the symbol's full history (they are all lookbacks), but only
+    these dates are written. Used by backfill_missing_indicators() to repair
+    gaps without rewriting rows that are already correct.
     """
     own_conn = conn is None
     if own_conn:
@@ -80,9 +163,12 @@ def backfill_symbol(symbol: str, conn=None) -> int:
         # Build all rows as tuples for a single batch insert
         batch = []
         for _, row in df.iterrows():
+            date_str = row["date"].strftime("%Y-%m-%d")
+            if only_dates is not None and date_str not in only_dates:
+                continue
             batch.append((
                 symbol,
-                row["date"].strftime("%Y-%m-%d"),
+                date_str,
                 _safe_float(row.get("rsi_14")),
                 _safe_float(row.get("macd")),
                 _safe_float(row.get("macd_signal")),

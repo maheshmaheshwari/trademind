@@ -148,6 +148,20 @@ MAX_NEWS_SHARDS = 20
 SYMBOLS_PER_PRICE_SHARD = 60
 MAX_PRICE_SHARDS = 12
 
+# Indicators are sharded too, even though a symbol is nominally ~2.5s. Cost is
+# NOT uniform: a symbol missing 15 dates and one missing its entire 4108-date
+# history both require computing every indicator across the full price series
+# (they are all lookbacks — sma_200 alone needs 200 prior bars), and the second
+# then writes 4108 rows instead of 15. The first repair pass is the expensive
+# one: all 500 symbols need work, ~49.6k rows in total.
+#
+# 50 per shard keeps a shard in the low minutes even if it draws several
+# full-history symbols, so no shard is anywhere near the 6h cap and one slow
+# shard cannot hold up the rest. Steady state is far cheaper — symbols whose
+# dates all match are skipped without computing anything.
+SYMBOLS_PER_INDICATOR_SHARD = 50
+MAX_INDICATOR_SHARDS = 12
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -678,12 +692,6 @@ def step_prices(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None
 
 # ── Step 5: indicators ────────────────────────────────────────────────────────
 
-# Rows by which technical_indicators may legitimately trail prices before a
-# symbol counts as under-covered. Measured gap on fully-backfilled symbols is
-# 15-17 rows regardless of history length (HDFCBANK 887px/870ind,
-# RELIANCE 886/870, TCS 885/870), so 30 leaves headroom without masking a real
-# gap — the broken cases sat at 1 row against hundreds.
-_IND_WARMUP_TOLERANCE = 30
 
 def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None,
                     shard: Optional[Tuple[int, int]] = None) -> Dict:
@@ -707,40 +715,33 @@ def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = 
     tag = f" shard {shard[0]}/{shard[1]}" if shard else ""
     step_banner(5, "indicators", f"prices -> technical_indicators{tag}")
 
-    conn = get_connection()
-    try:
-        cur = _execute(conn, """
-            SELECT p.symbol, p.px, COALESCE(i.n, 0) AS ind
-            FROM (SELECT symbol, COUNT(*) AS px FROM prices
-                   WHERE interval = '1d' GROUP BY symbol) p
-            LEFT JOIN (SELECT symbol, COUNT(*) AS n FROM technical_indicators
-                        GROUP BY symbol) i ON i.symbol = p.symbol
-        """)
-        coverage = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
-    finally:
-        release_connection(conn)
+    from collectors.backfill_indicators_historical import find_missing_indicator_dates
 
-    # Indicators legitimately trail prices by a constant warmup, not a
-    # percentage — fully covered symbols sit at px-15..px-17 whether they have
-    # 300 rows or 4000 (measured across the universe). A ratio test would
-    # therefore chase short-history symbols forever, so allow an absolute
-    # tolerance comfortably above the observed warmup and flag anything below.
-    targets = [s["symbol"] for s in nse
-               if s["symbol"] in coverage
-               and coverage[s["symbol"]][1] < coverage[s["symbol"]][0] - _IND_WARMUP_TOLERANCE]
+    # Partition the CSV list BEFORE asking which symbols have gaps. Shards run
+    # concurrently and close gaps as they go, so "symbols with gaps" shrinks
+    # while they run — striding that list would give each shard a different view
+    # of it and let symbols fall between the strides entirely. The constituent
+    # list is fixed for the run, so slicing it first gives every shard a stable,
+    # disjoint slice it exclusively owns. It also scopes the gap query to the
+    # shard's own symbols.
+    csv_syms = [s["symbol"] for s in nse]
     if only:
-        targets = [t for t in targets if t in only or t.replace(".NS", "") in only]
+        csv_syms = [t for t in csv_syms if t in only or t.replace(".NS", "") in only]
     if shard:
         idx, total = shard
-        targets = targets[idx - 1::total]
+        csv_syms = csv_syms[idx - 1::total]
+
+    gaps = find_missing_indicator_dates(csv_syms)
+    targets = [s for s in csv_syms if s in gaps]
 
     for t in targets[:20]:
-        px, ind = coverage[t]
-        logger.info(f"      {t:16} {ind:>5} indicator rows vs {px:>5} price rows")
+        d = gaps[t]
+        logger.info(f"      {t:16} {len(d):>5} missing date(s)  {d[0]} .. {d[-1]}")
     if len(targets) > 20:
         logger.info(f"      ... and {len(targets) - 20} more")
 
-    logger.info(f"Constituents with incomplete indicators: {len(targets)}")
+    logger.info(f"Constituents with missing indicator dates: {len(targets)} "
+                f"({sum(len(gaps[t]) for t in targets)} dates)")
     if not targets:
         logger.info("Nothing to compute")
         return {"ok": [], "failed": []}
@@ -791,17 +792,20 @@ def shard_plan(nse: List[Dict], what: str, per_shard: Optional[int] = None) -> D
                            "SELECT DISTINCT symbol FROM news_sentiment WHERE symbol IS NOT NULL")
             cap, default_per = MAX_NEWS_SHARDS, SYMBOLS_PER_NEWS_SHARD
         elif what == "indicators":
-            # "have" = adequately covered, using the SAME test step_indicators
-            # applies, so the plan can never disagree with what the step does.
+            # "have" = every price date already has an indicator row. Same
+            # date-level predicate step_indicators uses, so the plan can never
+            # disagree with what the step then does.
             cur = _execute(conn, """
-                SELECT p.symbol
-                FROM (SELECT symbol, COUNT(*) AS px FROM prices
-                       WHERE interval = '1d' GROUP BY symbol) p
-                LEFT JOIN (SELECT symbol, COUNT(*) AS n FROM technical_indicators
-                            GROUP BY symbol) i ON i.symbol = p.symbol
-                WHERE COALESCE(i.n, 0) >= p.px - ?
-            """, (_IND_WARMUP_TOLERANCE,))
-            cap, default_per = MAX_PRICE_SHARDS, SYMBOLS_PER_PRICE_SHARD
+                SELECT DISTINCT p.symbol FROM prices p
+                WHERE p.interval = '1d'
+                  AND NOT EXISTS (
+                        SELECT 1 FROM prices p2
+                        LEFT JOIN technical_indicators t
+                               ON t.symbol = p2.symbol AND t.date = p2.date
+                         WHERE p2.symbol = p.symbol AND p2.interval = '1d'
+                           AND t.date IS NULL)
+            """)
+            cap, default_per = MAX_INDICATOR_SHARDS, SYMBOLS_PER_INDICATOR_SHARD
         else:
             cur = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d'")
             cap, default_per = MAX_PRICE_SHARDS, SYMBOLS_PER_PRICE_SHARD

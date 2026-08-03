@@ -105,7 +105,9 @@ jobs:
       news_matrix: ${{ steps.plan_news.outputs.matrix }}
       news_count: ${{ steps.plan_news.outputs.count }}
       news_shards: ${{ steps.plan_news.outputs.shards }}
+      indicator_matrix: ${{ steps.plan_indicators.outputs.matrix }}
       indicator_count: ${{ steps.plan_indicators.outputs.count }}
+      indicator_shards: ${{ steps.plan_indicators.outputs.shards }}
     defaults:
       run:
         working-directory: backend
@@ -230,16 +232,24 @@ jobs:
   # indicators — and that is exactly the state 35 symbols were in, sitting at 1
   # indicator row against up to 4110 price rows.
   #
-  # Unsharded on purpose: ~2.5s a symbol, so even a full 500 is ~21 min, well
-  # inside the cap. needs backfill so it sees any prices that job just wrote,
-  # but always() lets it run when backfill skipped for having nothing to do.
+  # Sharded, and sized at run time like the other two matrices. Per-symbol cost
+  # is not uniform — repairing 15 missing dates and rebuilding a full 4108-date
+  # history both recompute the entire price series, and the first repair pass
+  # has all 500 symbols to do (~49.6k rows). Sharding keeps any one job in the
+  # low minutes so nothing approaches the 6h cap and a slow shard cannot stall
+  # the rest. needs backfill so it sees prices that job just wrote, but always()
+  # lets it run when backfill skipped for having nothing to do.
   indicators:
     needs: [prepare, backfill]
     if: >-
       ${{ always() && needs.prepare.result == 'success' && !inputs.dry_run
           && needs.prepare.outputs.indicator_count != '0' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.indicator_matrix) }}
     defaults:
       run:
         working-directory: backend
@@ -257,14 +267,17 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
-      - name: Backfill indicators
-        run: python scripts/sync_nifty500_universe.py --steps indicators
+      - name: Backfill indicators, shard ${{ matrix.shard }}
+        run: |
+          python scripts/sync_nifty500_universe.py \
+            --steps indicators \
+            --shard ${{ matrix.shard }}/${{ needs.prepare.outputs.indicator_shards }}
 
       - name: Upload indicator log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: sync-log-indicators-${{ github.run_id }}
+          name: sync-log-indicators-${{ matrix.shard }}-${{ github.run_id }}
           path: backend/logs/sync_universe_*.log
           if-no-files-found: warn
 

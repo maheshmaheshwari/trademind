@@ -329,7 +329,7 @@ def collect_rss_news_job():
 
 
 def calculate_indicators_job():
-    """Daily job: recalculate all technical indicators."""
+    """Daily job: recalculate all technical indicators, then repair any gaps."""
     logger.info("⏰ Running indicator calculation...")
     try:
         from analysis.signals import process_all_stocks
@@ -337,6 +337,26 @@ def calculate_indicators_job():
         logger.info(f"Indicators done: processed {result['processed']} stocks")
     except Exception as e:
         logger.error(f"Indicator calculation failed: {e}")
+
+    # process_all_stocks writes only the LATEST bar per symbol (process_stock
+    # stores df.iloc[-1]), so any day this job does not run leaves a hole that
+    # nothing ever fills. That is not hypothetical: RELIANCE and TCS were each
+    # missing the same 15 dates (2026-06-09 ... 2026-07-20), i.e. universe-wide
+    # days the job was skipped, and a newly added constituent sat at exactly one
+    # indicator row against thousands of price rows.
+    #
+    # Missing indicators are worse than missing news — prefetch_all_data fills
+    # absent sentiment with 0.0, but absent indicators reach the model as NaN
+    # across RSI/MACD/Bollinger/SMA/ATR/ADX/Stoch/OBV. So reconcile every run.
+    # Costs one query when there is nothing to fix.
+    try:
+        from collectors.backfill_indicators_historical import backfill_missing_indicators
+        filled = backfill_missing_indicators()
+        if filled:
+            logger.info(f"Indicator gap repair: filled {sum(filled.values())} row(s) "
+                        f"across {len(filled)} symbol(s)")
+    except Exception as e:
+        logger.error(f"Indicator gap repair failed: {e}")
 
 
 def collect_news_job():

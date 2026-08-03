@@ -771,8 +771,13 @@ def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = 
                 logger.info(f"[{idx}/{len(targets)}] {sym:18} filled {n}/{len(want)} date(s)")
             else:
                 failed.append(sym)
+                # backfill_symbol swallows its own exceptions and returns 0, so
+                # the reason is already logged above and is NOT inferable here.
+                # This used to guess "(likely < 14 price bars)", which sent
+                # AMBER.NS and BANKBARODA.NS's real cause — "out of memory" from
+                # Timescale — off in entirely the wrong direction.
                 logger.warning(f"[{idx}/{len(targets)}] {sym:18} wrote 0 rows "
-                               f"(likely < 14 price bars)")
+                               f"— see the logged error above for the cause")
         except Exception as e:
             failed.append(sym)
             logger.error(f"[{idx}/{len(targets)}] {sym:18} FAILED: {str(e)[:100]}")

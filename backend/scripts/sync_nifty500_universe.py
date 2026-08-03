@@ -318,6 +318,44 @@ def db_row_count_before(symbol: str, cutoff: str) -> int:
         release_connection(conn)
 
 
+def deactivate_signals(symbols: List[str], dry_run: bool = False) -> int:
+    """Mark every live trade_signals row for these symbols is_active = FALSE.
+
+    Retiring a model does NOT retire its signals on its own, and the two have to
+    happen together. insert_trade_signals_batch() only deactivates symbols that
+    appear in the batch it is handed, and generate_trades.py builds that batch by
+    enumerating final_models/*.pkl — so archiving a de-indexed model is precisely
+    what strands its last signals at is_active = TRUE permanently. The symbol can
+    never appear in a future batch, so nothing ever clears the flag, and the API
+    keeps serving a stock that left the index.
+
+    Matches both stored forms: trade_signals holds 'SYMBOL.NS' while the pkl
+    filenames are bare 'SYMBOL'.
+    """
+    if not symbols:
+        return 0
+
+    pats = list(symbols) + [f"{s}.NS" for s in symbols]
+    placeholders = ",".join(["?"] * len(pats))
+    conn = get_connection()
+    try:
+        if dry_run:
+            cur = _execute(conn,
+                           f"SELECT COUNT(*) FROM trade_signals "
+                           f"WHERE is_active = TRUE AND symbol IN ({placeholders})",
+                           tuple(pats))
+            return cur.fetchone()[0]
+
+        cur = _execute(conn,
+                       f"UPDATE trade_signals SET is_active = FALSE "
+                       f"WHERE is_active = TRUE AND symbol IN ({placeholders})",
+                       tuple(pats))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        release_connection(conn)
+
+
 # ── Step 1: compare ───────────────────────────────────────────────────────────
 
 def _norm(sym: str) -> str:
@@ -350,7 +388,10 @@ def _universe_layers() -> List[Tuple[str, set, bool]]:
 
     conn = get_connection()
     try:
-        cur = _execute(conn, "SELECT symbol FROM nifty_constituents")
+        # Active only: deactivated rows are the audit trail of what left the
+        # index, and counting them here would report every past removal as a
+        # symbol still needing removal.
+        cur = _execute(conn, "SELECT symbol FROM nifty_constituents WHERE is_active = TRUE")
         consts = {r[0] for r in cur.fetchall()}
         cur = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d'")
         px = {r[0] for r in cur.fetchall()}
@@ -486,7 +527,12 @@ def step_constituents(nse: List[Dict], dry_run: bool) -> Dict:
 
     conn = get_connection()
     try:
-        cur = _execute(conn, "SELECT symbol, name, sector FROM nifty_constituents")
+        # Only active rows count as "in the table" — a previously deactivated
+        # symbol must read as absent so it is re-added (and reactivated by the
+        # upsert) if NSE puts it back, and so to_drop never re-lists names that
+        # were already deactivated by an earlier run.
+        cur = _execute(conn, "SELECT symbol, name, sector FROM nifty_constituents "
+                             "WHERE is_active = TRUE")
         existing = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
     finally:
         release_connection(conn)
@@ -524,14 +570,18 @@ def step_constituents(nse: List[Dict], dry_run: bool) -> Dict:
         conn = get_connection()
         try:
             for s in to_drop:
-                _execute(conn, "DELETE FROM nifty_constituents WHERE symbol=?", (s,))
+                _execute(conn,
+                         "UPDATE nifty_constituents SET is_active = FALSE, removed_at = NOW() "
+                         "WHERE symbol = ? AND is_active = TRUE",
+                         (s,))
             conn.commit()
         finally:
             release_connection(conn)
-        logger.info(f"Deleted {len(to_drop)} rows no longer in the index")
+        logger.info(f"Deactivated {len(to_drop)} rows no longer in the index")
 
-    # upsert_nifty_constituents clears the sector cache, but the delete above
-    # happens after it - clear again so a live process can't serve dropped names.
+    # upsert_nifty_constituents clears the sector cache, but the deactivation
+    # above happens after it - clear again so a live process can't serve
+    # dropped names.
     try:
         from database import db as _db
         _db._sector_map_cache.clear()
@@ -540,8 +590,12 @@ def step_constituents(nse: List[Dict], dry_run: bool) -> Dict:
 
     conn = get_connection()
     try:
-        cur = _execute(conn, "SELECT COUNT(*) FROM nifty_constituents")
-        logger.info(f"nifty_constituents now has {cur.fetchone()[0]} rows")
+        cur = _execute(conn,
+                       "SELECT COUNT(*) FILTER (WHERE is_active), COUNT(*) "
+                       "FROM nifty_constituents")
+        active, total = cur.fetchone()
+        logger.info(f"nifty_constituents now has {active} active "
+                    f"({total - active} deactivated, {total} rows total)")
     finally:
         release_connection(conn)
 
@@ -827,13 +881,19 @@ def step_retire(nse: List[Dict], dry_run: bool, push_remote: bool = True) -> Dic
     it locally. Price history is intentionally left in the DB - it costs little
     and stays available for backtests.
 
+    Also deactivates the retired names' live trade_signals rows (see
+    deactivate_signals) - the API serves is_active = TRUE, and removing the .pkl
+    is what makes those rows unreachable by the normal deactivation path, so
+    they would otherwise stay served forever.
+
     LOCAL ARCHIVING IS ONLY HALF THE JOB, so remote deletion is the DEFAULT.
     model_store.upload_all() is add-only, so an encrypted copy left on the Hub
     is re-downloaded by sync_models() and production keeps trading a stock that
     left the index. Deletion is a commit, so it stays recoverable via
     sync_models(revision=<pre-delete>). --no-retire-remote opts out.
     """
-    step_banner(7, "retire", "archive + delete de-indexed models from the HF store")
+    step_banner(7, "retire",
+                "archive + delete de-indexed models, deactivate their signals")
 
     csv_syms = {s["symbol"] for s in nse}
     pkls = [f for f in os.listdir(FINAL_DIR) if f.endswith("_final.pkl")]
@@ -845,9 +905,12 @@ def step_retire(nse: List[Dict], dry_run: bool, push_remote: bool = True) -> Dic
     for f in stale:
         logger.info(f"      {f.replace('_final.pkl', '')}")
 
+    symbols = [f.replace("_final.pkl", "") for f in stale]
+
     if dry_run:
-        logger.info("DRY-RUN: no files moved")
-        return {"retired": stale}
+        n = deactivate_signals(symbols, dry_run=True)
+        logger.info(f"DRY-RUN: no files moved · {n} live signal row(s) would be deactivated")
+        return {"retired": stale, "signals_deactivated": n}
 
     if stale:
         os.makedirs(RETIRED_DIR, exist_ok=True)
@@ -858,7 +921,10 @@ def step_retire(nse: List[Dict], dry_run: bool, push_remote: bool = True) -> Dic
     remaining = len([f for f in os.listdir(FINAL_DIR) if f.endswith("_final.pkl")])
     logger.info(f"final_models now holds {remaining} models")
 
-    symbols = [f.replace("_final.pkl", "") for f in stale]
+    deactivated = deactivate_signals(symbols)
+    if deactivated:
+        logger.info(f"Deactivated {deactivated} live trade_signals row(s) for retired names")
+
     if stale and push_remote:
         from scripts.model_store import delete_models
         n = delete_models(symbols, commit_message="retire names dropped from Nifty 500")
@@ -869,7 +935,8 @@ def step_retire(nse: List[Dict], dry_run: bool, push_remote: bool = True) -> Dic
                        "generating signals for them. Finish with: python "
                        f"scripts/model_store.py delete {' '.join(symbols[:3])} ...")
 
-    return {"retired": stale, "remote_deleted": bool(stale and push_remote)}
+    return {"retired": stale, "remote_deleted": bool(stale and push_remote),
+            "signals_deactivated": deactivated}
 
 
 # ── Step 8: report ────────────────────────────────────────────────────────────

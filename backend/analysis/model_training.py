@@ -76,6 +76,19 @@ def prefetch_all_data(symbols: list = None) -> None:
     conn = get_connection()
     try:
         # ── 1. Prices + indicators + market overview + delivery (one big JOIN) ──
+        #
+        # Deliberately NOT ordered. This query used to end in
+        # `ORDER BY p.symbol, p.date ASC`, whose sort node is what exhausted the
+        # Timescale Cloud instance when several retrain shards prefetched at
+        # once — run 30656726827 killed shards 9-12 with
+        #   psycopg2.errors.OutOfMemory
+        #   DETAIL: Failed on request of size 164 in memory context "Caller tuples"
+        # ("Caller tuples" being the sort's own memory context). The ordering was
+        # pure waste: every consumer re-sorts anyway — the per-symbol split below
+        # does .set_index('date').sort_index(), and df_sent is consumed through a
+        # (symbol, date) lookup index, not in row order. Sorting ~40 symbols of
+        # history in pandas on the runner costs nothing; sorting it 12 times over
+        # concurrently on one shared instance is what fell over.
         log.info("   Loading prices + indicators + market + delivery...")
         conn.cursor().execute("SET statement_timeout = '600s'")
         df_all = _query_to_df(conn, f"""
@@ -101,7 +114,6 @@ def prefetch_all_data(symbols: list = None) -> None:
             LEFT JOIN fii_dii_daily f        ON p.date = f.date
             LEFT JOIN delivery_data d        ON p.symbol = d.symbol AND p.date = d.date
             WHERE p.interval = '1d'{sym_clause}
-            ORDER BY p.symbol, p.date ASC
         """, sym_params, timeout="600s")
         log.info(f"   Prices loaded: {len(df_all):,} rows across {df_all['symbol'].nunique()} symbols")
 
@@ -117,7 +129,6 @@ def prefetch_all_data(symbols: list = None) -> None:
                    max_negative    AS sent_max_neg
             FROM news_daily_sentiment
             WHERE symbol IS NOT NULL{sym_clause.replace("p.symbol", "symbol")}
-            ORDER BY symbol, date ASC
         """, sym_params, timeout="120s")
         log.info(f"   Sentiment loaded: {len(df_sent):,} rows")
 

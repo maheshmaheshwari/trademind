@@ -38,11 +38,9 @@ from analysis.indicators import calculate_all
 from database.db import (
     get_all_prices_df,
     get_all_symbols,
-    get_connection,
-    release_connection,
+    get_active_universe,
     init_database,
     insert_indicators,
-    _execute,
 )
 import joblib
 import os
@@ -283,15 +281,10 @@ def process_all_stocks() -> Dict:
         init_database()
 
 
-        # Get all symbols that have price data
-        conn = get_connection()
-        try:
-            cur = _execute(conn,
-                "SELECT DISTINCT symbol FROM prices WHERE interval = '1d' ORDER BY symbol"
-            )
-            symbols = [row[0] for row in cur.fetchall()]
-        finally:
-            release_connection(conn)
+        # Current Nifty 500 constituents only — not every symbol with price
+        # data. prices also holds de-indexed names (history kept for backtests)
+        # and the index tickers, none of which should produce signals.
+        symbols = get_active_universe()
 
         if not symbols:
             print("⚠️  No price data in database. Run price collector first!")

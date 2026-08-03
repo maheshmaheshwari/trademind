@@ -357,8 +357,16 @@ CREATE TABLE IF NOT EXISTS nifty_constituents (
     symbol      TEXT PRIMARY KEY,
     name        TEXT,
     sector      TEXT,
-    updated_at  TIMESTAMPTZ DEFAULT NOW()
+    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    -- Dropped constituents are deactivated, never deleted; is_active = TRUE is
+    -- the authoritative tradable universe. See SQL_NIFTY_CONSTITUENTS_ALTER.
+    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+    removed_at  TIMESTAMPTZ
 );
+-- NB: the matching index lives in SQL_NIFTY_CONSTITUENTS_ALTER, not here. On a
+-- pre-existing table CREATE TABLE IF NOT EXISTS is a no-op, so an index over
+-- is_active in this block would run before the ALTER adds the column and fail
+-- with "column is_active does not exist".
 """
 
 # Per-symbol model training metrics from scripts/retrain_walk_forward.py. Was
@@ -468,6 +476,24 @@ CREATE INDEX IF NOT EXISTS idx_portfolios_user_id ON portfolios (user_id);
 # and every INSERT INTO positions fails.
 SQL_POSITIONS_ALTER = """
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+"""
+
+# Migration: an index review drops names, and step_constituents used to DELETE
+# those rows outright — leaving no record a symbol was ever a constituent, and
+# no way to tell "dropped from the index" from "never seen". So every job that
+# needed the tradable universe fell back to `SELECT DISTINCT symbol FROM prices`,
+# which is 537, not 500: the current names, plus 33 de-indexed ones whose price
+# history is deliberately kept for backtests, plus the 4 index tickers (^NSEI,
+# ^BSESN, ^INDIAVIX, ^CRSLDX) that are benchmarks rather than stocks. The weekly
+# retrain trained all of them.
+#
+# Deactivating instead of deleting makes nifty_constituents the authoritative
+# tradable universe — `WHERE is_active = TRUE` is exactly the 500, and a name
+# that left the index stays on record with the date it went.
+SQL_NIFTY_CONSTITUENTS_ALTER = """
+ALTER TABLE nifty_constituents ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE nifty_constituents ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_nifty_constituents_active ON nifty_constituents (is_active);
 """
 
 # Migration: widen trade_signals UNIQUE from (symbol, date) to (symbol, date, horizon)
@@ -843,6 +869,16 @@ def init_timescale(conn) -> None:
             except Exception as e:
                 conn.rollback()
                 logger.warning(f"ALTER TABLE positions: {e}")
+
+    # Add is_active/removed_at to nifty_constituents (idempotent ALTER TABLE)
+    for stmt in SQL_NIFTY_CONSTITUENTS_ALTER.strip().split("\n"):
+        stmt = stmt.strip()
+        if stmt:
+            try:
+                cur.execute(stmt)
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"ALTER TABLE nifty_constituents: {e}")
 
     # Widen trade_signals UNIQUE constraint to include model_horizon (per-horizon signals)
     for stmt in SQL_TRADE_SIGNALS_MIGRATE:

@@ -150,12 +150,10 @@ def backfill_symbol(symbol: str, conn=None) -> int:
 def backfill_all(symbol_filter: str = None):
     init_database()
 
-    conn = get_connection()
-    cur = _execute(conn,
-        "SELECT DISTINCT symbol FROM prices WHERE interval = '1d' ORDER BY symbol"
-    )
-    all_symbols = [r[0] for r in cur.fetchall()]
-    release_connection(conn)
+    # Active constituents only — de-indexed names and index tickers still have
+    # price history, but computing indicators for them is wasted work.
+    from database.db import get_active_universe
+    all_symbols = get_active_universe()
 
     if symbol_filter:
         all_symbols = [s for s in all_symbols if s == symbol_filter]

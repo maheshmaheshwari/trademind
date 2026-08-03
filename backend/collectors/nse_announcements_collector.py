@@ -183,12 +183,10 @@ def collect_daily(lookback_days: int = 2) -> dict:
     from_dt = (datetime.now() - timedelta(days=lookback_days)).strftime("%d-%m-%Y")
 
     if not os.path.exists(_TOKENS_FILE):
-        conn = get_connection()
-        try:
-            cur = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d' ORDER BY symbol")
-            all_symbols = [r[0].replace(".NS", "") for r in cur.fetchall()]
-        finally:
-            release_connection(conn)
+        # Active constituents only — no point fetching announcements for names
+        # that left the index or for the index tickers themselves.
+        from database.db import get_active_universe
+        all_symbols = [s.replace(".NS", "") for s in get_active_universe()]
     else:
         with open(_TOKENS_FILE) as f:
             all_symbols = list(json.load(f).keys())
@@ -272,13 +270,10 @@ def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None
 
     # Load all symbols
     if not os.path.exists(_TOKENS_FILE):
-        # Fall back: get symbols from prices table
-        conn = get_connection()
-        try:
-            cur = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d' ORDER BY symbol")
-            all_symbols = [r[0].replace(".NS", "") for r in cur.fetchall()]
-        finally:
-            release_connection(conn)
+        # Fall back: active constituents from the DB (not every symbol in
+        # prices, which includes de-indexed names and index tickers).
+        from database.db import get_active_universe
+        all_symbols = [s.replace(".NS", "") for s in get_active_universe()]
     else:
         with open(_TOKENS_FILE) as f:
             all_symbols = list(json.load(f).keys())

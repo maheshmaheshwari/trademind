@@ -327,12 +327,25 @@ async def startup_event():
 
     # Only the scheduler worker runs DB init to avoid concurrent-update races
     # when all 4 workers start simultaneously.
-    if is_scheduler_worker:
+    #
+    # ENABLE_SCHEMA_INIT=false additionally opts out entirely, and dev.sh sets
+    # it. Same reasoning as ENABLE_SCHEDULER there — local dev must not write to
+    # the shared Timescale Cloud instance — but the scheduler switch did not
+    # cover this call, so under `bash dev.sh` every save to api/, analysis/,
+    # trading/, database/, collectors/ or scheduler/ restarted uvicorn and
+    # re-ran init_database() against PROD. That silently applied in-progress
+    # schema edits to production, and collided with deliberate migrations
+    # ("tuple concurrently updated"). Defaults to true so deployed servers,
+    # which set neither var, still self-initialize on boot.
+    _schema_init_enabled = os.environ.get("ENABLE_SCHEMA_INIT", "true").lower() != "false"
+    if is_scheduler_worker and _schema_init_enabled:
         try:
             init_database()
             logger.info("Database initialized (worker %d)", worker_pid)
         except Exception as e:
             logger.error("Database initialization failed: %s", e)
+    elif is_scheduler_worker:
+        logger.info("Skipping schema init (ENABLE_SCHEMA_INIT=false)")
 
     # Pull the encrypted model store from HF Hub in the background — deployed
     # containers boot with an empty final_models/ (ephemeral disk). Local dev

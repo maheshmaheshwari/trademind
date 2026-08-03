@@ -38,6 +38,13 @@ jobs:
     timeout-minutes: 330
     strategy:
       fail-fast: false
+      # Timescale Cloud memory is the binding constraint, not runner minutes.
+      # All 12 shards starting within an 11-minute window is what OOM'd the
+      # instance in run 30656726827 (shards 9-12 died in prefetch_all_data).
+      # The stagger below spaces the starts; this bounds how many can ever be
+      # resident at once. 6 x ~4h = two waves, still finishing well inside a
+      # Friday night.
+      max-parallel: 6
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     defaults:
@@ -94,6 +101,22 @@ jobs:
 
   finalize:
     needs: retrain
+    # always() so a partial retrain still gets finished. Without this, ONE failed
+    # shard skips finalize entirely and discards the work of every shard that
+    # succeeded: run 30656726827 trained 8 of 12 shards, pushed them to the
+    # store, then skipped finalize — so signals were never regenerated and the
+    # Space was never restarted, leaving production on the previous model set
+    # with nothing to show for four hours of training. Same reasoning as
+    # sync-universe.yml's finalize.
+    #
+    # Excludes cancellation only: a cancelled run is a deliberate abort and must
+    # not publish. It cannot be narrowed to "some shard succeeded" —
+    # needs.retrain.result collapses the whole matrix to 'failure' the moment any
+    # single shard fails, so there is no expression that distinguishes 8-of-12
+    # from 0-of-12. The cost of that is bounded: if every shard failed, finalize
+    # regenerates signals from the model set already in the store (the previous
+    # week's), which is what production is serving anyway.
+    if: ${{ always() && needs.retrain.result != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     defaults:

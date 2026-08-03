@@ -1225,10 +1225,14 @@ def get_nifty_constituents() -> List[Dict]:
     """Nifty 500 constituent list (symbol/name/sector) from the DB.
 
     Replaces the undeployed data.nifty500_full module — seed with
-    scripts/seed_nifty_constituents.py. Returns [] if the table isn't seeded."""
+    scripts/seed_nifty_constituents.py. Returns [] if the table isn't seeded.
+
+    Active constituents only: de-indexed names are kept as is_active = FALSE
+    rows for the audit trail, not to be served."""
     conn = get_connection()
     try:
-        cur = _execute(conn, "SELECT symbol, name, sector FROM nifty_constituents ORDER BY symbol")
+        cur = _execute(conn, "SELECT symbol, name, sector FROM nifty_constituents "
+                             "WHERE is_active = TRUE ORDER BY symbol")
         return [{"symbol": r[0], "name": r[1], "sector": r[2]} for r in cur.fetchall()]
     finally:
         release_connection(conn)
@@ -1259,13 +1263,52 @@ def upsert_nifty_constituents(rows: List[Dict]) -> int:
     try:
         for r in rows:
             _execute(conn,
+                # is_active/removed_at are reset on conflict so a name that
+                # rejoins the index after a review is reactivated rather than
+                # staying dormant — the caller passes the current NSE list, so
+                # anything in `rows` is by definition a live constituent.
                 """INSERT INTO nifty_constituents (symbol, name, sector) VALUES (?,?,?)
                    ON CONFLICT (symbol) DO UPDATE SET
-                       name = EXCLUDED.name, sector = EXCLUDED.sector, updated_at = NOW()""",
+                       name = EXCLUDED.name, sector = EXCLUDED.sector, updated_at = NOW(),
+                       is_active = TRUE, removed_at = NULL""",
                 (r.get("symbol"), r.get("name"), r.get("sector")))
         conn.commit()
         _sector_map_cache.clear()   # reseeded list must not be masked by the cache
         return len(rows)
+    finally:
+        release_connection(conn)
+
+
+def get_active_universe() -> List[str]:
+    """The tradable universe: current Nifty 500 constituents only.
+
+    Use this anywhere a job needs "every stock we trade". The obvious
+    alternative, `SELECT DISTINCT symbol FROM prices`, is wrong and was the
+    source of the weekly retrain training ~537 models instead of 500 — prices
+    also holds de-indexed names (their history is kept on purpose for
+    backtests) and the 4 index tickers (^NSEI, ^BSESN, ^INDIAVIX, ^CRSLDX),
+    which are benchmarks, not stocks. Market features read those benchmarks
+    from market_overview, never from a per-symbol prices row, so excluding
+    them here costs nothing.
+
+    Falls back to the prices enumeration only if nifty_constituents is empty
+    (a fresh DB that has not run the universe sync yet), so a brand-new
+    environment still bootstraps instead of silently training nothing.
+    """
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT symbol FROM nifty_constituents WHERE is_active = TRUE ORDER BY symbol")
+        symbols = [r[0] for r in cur.fetchall()]
+        if symbols:
+            return symbols
+
+        logger.warning("nifty_constituents is empty — falling back to prices enumeration. "
+                       "Run scripts/sync_nifty500_universe.py to populate the universe.")
+        cur = _execute(conn,
+            "SELECT DISTINCT symbol FROM prices WHERE interval='1d' ORDER BY symbol")
+        return [r[0] for r in cur.fetchall()
+                if not r[0].startswith("^") and not r[0].startswith("MARKET:")]
     finally:
         release_connection(conn)
 

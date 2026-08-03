@@ -751,25 +751,34 @@ def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = 
         logger.info("DRY-RUN: no indicator computation")
         return {"ok": [], "failed": []}
 
-    from analysis.signals import process_stock
+    # backfill_symbol, NOT process_stock. process_stock computes indicators over
+    # 400 days and then stores only df.iloc[-1] — one row, today's, which
+    # already exists. It is the reason these gaps accumulate in the first place,
+    # so calling it here detected 5257 missing dates and then wrote nothing,
+    # reporting "50 ok" in 3 seconds (run 30807471826).
+    from collectors.backfill_indicators_historical import backfill_symbol
 
     ok, failed = [], []
+    rows_written = 0
     for idx, sym in enumerate(targets, 1):
+        want = {d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+                for d in gaps[sym]}
         try:
-            res = process_stock(sym, days=400)
-            if res:
+            n = backfill_symbol(sym, only_dates=want)
+            if n:
                 ok.append(sym)
-                logger.info(f"[{idx}/{len(targets)}] {sym:18} {res.get('signal', '?'):10} "
-                            f"strength={res.get('strength', 0)}")
+                rows_written += n
+                logger.info(f"[{idx}/{len(targets)}] {sym:18} filled {n}/{len(want)} date(s)")
             else:
                 failed.append(sym)
-                logger.warning(f"[{idx}/{len(targets)}] {sym:18} returned no result "
-                               f"(likely < 14 bars)")
+                logger.warning(f"[{idx}/{len(targets)}] {sym:18} wrote 0 rows "
+                               f"(likely < 14 price bars)")
         except Exception as e:
             failed.append(sym)
             logger.error(f"[{idx}/{len(targets)}] {sym:18} FAILED: {str(e)[:100]}")
 
-    logger.info(f"Indicators computed: {len(ok)} ok, {len(failed)} failed")
+    logger.info(f"Indicators backfilled: {len(ok)} ok, {len(failed)} failed, "
+                f"{rows_written} row(s) written")
     return {"ok": ok, "failed": failed}
 
 

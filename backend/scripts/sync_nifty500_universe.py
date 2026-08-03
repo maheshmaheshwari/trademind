@@ -678,33 +678,69 @@ def step_prices(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None
 
 # ── Step 5: indicators ────────────────────────────────────────────────────────
 
+# Rows by which technical_indicators may legitimately trail prices before a
+# symbol counts as under-covered. Measured gap on fully-backfilled symbols is
+# 15-17 rows regardless of history length (HDFCBANK 887px/870ind,
+# RELIANCE 886/870, TCS 885/870), so 30 leaves headroom without masking a real
+# gap — the broken cases sat at 1 row against hundreds.
+_IND_WARMUP_TOLERANCE = 30
+
 def step_indicators(nse: List[Dict], dry_run: bool, only: Optional[List[str]] = None,
                     shard: Optional[Tuple[int, int]] = None) -> Dict:
-    """Compute technical indicators for constituents that don't have any yet.
+    """Compute technical indicators for constituents whose coverage is short.
 
     Cheap next to the price backfill (~2.5s a symbol, so ~21 min for a full
     500), but it takes the same shard so it can run in the same job as the
     prices slice it depends on.
+
+    Selection is by COVERAGE, not presence. It used to be
+    `nse - (SELECT DISTINCT symbol FROM technical_indicators)`, which asked only
+    "does this symbol have any indicator row at all". A newly added constituent
+    picks up exactly ONE row on its first EOD, from calculate_indicators_job
+    computing the latest bar — so it satisfied that test forever while having no
+    history at all. 19 new constituents sat at 1 row against 151-4109 price rows,
+    and every re-run reported "nothing to compute". Unlike sentiment, which
+    prefetch_all_data fills with 0.0 when absent, missing indicators arrive as
+    NaN across real features (RSI, MACD, Bollinger, SMA, ATR, ADX, Stoch, OBV),
+    so this silently poisoned training for those names.
     """
     tag = f" shard {shard[0]}/{shard[1]}" if shard else ""
     step_banner(5, "indicators", f"prices -> technical_indicators{tag}")
 
     conn = get_connection()
     try:
-        cur = _execute(conn, "SELECT DISTINCT symbol FROM technical_indicators")
-        have_ind = {r[0] for r in cur.fetchall()}
+        cur = _execute(conn, """
+            SELECT p.symbol, p.px, COALESCE(i.n, 0) AS ind
+            FROM (SELECT symbol, COUNT(*) AS px FROM prices
+                   WHERE interval = '1d' GROUP BY symbol) p
+            LEFT JOIN (SELECT symbol, COUNT(*) AS n FROM technical_indicators
+                        GROUP BY symbol) i ON i.symbol = p.symbol
+        """)
+        coverage = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
     finally:
         release_connection(conn)
 
-    have_px = db_symbols_with_prices()
-    targets = [s["symbol"] for s in nse if s["symbol"] in have_px and s["symbol"] not in have_ind]
+    # Indicators legitimately trail prices by a constant warmup, not a
+    # percentage — fully covered symbols sit at px-15..px-17 whether they have
+    # 300 rows or 4000 (measured across the universe). A ratio test would
+    # therefore chase short-history symbols forever, so allow an absolute
+    # tolerance comfortably above the observed warmup and flag anything below.
+    targets = [s["symbol"] for s in nse
+               if s["symbol"] in coverage
+               and coverage[s["symbol"]][1] < coverage[s["symbol"]][0] - _IND_WARMUP_TOLERANCE]
     if only:
         targets = [t for t in targets if t in only or t.replace(".NS", "") in only]
     if shard:
         idx, total = shard
         targets = targets[idx - 1::total]
 
-    logger.info(f"Constituents missing indicators: {len(targets)}")
+    for t in targets[:20]:
+        px, ind = coverage[t]
+        logger.info(f"      {t:16} {ind:>5} indicator rows vs {px:>5} price rows")
+    if len(targets) > 20:
+        logger.info(f"      ... and {len(targets) - 20} more")
+
+    logger.info(f"Constituents with incomplete indicators: {len(targets)}")
     if not targets:
         logger.info("Nothing to compute")
         return {"ok": [], "failed": []}
@@ -754,6 +790,18 @@ def shard_plan(nse: List[Dict], what: str, per_shard: Optional[int] = None) -> D
             cur = _execute(conn,
                            "SELECT DISTINCT symbol FROM news_sentiment WHERE symbol IS NOT NULL")
             cap, default_per = MAX_NEWS_SHARDS, SYMBOLS_PER_NEWS_SHARD
+        elif what == "indicators":
+            # "have" = adequately covered, using the SAME test step_indicators
+            # applies, so the plan can never disagree with what the step does.
+            cur = _execute(conn, """
+                SELECT p.symbol
+                FROM (SELECT symbol, COUNT(*) AS px FROM prices
+                       WHERE interval = '1d' GROUP BY symbol) p
+                LEFT JOIN (SELECT symbol, COUNT(*) AS n FROM technical_indicators
+                            GROUP BY symbol) i ON i.symbol = p.symbol
+                WHERE COALESCE(i.n, 0) >= p.px - ?
+            """, (_IND_WARMUP_TOLERANCE,))
+            cap, default_per = MAX_PRICE_SHARDS, SYMBOLS_PER_PRICE_SHARD
         else:
             cur = _execute(conn, "SELECT DISTINCT symbol FROM prices WHERE interval='1d'")
             cap, default_per = MAX_PRICE_SHARDS, SYMBOLS_PER_PRICE_SHARD
@@ -1008,7 +1056,7 @@ def main():
     p.add_argument("--shard", default=None, metavar="i/N",
                    help="step 6: process only shard i of N (round-robin over the "
                         "symbols needing news), e.g. --shard 3/6")
-    p.add_argument("--plan", choices=["prices", "news"], default=None,
+    p.add_argument("--plan", choices=["prices", "news", "indicators"], default=None,
                    help="print how many shards this step needs as GitHub Actions "
                         "output lines (count/shards/matrix) and exit — lets the "
                         "workflow matrix size itself to the actual intake")

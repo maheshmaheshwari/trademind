@@ -146,6 +146,18 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
+      # Same ~5.2GB (x2 for the hub cache) problem that broke sync-universe's
+      # finalize in run 30784056773 with ENOSPC — this job pulls the identical
+      # full set, so it needs the identical headroom.
+      - name: Free disk space for the model set
+        working-directory: .
+        run: |
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          echo "after:";  df -h / | tail -1
+
       # Pulls the complete fresh model set the shards just pushed, plus the
       # store's existing data files (retrain_results.csv history, angel_tokens).
       - name: Sync full model set from the store

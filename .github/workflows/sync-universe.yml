@@ -298,6 +298,21 @@ jobs:
         if: ${{ !inputs.skip_news }}
         run: python scripts/sync_nifty500_universe.py --steps news --news-score-only
 
+      # The model set is ~5.2GB and huggingface_hub materialises it twice (cache
+      # + target), so ~10.5GB is needed on top of CPU-torch and requirements.
+      # A stock ubuntu-latest runner does not have that: run 30784056773 died at
+      # 403/515 files with "OSError: [Errno 28] No space left on device", which
+      # skipped retire, the closing report and the Space restart. Dropping the
+      # preinstalled toolchains this job never uses reclaims ~20GB.
+      - name: Free disk space for the model set
+        working-directory: .
+        run: |
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          echo "after:";  df -h / | tail -1
+
       # Needs the full model set on disk to know what to archive, so it syncs
       # first. Deletion from the store is the default — a model left there is
       # re-downloaded and production keeps trading a de-indexed stock.

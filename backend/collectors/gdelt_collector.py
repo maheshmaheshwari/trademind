@@ -53,6 +53,26 @@ _GDELT_SLEEP = 12.0         # seconds between requests (conservative — GDELT e
 _TOKENS_FILE = os.path.join(_BACKEND_DIR, "data", "angel_tokens.json")
 _MAX_RECORDS = 250
 
+# Circuit breaker. A 429 from GDELT is indistinguishable, per-request, from
+# "busy right now" — but the API also refuses traffic wholesale for long
+# stretches (observed 2026-08-03: every request 429'd, from CI and from a
+# residential IP, via requests and curl, with any User-Agent and any query,
+# while gdeltproject.org itself served 200). Its own 429 body says as much:
+# "All high-traffic users should switch to our ngrams dataset."
+#
+# Without a breaker, that state costs 12 + 60 + 120 + 180 = 6.2 min PER MONTH
+# fetched and never terminates early: one shard ground through 19 months in 2
+# hours, wrote nothing, and had to be cancelled by hand. Retrying harder against
+# a wholesale block is pure waste, so give up quickly and fail loudly instead.
+_MAX_CONSECUTIVE_429_MONTHS = 5
+
+# Reset by any successful (non-429) response; see fetch_gdelt_month.
+_consecutive_429_months = 0
+
+
+class GdeltUnavailable(RuntimeError):
+    """GDELT refused enough consecutive requests that the run should abort."""
+
 
 # ---------------------------------------------------------------------------
 # Token map loader
@@ -111,6 +131,8 @@ def fetch_gdelt_month(
         "sort":          "DateDesc",
     }
 
+    global _consecutive_429_months
+
     for attempt in range(3):
         try:
             resp = requests.get(_GDELT_URL, params=params, timeout=20)
@@ -120,6 +142,7 @@ def fetch_gdelt_month(
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
+            _consecutive_429_months = 0     # a live response clears the breaker
             break
         except requests.exceptions.JSONDecodeError:
             # GDELT sometimes returns an empty body when there are no results
@@ -129,7 +152,16 @@ def fetch_gdelt_month(
             logger.warning(f"[{symbol}] {year}-{month:02d} GDELT error: {exc}")
             return []
     else:
-        logger.warning(f"[{symbol}] {year}-{month:02d}: exhausted retries — skipping")
+        _consecutive_429_months += 1
+        logger.warning(f"[{symbol}] {year}-{month:02d}: exhausted retries "
+                       f"({_consecutive_429_months} consecutive)")
+        if _consecutive_429_months >= _MAX_CONSECUTIVE_429_MONTHS:
+            raise GdeltUnavailable(
+                f"GDELT returned 429 for {_consecutive_429_months} consecutive "
+                f"month-fetches, exhausting all retries each time. The API is "
+                f"refusing traffic; continuing would burn "
+                f"~{(12 + 60 + 120 + 180) / 60:.0f} min per month for no data."
+            )
         return []
 
     try:

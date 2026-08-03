@@ -36,7 +36,9 @@ trademind/
 │   ├── scheduler/jobs.py      — APScheduler (EOD + hourly + weekly jobs)
 │   ├── trading/               — GTT manager, price monitor, risk manager, engine
 │   ├── scripts/                — Manual/CLI pipeline scripts (generate_trades.py, update_stocks_angel.py, retrain_*.py, run_*.sh, etc.) — imported by scheduler/jobs.py as `scripts.<name>`
-│   ├── final_models/          — 480 production .pkl models (~247MB) — live, loaded by the API
+│   ├── final_models/          — ~520 production .pkl models (~5.2GB) — live, loaded by the API
+│   │                            NB: a CI job that syncs the full set needs ~10.5GB free
+│   │                            (huggingface_hub writes a cache copy AND a target copy)
 │   ├── model_archives/
 │   │   ├── training_snapshots/ — Per-symbol training output (v2/v3) written by model_training.py, read by scripts/retrain_failed_models.py
 │   │   └── previous_models/    — Pre-retrain backups, written by scripts/retrain_walk_forward.py

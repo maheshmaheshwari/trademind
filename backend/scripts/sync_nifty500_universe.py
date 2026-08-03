@@ -833,7 +833,7 @@ def step_news(nse: List[Dict], dry_run: bool, from_year: int,
 
     collected, failed = [], []
     if missing and not score_only:
-        from collectors.gdelt_collector import bootstrap_gdelt
+        from collectors.gdelt_collector import GdeltUnavailable, bootstrap_gdelt
         # Per-symbol rather than only_missing=True so one symbol's failure
         # cannot abort the rest of the shard, and progress is logged per symbol.
         for i, sym in enumerate(missing, 1):
@@ -842,6 +842,15 @@ def step_news(nse: List[Dict], dry_run: bool, from_year: int,
             try:
                 bootstrap_gdelt(from_year=from_year, from_month=1, only_symbol=base)
                 collected.append(sym)
+            except GdeltUnavailable:
+                # Deliberately NOT swallowed by the per-symbol handler below.
+                # That handler exists so one bad symbol doesn't sink the shard,
+                # but a wholesale 429 block is not per-symbol — every remaining
+                # symbol would fail the same way, ~6 min per month apiece. Abort
+                # the step so the job fails in minutes instead of hours.
+                logger.error(f"    ABORTING: GDELT is refusing traffic "
+                             f"(stopped at {base}, {i}/{len(missing)})")
+                raise
             except Exception as e:
                 failed.append(sym)
                 logger.error(f"    {base} FAILED: {str(e)[:120]}")

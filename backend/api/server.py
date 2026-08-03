@@ -61,7 +61,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from api.rate_limit import limiter
 from api.routes import prices, indicators, sentiment, signals
-from database.db import init_database
+from database.db import ensure_schema
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -328,24 +328,25 @@ async def startup_event():
     # Only the scheduler worker runs DB init to avoid concurrent-update races
     # when all 4 workers start simultaneously.
     #
-    # ENABLE_SCHEMA_INIT=false additionally opts out entirely, and dev.sh sets
-    # it. Same reasoning as ENABLE_SCHEDULER there — local dev must not write to
-    # the shared Timescale Cloud instance — but the scheduler switch did not
-    # cover this call, so under `bash dev.sh` every save to api/, analysis/,
-    # trading/, database/, collectors/ or scheduler/ restarted uvicorn and
-    # re-ran init_database() against PROD. That silently applied in-progress
-    # schema edits to production, and collided with deliberate migrations
-    # ("tuple concurrently updated"). Defaults to true so deployed servers,
-    # which set neither var, still self-initialize on boot.
+    # ensure_schema(), NOT init_database(): boot creates missing tables and
+    # otherwise touches nothing. init_database() applies the full schema
+    # including ALTER TABLE / CREATE INDEX / migrations, which is not something a
+    # process that restarts on every file save should be doing — under
+    # `bash dev.sh` that applied half-finished schema_pg.py edits straight to
+    # PROD and raced deliberate migrations ("tuple concurrently updated").
+    # ENABLE_SCHEMA_INIT=false skips even the bootstrap; dev.sh sets it, mirroring
+    # ENABLE_SCHEDULER. Deployed servers set neither and still self-build on a
+    # fresh database.
     _schema_init_enabled = os.environ.get("ENABLE_SCHEMA_INIT", "true").lower() != "false"
     if is_scheduler_worker and _schema_init_enabled:
         try:
-            init_database()
-            logger.info("Database initialized (worker %d)", worker_pid)
+            created = ensure_schema()
+            logger.info("Schema %s (worker %d)",
+                        "created" if created else "already present", worker_pid)
         except Exception as e:
-            logger.error("Database initialization failed: %s", e)
+            logger.error("Schema check failed: %s", e)
     elif is_scheduler_worker:
-        logger.info("Skipping schema init (ENABLE_SCHEMA_INIT=false)")
+        logger.info("Skipping schema check (ENABLE_SCHEMA_INIT=false)")
 
     # Pull the encrypted model store from HF Hub in the background — deployed
     # containers boot with an empty final_models/ (ephemeral disk). Local dev

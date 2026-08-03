@@ -8,6 +8,8 @@ compression policies, and the news_daily_sentiment continuous aggregate.
 
 import logging
 import os
+import re
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -812,6 +814,57 @@ SQL_INDEXES = [
 ]
 
 
+# Every CREATE TABLE init_timescale runs, split by whether the table later
+# becomes a hypertable. Module constants rather than inline lists so
+# missing_tables() below derives its expectations from the same source that
+# creates them — add a table here and the startup check covers it automatically,
+# with no second list to keep in sync.
+SQL_REGULAR_TABLES = [
+    SQL_USERS, SQL_PORTFOLIOS, SQL_PORTFOLIO_SECTORS, SQL_PORTFOLIO_STOCKS,
+    SQL_TRADE_SIGNALS, SQL_RISK_SETTINGS,
+    SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS,
+    SQL_AUTHORIZED_TRADES, SQL_AUTOPILOT_SETTINGS, SQL_MARKET_OVERVIEW,
+    SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG, SQL_STRATEGY_BACKTEST,
+    SQL_NIFTY_CONSTITUENTS, SQL_MODEL_TRAINING_STATS,
+    SQL_PASSWORD_RESET_OTPS, SQL_USER_SESSIONS,
+    SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
+    SQL_AV_COVERAGE_TRACKER,
+    SQL_CORPORATE_ACTIONS, SQL_DELIVERY_DATA, SQL_MARKET_HOLIDAYS,
+]
+
+SQL_HYPERTABLE_TABLES = [
+    SQL_PRICES, SQL_TECHNICAL_INDICATORS, SQL_NEWS_SENTIMENT, SQL_APP_LOGS,
+]
+
+_CREATE_TABLE_RE = re.compile(
+    r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)", re.IGNORECASE)
+_SQL_LINE_COMMENT_RE = re.compile(r"--[^\n]*")
+
+
+def expected_tables() -> List[str]:
+    """Table names the schema declares, parsed from the CREATE statements.
+
+    SQL `--` comments are stripped first. The constants below explain themselves
+    in prose that includes the literal phrase "CREATE TABLE IF NOT EXISTS is a
+    no-op" — matched raw, that yields a table named "is", and the startup check
+    would then try to build the schema on every boot forever because a table by
+    that name can never exist.
+    """
+    names: List[str] = []
+    for sql in SQL_REGULAR_TABLES + SQL_HYPERTABLE_TABLES:
+        names.extend(_CREATE_TABLE_RE.findall(_SQL_LINE_COMMENT_RE.sub("", sql)))
+    return sorted(set(names))
+
+
+def missing_tables(conn) -> List[str]:
+    """Declared tables that do not exist in the connected database."""
+    cur = conn.cursor()
+    cur.execute("SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public'")
+    present = {r[0] for r in cur.fetchall()}
+    return [t for t in expected_tables() if t not in present]
+
+
 def init_timescale(conn) -> None:
     """
     Create all tables, hypertables, compression policies,
@@ -826,18 +879,7 @@ def init_timescale(conn) -> None:
     cur.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
 
     # Regular tables first (no time-series partitioning)
-    for sql in [
-        SQL_USERS, SQL_PORTFOLIOS, SQL_PORTFOLIO_SECTORS, SQL_PORTFOLIO_STOCKS,
-        SQL_TRADE_SIGNALS, SQL_RISK_SETTINGS,
-        SQL_ORDERS, SQL_POSITIONS, SQL_WATCHLIST, SQL_NOTIFICATIONS,
-        SQL_AUTHORIZED_TRADES, SQL_AUTOPILOT_SETTINGS, SQL_MARKET_OVERVIEW,
-        SQL_FII_DII_DAILY, SQL_SCHEDULER_LOG, SQL_STRATEGY_BACKTEST,
-        SQL_NIFTY_CONSTITUENTS, SQL_MODEL_TRAINING_STATS,
-        SQL_PASSWORD_RESET_OTPS, SQL_USER_SESSIONS,
-        SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
-        SQL_AV_COVERAGE_TRACKER,
-        SQL_CORPORATE_ACTIONS, SQL_DELIVERY_DATA, SQL_MARKET_HOLIDAYS,
-    ]:
+    for sql in SQL_REGULAR_TABLES:
         cur.execute(sql)
 
     # Add new columns to users table (idempotent ALTER TABLE)
@@ -890,8 +932,7 @@ def init_timescale(conn) -> None:
             logger.warning(f"trade_signals migration: {e}")
 
     # Hypertable candidates
-    for sql in [SQL_PRICES, SQL_TECHNICAL_INDICATORS, SQL_NEWS_SENTIMENT,
-                SQL_APP_LOGS]:
+    for sql in SQL_HYPERTABLE_TABLES:
         cur.execute(sql)
 
     conn.commit()

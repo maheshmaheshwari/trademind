@@ -181,11 +181,49 @@ def _on_conflict_replace(sql: str, unique_cols: List[str], update_cols: List[str
 # ---------------------------------------------------------------------------
 
 def init_database() -> None:
-    """Create all tables, hypertables, indexes (idempotent)."""
+    """Create all tables, hypertables, indexes (idempotent).
+
+    Applies the FULL schema, migrations included. This is the deliberate
+    migration entry point — use it from a script or a shell one-liner, not from
+    a process that restarts on its own. See ensure_schema() for the boot path.
+    """
     from database.schema_pg import init_timescale
     conn = get_connection()
     try:
         init_timescale(conn)
+    finally:
+        release_connection(conn)
+
+
+def ensure_schema() -> bool:
+    """Bootstrap the schema only if it is actually missing. Returns True if it ran.
+
+    The boot-time counterpart to init_database(). A fresh database gets built;
+    a database that already has every declared table is left completely alone.
+
+    The distinction matters because init_database() is not read-only against an
+    existing DB — beyond CREATE TABLE IF NOT EXISTS (a genuine no-op) it runs
+    ALTER TABLE ADD COLUMN, CREATE INDEX, and the trade_signals constraint
+    migration. Under `bash dev.sh`, watchfiles restarts uvicorn on every save,
+    so calling init_database() at startup meant a half-finished edit to
+    schema_pg.py was applied to PROD the moment it hit disk, and raced
+    deliberate migrations ("tuple concurrently updated").
+
+    Checking for missing tables rather than a single sentinel means a newly
+    declared table still gets created on the next boot.
+    """
+    from database.schema_pg import expected_tables, init_timescale, missing_tables
+    conn = get_connection()
+    try:
+        missing = missing_tables(conn)
+        if not missing:
+            logger.info("Schema present (%d tables) — nothing to create",
+                        len(expected_tables()))
+            return False
+        logger.info("Schema incomplete — creating %d missing table(s): %s",
+                    len(missing), ", ".join(missing))
+        init_timescale(conn)
+        return True
     finally:
         release_connection(conn)
 

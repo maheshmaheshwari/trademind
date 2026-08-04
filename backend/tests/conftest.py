@@ -62,6 +62,21 @@ def clean_db():
     # cache's back would leak one test's calendar into the next.
     from database.db import clear_holiday_cache
     clear_holiday_cache()
+
+    # slowapi's Limiter is a module-level singleton keyed by client IP, and
+    # TestClient presents the same IP for every request — so its counters are
+    # shared by the WHOLE session, not per test. /api/trading/register is capped
+    # at 5/hour, and almost every test registers a user to get a token, so from
+    # the sixth test onward they failed with
+    #   AssertionError: {"error":"Rate limit exceeded: 5 per 1 hour"}
+    # That single leak accounted for the bulk of the suite's failures, and it
+    # hid behind looking like many unrelated broken features: each test passes
+    # on its own and only fails in company.
+    #
+    # Reset rather than disable, so a test that deliberately exercises a limit
+    # still sees real limiter behaviour within its own run.
+    from api.rate_limit import limiter
+    limiter.reset()
     yield
 
 

@@ -1153,6 +1153,28 @@ def main():
     if "report" in steps:
         out["report"] = step_report(nse)
 
+    # Tell CI whether anything the Space actually loads has changed, so it can
+    # decide whether a restart is warranted. The Space re-reads the model set and
+    # the token map on boot, so only those matter: an indicators-only run
+    # changes neither, and restarting for it is pure disruption — every restart
+    # replays overdue jobs on startup, and that catch-up re-runs EOD collection
+    # and burns Angel One's rate quota, which then starves the genuinely
+    # scheduled run later the same day (2026-08-05: 224 "exceeding access rate"
+    # errors at 11:00 after a restart, then only 479/500 prices at 15:35).
+    gh_out = os.environ.get("GITHUB_OUTPUT")
+    if gh_out:
+        tok = out.get("tokens", {})
+        retired = len(out.get("retire", {}).get("retired", []) or [])
+        tokens_changed = bool(tok.get("added") or tok.get("removed"))
+        models_changed = retired > 0 or tokens_changed
+        try:
+            with open(gh_out, "a") as fh:
+                fh.write(f"retired={retired}\n")
+                fh.write(f"models_changed={'true' if models_changed else 'false'}\n")
+            logger.info(f"CI outputs: retired={retired} models_changed={models_changed}")
+        except Exception as exc:
+            logger.warning(f"Could not write GITHUB_OUTPUT: {exc}")
+
     logger.info("")
     logger.info("=" * 78)
     logger.info(f"DONE in {time.time() - t0:.0f}s — log: {LOG_PATH}")

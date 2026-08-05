@@ -390,7 +390,8 @@ jobs:
       - name: Sync model set from the store
         run: python scripts/model_store.py sync
 
-      - name: Retire de-indexed models
+      - id: retire
+        name: Retire de-indexed models
         run: |
           python scripts/sync_nifty500_universe.py \
             --steps retire \
@@ -402,7 +403,19 @@ jobs:
       - name: Closing comparison
         run: python scripts/sync_nifty500_universe.py --steps report
 
+      # Only when the Space would actually see something different. It reloads
+      # the model set and the token map on boot and nothing else, so a run that
+      # merely repaired indicators or fetched news gives it no reason to bounce.
+      #
+      # Restarting is not free: on startup the scheduler replays overdue jobs,
+      # and that catch-up re-runs EOD collection, which burns Angel One's
+      # per-account rate quota. The genuinely scheduled 15:35 run then gets
+      # throttled and collects a partial universe. On 2026-08-05 that produced
+      # 224 "exceeding access rate" errors after an 11:47 restart, then only
+      # 479/500 prices at 15:35. Eleven of the fifteen restarts in the three days
+      # to 2026-08-05 came from repeat dispatches of this workflow.
       - name: Restart the Space to pick up the new universe
+        if: ${{ steps.retire.outputs.models_changed == 'true' }}
         run: |
           python -c "
           import os
@@ -410,6 +423,12 @@ jobs:
           HfApi(token=os.environ['HF_TOKEN']).restart_space(os.environ['HF_SPACE_REPO'])
           print('Space restart requested')
           "
+
+      - name: Skip Space restart (nothing it loads changed)
+        if: ${{ steps.retire.outputs.models_changed != 'true' }}
+        run: |
+          echo "models_changed=${{ steps.retire.outputs.models_changed }}, retired=${{ steps.retire.outputs.retired }}"
+          echo "No models retired and no token-map change — leaving the Space running."
 
       - name: Upload finalize log
         if: always()

@@ -49,7 +49,38 @@ RATE_LIMIT_SECS = 0.35  # Angel One allows ~3 req/sec
 
 
 def load_token_map() -> Dict:
-    """Load the full Nifty 500 token map from angel_tokens.json."""
+    """Load the full Nifty 500 token map, fetching it from the store if absent.
+
+    data/** is excluded from the Space deploy (deploy_space.py IGNORE_PATTERNS)
+    and the container's disk is ephemeral, so angel_tokens.json only exists
+    there once the startup model-store sync has run. A retry that fires before
+    that sync finishes used to die on
+
+        EOD price collection failed:
+        [Errno 2] No such file or directory: '/app/data/angel_tokens.json'
+
+    losing that day's prices entirely (scheduler_log, eod_data, 2026-07-25).
+    The store is the authoritative source for this file, so fetch it rather
+    than fail — `only="data"` pulls a few KB, not the ~5GB model set.
+    """
+    if not os.path.exists(TOKENS_FILE):
+        print(f"⚠️  {TOKENS_FILE} missing — fetching data/ from the model store...")
+        try:
+            try:
+                from scripts.model_store import sync_models      # scheduler imports us as scripts.*
+            except ImportError:
+                from model_store import sync_models              # run directly: scripts/ is sys.path[0]
+            sync_models(only="data")
+        except Exception as exc:
+            print(f"❌ Could not fetch the token map from the store: {exc}")
+        if not os.path.exists(TOKENS_FILE):
+            raise FileNotFoundError(
+                f"{TOKENS_FILE} not found and could not be fetched from the model "
+                f"store. Check HF_TOKEN/MODEL_KEY, or run "
+                f"`python scripts/model_store.py sync --data-only`."
+            )
+        print("✅ Token map recovered from the store")
+
     with open(TOKENS_FILE) as f:
         return json.load(f)
 
@@ -231,12 +262,37 @@ def main(days: int = None):
         if len(failed_symbols) > 20:
             print(f"      ... and {len(failed_symbols) - 20} more")
 
-    # Verify final state
+    # Verify final state.
+    #
+    # Scoped to the last 7 days on purpose. This was
+    #   SELECT MAX(date), COUNT(DISTINCT symbol) FROM prices WHERE interval='1d'
+    # which is a full scan of a 202-chunk compressed hypertable — ~460k rows
+    # decompressed to print one cosmetic line — and it OOM'd the free-tier
+    # instance outright:
+    #   EOD price collection failed: out of memory
+    #   DETAIL: Failed while creating memory context "ExprContext"
+    # (scheduler_log, eod_data, 2026-08-03), aborting the whole EOD chain after
+    # the prices had already been written.
+    #
+    # A date-bounded predicate touches one or two chunks instead of all 202, and
+    # "how many symbols reported in the last week" is the more useful number
+    # here anyway — the all-time distinct count includes de-indexed names that
+    # stopped reporting months ago.
     conn = get_connection()
-    cur = _execute(conn, "SELECT MAX(date) as latest, COUNT(DISTINCT symbol) as symbols FROM prices WHERE interval = '1d'")
-    final = cur.fetchone()
-    print(f"\n📊 DB state: {final[1]} symbols, latest date: {final[0]}")
-    release_connection(conn)
+    try:
+        cur = _execute(conn, """
+            SELECT MAX(date), COUNT(DISTINCT symbol)
+              FROM prices
+             WHERE interval = '1d' AND date >= CURRENT_DATE - INTERVAL '7 days'
+        """)
+        final = cur.fetchone()
+        print(f"\n📊 DB state: {final[1]} symbols reporting in the last 7d, "
+              f"latest date: {final[0]}")
+    except Exception as exc:
+        # Never let a summary line abort the run — the prices are already in.
+        print(f"\n📊 DB state: summary query failed ({exc}) — collection itself succeeded")
+    finally:
+        release_connection(conn)
 
 
 if __name__ == "__main__":

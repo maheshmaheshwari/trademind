@@ -36,6 +36,12 @@ SECRET_KEYS = [
     "JWT_SECRET", "HF_TOKEN", "MODEL_KEY", "HF_MODELS_REPO",
     "CORS_ALLOWED_ORIGINS",
     "RESEND_API_KEY", "RESEND_FROM_EMAIL",
+    # Both live in .env and work locally, but were never in this list, so the
+    # Space never received them. The collectors then failed there while passing
+    # on every dev machine: alphavantage_collector logged
+    # "ALPHAVANTAGE_API_KEY not set in environment" once per symbol (~500 errors
+    # a run) and news_collector logged "NewsAPI key not configured".
+    "ALPHAVANTAGE_API_KEY", "NEWSAPI_KEY",
 ]
 
 # Test-instance credentials, pushed as TEST_PG* from backend/.env.test —
@@ -45,7 +51,19 @@ TEST_SECRET_KEYS = ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]
 # Never uploaded to the Space repo. .env exclusion is non-negotiable.
 IGNORE_PATTERNS = [
     ".env*", "venv/**", "final_models/**", "model_archives/**", "logs/**",
-    "data/**", "*.db", "**/__pycache__/**", "*.pyc", ".pytest_cache/**",
+    # data/ is data only — no importable code. stocks_list.py used to live here
+    # and production imported it, but backend/data/ is gitignored (.gitignore:41),
+    # so CI's checkout never contained the file and the deploy could not upload
+    # it whatever this list said. Result: `from data.stocks_list import ...`
+    # raised ModuleNotFoundError on the Space, breaking the index_data scheduler
+    # job and GET /api/heatmap/sectors, while working on every dev machine.
+    # It now lives in backend/config/, which is tracked and deployed.
+    #
+    # data/nifty500_full.py may stay here: only local scripts import it
+    # (seed_nifty_constituents.py, map_tokens.py), never the running server.
+    # Anything production imports must live in a tracked package, not data/.
+    "data/**",
+    "*.db", "**/__pycache__/**", "*.pyc", ".pytest_cache/**",
     "tests/**", "*.log", "htmlcov/**", ".coverage*", ".DS_Store",
 ]
 

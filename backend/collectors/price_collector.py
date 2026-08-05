@@ -26,7 +26,7 @@ import pandas as pd
 import yfinance as yf
 from tqdm import tqdm
 
-from data.stocks_list import NIFTY_50_STOCKS, INDEX_SYMBOLS, get_all_symbols
+from config.stocks_list import NIFTY_50_STOCKS, INDEX_SYMBOLS, get_all_symbols
 from database.db import get_connection, init_database, insert_prices_batch, get_latest_date
 
 # Configure logging

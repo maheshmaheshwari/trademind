@@ -45,13 +45,44 @@ IST = pytz.timezone("Asia/Kolkata")
 # Scheduler log helpers — write job run state to DB
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _event_scheduled_at(event):
+    """The planned fire time for an APScheduler event, as the log's dedup key.
+
+    APScheduler uses two different attribute names, and getting this wrong is
+    invisible rather than loud:
+
+        EVENT_JOB_SUBMITTED -> JobSubmissionEvent.scheduled_run_times  (plural, list)
+        EVENT_JOB_EXECUTED  -> JobExecutionEvent.scheduled_run_time    (singular)
+
+    Both listeners used to read `getattr(event, "scheduled_run_time", now())`.
+    On submission that attribute does not exist, so it silently fell back to
+    wall-clock now(); on completion it resolved to the real fire time. The two
+    writes therefore keyed different scheduled_at values (observed: a 'running'
+    row at 15:55:00.384373 — microseconds, i.e. now() — against a cron fire time
+    of exactly 15:55:00.000000), so ON CONFLICT (job_id, scheduled_at) never
+    matched and no run was ever marked done. scheduler_log read ~50% "failed"
+    while the jobs themselves were completing normally.
+
+    Returns None when neither attribute is present, so the caller can skip the
+    write rather than invent a key that cannot be matched later.
+    """
+    times = getattr(event, "scheduled_run_times", None)
+    if times:
+        return times[0]
+    return getattr(event, "scheduled_run_time", None)
+
+
 def _scheduler_log_write(
     job_id: str, job_name: str, scheduled_at,
     status: str, attempt: int = 0,
     error_msg: str = None,
     started_at=None, completed_at=None,
 ):
-    """Upsert a scheduler_log row. Silently swallows errors so it never breaks a job."""
+    """Upsert a scheduler_log row. Never raises — a logging failure must not break a job."""
+    if scheduled_at is None:
+        logger.warning("scheduler_log write skipped for %s/%s — no scheduled_at "
+                       "(the row could never be matched by a later update)", job_id, status)
+        return
     try:
         from database.db import get_connection, release_connection, _execute
         conn = get_connection()
@@ -72,7 +103,10 @@ def _scheduler_log_write(
         finally:
             release_connection(conn)
     except Exception as exc:
-        logger.debug("scheduler_log write skipped: %s", exc)
+        # WARNING, not DEBUG. At debug level this hid the fact that completion
+        # writes were failing for weeks — the table looked broken and nobody
+        # could see why. Still swallowed: bookkeeping must never fail a job.
+        logger.warning("scheduler_log write failed (%s/%s): %s", job_id, status, exc)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Recovery queue — run missed / failed jobs on startup (FIFO, single worker)
@@ -217,6 +251,41 @@ def run_recovery_queue():
                 logger.error("  🚫 %s permanently failed — manual run required", job_name)
 
 
+# Fraction of the active universe that must have BOTH a price bar and an
+# indicator row for today before the EOD chain is allowed to republish signals.
+# 0.90 admits the handful of constituents that legitimately report nothing on a
+# given day (suspensions, no trades) while rejecting the 130/500 case that
+# prompted this. Override with EOD_MIN_COVERAGE for a manual catch-up run.
+EOD_MIN_COVERAGE = float(os.environ.get("EOD_MIN_COVERAGE", "0.90"))
+
+
+def _eod_coverage():
+    """(expected, symbols_with_price_today, symbols_with_indicator_today).
+
+    Counts only ACTIVE constituents — prices also holds de-indexed names and the
+    index tickers, which would inflate the denominator and mask a real shortfall.
+    """
+    from database.db import get_connection, release_connection, _execute
+    conn = get_connection()
+    try:
+        cur = _execute(conn, """
+            SELECT
+              (SELECT COUNT(*) FROM nifty_constituents WHERE is_active),
+              (SELECT COUNT(*) FROM nifty_constituents c
+                WHERE c.is_active AND EXISTS (
+                      SELECT 1 FROM prices p
+                       WHERE p.symbol = c.symbol AND p.interval = '1d'
+                         AND p.date = CURRENT_DATE)),
+              (SELECT COUNT(*) FROM nifty_constituents c
+                WHERE c.is_active AND EXISTS (
+                      SELECT 1 FROM technical_indicators t
+                       WHERE t.symbol = c.symbol AND t.date = CURRENT_DATE))
+        """)
+        return cur.fetchone()
+    finally:
+        release_connection(conn)
+
+
 def collect_eod_data_job():
     """
     Daily job: EOD prices → indicators → trade signals (chained in order).
@@ -256,6 +325,40 @@ def collect_eod_data_job():
     except BaseException as e:
         logger.error(f"❌ [2/3] Indicators failed: {e} — aborting chain")
         raise RuntimeError(f"Indicators failed: {e}") from e
+
+    # ── Gate: refuse to publish signals computed from partial inputs ─────────
+    #
+    # Steps 1 and 2 report success even when they covered only part of the
+    # universe, and step 3 used to run regardless. On 2026-08-05 that published
+    # a full signal set built from 479/500 prices and indicators for just 130
+    # stocks ("✅ [2/3] Indicators done (130 stocks)") — and because
+    # insert_trade_signals_batch deactivates the previous set per symbol, those
+    # partial-input signals replaced good ones as the live recommendations.
+    #
+    # Stale signals are far safer than confidently wrong ones, so abort instead.
+    # Raising (rather than quietly skipping) marks the job failed, which lets the
+    # startup retry re-run the chain later when the data may be complete.
+    #
+    # Coverage is measured from the DB rather than the steps' return values:
+    # what matters is what generate_signals will actually read.
+    try:
+        expected, px_cov, ind_cov = _eod_coverage()
+        logger.info(f"   coverage check: prices {px_cov}/{expected}, "
+                    f"indicators {ind_cov}/{expected} (min {EOD_MIN_COVERAGE:.0%})")
+        if expected and (px_cov < expected * EOD_MIN_COVERAGE
+                         or ind_cov < expected * EOD_MIN_COVERAGE):
+            raise RuntimeError(
+                f"partial EOD data — prices {px_cov}/{expected}, "
+                f"indicators {ind_cov}/{expected}, below {EOD_MIN_COVERAGE:.0%}. "
+                f"Refusing to regenerate signals; existing signals stay active."
+            )
+    except RuntimeError:
+        logger.error("❌ [3/3] Skipped — %s", "partial data; keeping existing signals")
+        raise
+    except Exception as e:
+        # A broken coverage query must not silently disable the gate.
+        logger.error(f"❌ [3/3] Coverage check failed ({e}) — not publishing signals")
+        raise RuntimeError(f"EOD coverage check failed: {e}") from e
 
     # ── Step 3: Trade signal generation ──────────────────────────────────────
     logger.info("⏰ [3/3] Trade signal generation starting...")
@@ -921,7 +1024,7 @@ def start_scheduler() -> None:
         job_id = event.job_id
         job = scheduler.get_job(job_id)
         job_name = job.name if job else job_id
-        scheduled_at = getattr(event, "scheduled_run_time", datetime.now(IST))
+        scheduled_at = _event_scheduled_at(event)
 
         if event.code == EVENT_JOB_EXECUTED:
             elapsed = _time.time() - _job_start_times.pop(job_id, _time.time())
@@ -941,7 +1044,7 @@ def start_scheduler() -> None:
         _job_start_times[event.job_id] = _time.time()
         job = scheduler.get_job(event.job_id)
         job_name = job.name if job else event.job_id
-        scheduled_at = getattr(event, "scheduled_run_time", datetime.now(IST))
+        scheduled_at = _event_scheduled_at(event)
         _scheduler_log_write(event.job_id, job_name, scheduled_at, "running",
                              started_at=datetime.now(IST))
 
@@ -1219,7 +1322,7 @@ def start_background_scheduler() -> Optional[BackgroundScheduler]:
         job_id = event.job_id
         job = _bg_scheduler.get_job(job_id) if _bg_scheduler else None
         job_name = job.name if job else job_id
-        scheduled_at = getattr(event, "scheduled_run_time", datetime.now(IST))
+        scheduled_at = _event_scheduled_at(event)
 
         if event.code == EVENT_JOB_EXECUTED:
             elapsed = _time.time() - _job_start_times.pop(job_id, _time.time())
@@ -1238,7 +1341,7 @@ def start_background_scheduler() -> Optional[BackgroundScheduler]:
         _job_start_times[event.job_id] = _time.time()
         job = _bg_scheduler.get_job(event.job_id) if _bg_scheduler else None
         job_name = job.name if job else event.job_id
-        scheduled_at = getattr(event, "scheduled_run_time", datetime.now(IST))
+        scheduled_at = _event_scheduled_at(event)
         _scheduler_log_write(event.job_id, job_name, scheduled_at, "running",
                              started_at=datetime.now(IST))
 

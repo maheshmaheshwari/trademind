@@ -204,6 +204,17 @@ def collect_av_batch(
     Returns:
         Dict: processed, total_articles, remaining
     """
+    # Check the credential ONCE, before the loop. fetch_av_news raises
+    # "ALPHAVANTAGE_API_KEY not set in environment." per symbol, and the caller
+    # catches per symbol, so an unset key produced one ERROR line for every
+    # stock in the batch — ~500 identical errors per run on the deployed Space,
+    # burying real failures in the log. The key is either configured or it is
+    # not; that is a single fact, so report it once and skip the run.
+    if not os.getenv("ALPHAVANTAGE_API_KEY", ""):
+        logger.warning("ALPHAVANTAGE_API_KEY not set — skipping Alpha Vantage news "
+                       "collection (set it in the environment to enable)")
+        return {"processed": 0, "total_articles": 0, "remaining": 0, "skipped": "no_api_key"}
+
     if symbols is not None:
         # Manual override: look up ADR tickers for the given NSE symbols
         conn = get_connection()

@@ -1022,7 +1022,7 @@ async def heatmap_sectors():
     """
     Returns sector-wise performance data for the heatmap visualization.
     """
-    from data.stocks_list import NIFTY_50_STOCKS, get_all_sectors
+    from config.stocks_list import NIFTY_50_STOCKS, get_all_sectors
     from database.db import get_prices
 
     cached = get_cached("heatmap_sectors", "overview")

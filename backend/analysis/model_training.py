@@ -284,6 +284,117 @@ def precompute_sector_returns() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Offline training cache — read the DB once, train from files
+# ---------------------------------------------------------------------------
+#
+# Every retrain shard used to run TWO full-history scans of prices:
+# prefetch_all_data (a 5-table join) and precompute_sector_returns (unfiltered,
+# with LAG window functions over every symbol). Twelve shards therefore made 24
+# such scans, up to 6 concurrently, and the instance could not take it —
+# run 30905939291 lost 10 of 12 shards to
+#   psycopg2.errors.OutOfMemory
+#   DETAIL: Failed while creating memory context
+#           "DecompressBatchState bulk decompression"
+#
+# The waste is structural, not incidental: prices is a hypertable partitioned by
+# DATE and every chunk holds all ~537 symbols, so a shard asking for its 42
+# symbols still decompresses all 202 chunks and throws ~92% of the rows away.
+# Sharding harder cannot help; only doing the scans fewer times can.
+#
+# So one job exports the cache to disk — slice by slice, sequentially, each
+# query the same size as a shard's (a size we know succeeds) — and the shards
+# then train from files, touching prices zero times.
+#
+# joblib rather than parquet: it is already a dependency (the model artifacts
+# use it), and it round-trips a DatetimeIndex and mixed dtypes exactly, which
+# parquet does not without care.
+
+_SECTOR_RETURNS_FILE = "sector_returns.joblib"
+
+
+def shard_slice(symbols: list, shard: int, shards: int) -> list:
+    """Round-robin slice for `shard` of `shards` (1-based).
+
+    Round-robin, not contiguous blocks, so every slice gets a mix of
+    long-history and newly-listed symbols rather than one shard drawing all the
+    expensive ones. Must match retrain_all's own slicing exactly, or a shard
+    would train symbols it has no cached data for.
+    """
+    return symbols[shard - 1::shards]
+
+
+def export_training_data(out_dir: str, shards: int = 12, symbols: list = None) -> dict:
+    """Materialise the training cache to `out_dir`: one file per shard, plus sectors.
+
+    Returns {filename: symbol_count}.
+    """
+    import logging
+    import joblib
+    global _DATA_CACHE
+
+    log = logging.getLogger(__name__)
+    os.makedirs(out_dir, exist_ok=True)
+
+    if symbols is None:
+        from database.db import get_active_universe
+        symbols = get_active_universe()
+    log.info(f"Exporting training data for {len(symbols)} symbols into {shards} shard file(s)")
+
+    written = {}
+    for i in range(1, shards + 1):
+        syms = shard_slice(symbols, i, shards)
+        if not syms:
+            continue
+        # One slice at a time, sequentially. Same query size a shard used to
+        # issue, so it is known to fit; the difference is that nothing else is
+        # running against the instance at the same time.
+        _DATA_CACHE = {}
+        prefetch_all_data(symbols=syms)
+        payload = {s: _DATA_CACHE[s] for s in syms if s in _DATA_CACHE}
+        path = os.path.join(out_dir, f"training_data_{i}.joblib")
+        joblib.dump(payload, path, compress=3)
+        size_mb = os.path.getsize(path) / 1024 / 1024
+        log.info(f"   shard {i}/{shards}: {len(payload)} symbols -> {path} ({size_mb:.1f} MB)")
+        written[os.path.basename(path)] = len(payload)
+        _DATA_CACHE = {}          # free before the next slice
+
+    # Sector returns are universe-wide, so one file shared by every shard.
+    precompute_sector_returns()
+    sector_path = os.path.join(out_dir, _SECTOR_RETURNS_FILE)
+    joblib.dump(_SECTOR_RETURNS_CACHE, sector_path, compress=3)
+    log.info(f"   sectors: {len(_SECTOR_RETURNS_CACHE)} -> {sector_path}")
+    written[_SECTOR_RETURNS_FILE] = len(_SECTOR_RETURNS_CACHE)
+    return written
+
+
+def load_training_data(cache_path: str, sector_path: str = None) -> int:
+    """Load an exported shard cache, replacing whatever is in memory.
+
+    After this, load_data_for_symbol() and the sector features are served
+    entirely from the file — the shard makes no price queries at all.
+    """
+    import logging
+    import joblib
+    global _DATA_CACHE, _SECTOR_RETURNS_CACHE
+
+    log = logging.getLogger(__name__)
+    _DATA_CACHE = joblib.load(cache_path)
+    log.info(f"📦 Loaded training cache: {len(_DATA_CACHE)} symbols from {cache_path}")
+
+    if sector_path is None:
+        sector_path = os.path.join(os.path.dirname(cache_path) or ".", _SECTOR_RETURNS_FILE)
+    if os.path.exists(sector_path):
+        _SECTOR_RETURNS_CACHE = joblib.load(sector_path)
+        log.info(f"   sector returns: {len(_SECTOR_RETURNS_CACHE)} sectors")
+    else:
+        # Not fatal — sector features degrade to neutral, same as when the
+        # pre-computation query fails. Loud, because it is silent otherwise.
+        log.warning(f"   sector returns file missing at {sector_path} — "
+                    f"sector features will be disabled for this shard")
+    return len(_DATA_CACHE)
+
+
+# ---------------------------------------------------------------------------
 # Horizons: thresholds tuned for ~30-35% positive class rate
 # (raw return target — alpha features used as INPUT, not target)
 # ---------------------------------------------------------------------------

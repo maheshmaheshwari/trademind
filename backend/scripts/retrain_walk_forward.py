@@ -228,10 +228,17 @@ def _worker(args):
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
+def _cached_symbols() -> set:
+    """Symbols currently resident in the training cache."""
+    from analysis.model_training import _DATA_CACHE
+    return set(_DATA_CACHE)
+
+
 def retrain_all(symbol_filter: Optional[str] = None,
                 workers: int = 1,
                 resume: bool = True,
-                shard: Optional[Tuple[int, int]] = None):
+                shard: Optional[Tuple[int, int]] = None,
+                training_data: Optional[str] = None):
     from database.db import get_active_universe
 
     # Current Nifty 500 constituents only. This used to be
@@ -267,12 +274,31 @@ def retrain_all(symbol_filter: Optional[str] = None,
     logger.info(f"   Stocks: {total}  |  Workers: {workers}")
     logger.info(f"{'='*70}\n")
 
-    # Pre-fetch ALL stock data from DB once — zero DB queries during training
-    logger.info("⏳ Pre-fetching all stock data from DB...")
-    from analysis.model_training import prefetch_all_data, precompute_sector_returns
-    prefetch_all_data(symbols=pending)     # only fetch symbols we'll actually train
-    precompute_sector_returns()            # sector returns from the cached price data
-    logger.info("✅ All data cached — starting training (zero DB queries from here)\n")
+    if training_data:
+        # Cache exported by an earlier job (see model_training.export_training_data).
+        # This shard reads prices ZERO times: both full-history scans it would
+        # otherwise run — the prefetch join and the unfiltered sector-returns
+        # window query — were done once, sequentially, by the export job.
+        logger.info(f"📦 Loading training cache from {training_data} (no DB scans)...")
+        from analysis.model_training import load_training_data
+        n = load_training_data(training_data)
+        missing = [s for s in pending if s not in _cached_symbols()]
+        if missing:
+            # Fail loudly. Silently training a subset would look like success
+            # while quietly dropping symbols from the model set.
+            logger.error(f"Training cache is missing {len(missing)} of this shard's "
+                         f"{len(pending)} symbols, e.g. {missing[:5]}")
+            logger.error("The export's shard slicing must match this job's — "
+                         "check --shard i/N is identical on both sides.")
+            sys.exit(1)
+        logger.info(f"✅ {n} symbols loaded from cache — starting training\n")
+    else:
+        # Pre-fetch ALL stock data from DB once — zero DB queries during training
+        logger.info("⏳ Pre-fetching all stock data from DB...")
+        from analysis.model_training import prefetch_all_data, precompute_sector_returns
+        prefetch_all_data(symbols=pending)     # only fetch symbols we'll actually train
+        precompute_sector_returns()            # sector returns from the cached price data
+        logger.info("✅ All data cached — starting training (zero DB queries from here)\n")
 
     results = []
     done = 0

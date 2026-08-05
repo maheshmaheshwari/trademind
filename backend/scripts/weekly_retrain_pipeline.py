@@ -112,18 +112,21 @@ def wait_for_eod_prices(skip: bool = False) -> bool:
 
 
 def run_retrain(workers: int, resume: bool,
-                shard: Optional[Tuple[int, int]] = None) -> bool:
+                shard: Optional[Tuple[int, int]] = None,
+                training_data: Optional[str] = None) -> bool:
     """Retrain all 499 models (or one shard of them). Returns True on success."""
     logger.info("")
     logger.info("=" * 70)
     logger.info("🤖 STEP 2 — Model Retraining")
     shard_txt = f"  |  Shard: {shard[0] + 1}/{shard[1]}" if shard else ""
-    logger.info(f"   Workers: {workers}  |  Resume: {resume}{shard_txt}")
+    cache_txt = f"  |  Cache: {training_data}" if training_data else ""
+    logger.info(f"   Workers: {workers}  |  Resume: {resume}{shard_txt}{cache_txt}")
     logger.info("=" * 70)
     t0 = time.time()
     try:
         from retrain_walk_forward import retrain_all
-        retrain_all(workers=workers, resume=resume, shard=shard)
+        retrain_all(workers=workers, resume=resume, shard=shard,
+                    training_data=training_data)
         elapsed = (time.time() - t0) / 3600
         logger.info(f"✅ Retraining complete in {elapsed:.1f}h")
         return True
@@ -172,7 +175,8 @@ def run_upload_models(include_data: bool = True, label: str = "") -> bool:
 
 
 def run_pipeline(workers: int = 1, resume: bool = False, skip_wait: bool = False,
-                 shard: Optional[Tuple[int, int]] = None):
+                 shard: Optional[Tuple[int, int]] = None,
+                 training_data: Optional[str] = None):
     """Full pipeline, or one shard of it.
 
     Shard mode (GitHub Actions matrix): retrain only this shard's symbols and
@@ -199,7 +203,8 @@ def run_pipeline(workers: int = 1, resume: bool = False, skip_wait: bool = False
         sys.exit(1)
 
     # ── Step 2: Retrain models ───────────────────────────────────────────────────
-    retrain_ok = run_retrain(workers=workers, resume=resume, shard=shard)
+    retrain_ok = run_retrain(workers=workers, resume=resume, shard=shard,
+                             training_data=training_data)
     if not retrain_ok:
         logger.error("Pipeline aborted — retraining failed.")
         sys.exit(1)
@@ -262,11 +267,35 @@ if __name__ == "__main__":
     parser.add_argument("--shard", type=_parse_shard, default=None, metavar="I/N",
                         help="Train only shard I of N (1-based) and upload models "
                              "only — for parallel CI runners")
+    parser.add_argument("--export-training-data", metavar="DIR", default=None,
+                        help="Read the DB once and write a per-shard training cache "
+                             "to DIR, then exit. Shards then train from those files "
+                             "with --training-data and never scan prices.")
+    parser.add_argument("--export-shards", type=int, default=12, metavar="N",
+                        help="How many shard files --export-training-data writes "
+                             "(must equal the N the shards are run with)")
+    parser.add_argument("--training-data", metavar="FILE", default=None,
+                        help="Train from an exported cache file instead of querying "
+                             "the DB (see --export-training-data)")
     args = parser.parse_args()
+
+    if args.export_training_data:
+        # Export-only mode: no training, no uploads. Runs the scans sequentially
+        # so the instance never sees more than one at a time.
+        import logging as _logging
+        _logging.getLogger().setLevel(_logging.INFO)
+        from analysis.model_training import export_training_data
+        written = export_training_data(args.export_training_data,
+                                       shards=args.export_shards)
+        logger.info("Export complete:")
+        for name, count in written.items():
+            logger.info(f"   {name:28} {count} entries")
+        sys.exit(0)
 
     run_pipeline(
         workers=args.workers,
         resume=not args.no_resume,
         skip_wait=args.skip_wait or True,  # Friday night — EOD prices already collected
         shard=args.shard,
+        training_data=args.training_data,
     )

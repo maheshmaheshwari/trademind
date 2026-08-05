@@ -33,17 +33,87 @@ env:
   RETRAIN_RUN_ID: gha_${{ github.run_id }}
 
 jobs:
+  # ── 0. Read the DB once, so the shards never have to ──────────────────────
+  #
+  # Each shard used to run TWO full-history scans of prices: prefetch_all_data's
+  # 5-table join, and precompute_sector_returns' unfiltered LAG-window query.
+  # Twelve shards = 24 such scans, up to 6 at a time, and the free-tier instance
+  # (shared CPU/memory, 256 MB shared_buffers) cannot take it — run 30905939291
+  # lost 10 of 12 shards to
+  #   psycopg2.errors.OutOfMemory
+  #   DETAIL: Failed while creating memory context
+  #           "DecompressBatchState bulk decompression"
+  #
+  # Sharding harder does not help: prices is partitioned by DATE and every chunk
+  # holds all ~537 symbols, so a shard asking for its 42 still decompresses all
+  # 202 chunks and discards ~92% of the rows. Only doing the scans fewer times
+  # helps. This job does them once, sequentially, and publishes the result.
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PGHOST: ${{ secrets.PGHOST }}
+      PGPORT: ${{ secrets.PGPORT }}
+      PGDATABASE: ${{ secrets.PGDATABASE }}
+      PGUSER: ${{ secrets.PGUSER }}
+      PGPASSWORD: ${{ secrets.PGPASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Export per-shard training cache
+        run: |
+          python scripts/weekly_retrain_pipeline.py \
+            --export-training-data training-cache \
+            --export-shards 12
+
+      - name: Show cache size
+        run: du -sh training-cache && ls -la training-cache
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: training-cache-${{ github.run_id }}
+          path: backend/training-cache
+          retention-days: 2
+          if-no-files-found: error
+
   retrain:
+    needs: export
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
       fail-fast: false
-      # Timescale Cloud memory is the binding constraint, not runner minutes.
-      # All 12 shards starting within an 11-minute window is what OOM'd the
-      # instance in run 30656726827 (shards 9-12 died in prefetch_all_data).
-      # The stagger below spaces the starts; this bounds how many can ever be
-      # resident at once. 6 x ~4h = two waves, still finishing well inside a
-      # Friday night.
+      # Timescale Cloud memory is the binding constraint, not runner minutes,
+      # and the instance is on the free tier — 256 MB shared_buffers.
+      #
+      # prefetch_all_data joins prices (59 MB) and technical_indicators
+      # (193 MB): ~252 MB of compressed data against a 256 MB buffer pool, with
+      # every shard decompressing its own slice concurrently. 6 was already too
+      # many — run 30905939291 lost 10 of 12 shards to
+      #   psycopg2.errors.OutOfMemory
+      #   DETAIL: Failed while creating memory context
+      #           "DecompressBatchState bulk decompression"
+      # (a different context from the "Caller tuples" sort OOM fixed earlier —
+      # that one is gone).
+      #
+      # Shards now train from the exported cache and scan prices ZERO times, so
+      # the memory constraint that forced this down to 2 is gone. Kept at 6
+      # rather than removed: the remaining DB traffic is small (get_active_universe,
+      # corporate actions, stats writes), but this OOM has been misdiagnosed
+      # twice already, so raise it only once a full run is observed clean.
       max-parallel: 6
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
@@ -73,22 +143,27 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
-      # Stagger shard starts so the prefetch queries don't all hit Timescale
-      # Cloud simultaneously — concurrent big sorts OOM'd the instance
-      # (shard 1 of run 29821691143: "out of memory ... TupleSort main").
-      # 60s is enough now that each prefetch is filtered to its own shard.
-      - name: Stagger start (shard ${{ matrix.shard }})
-        run: sleep $(( (${{ matrix.shard }} - 1) * 60 ))
-        working-directory: .
+      - name: Download training cache
+        uses: actions/download-artifact@v8
+        with:
+          name: training-cache-${{ github.run_id }}
+          path: backend/training-cache
+
+      # No stagger any more. It existed to spread the prefetch queries out in
+      # time; this shard issues none — it trains from the cache file below.
 
       # Retry once: the second attempt resumes, skipping symbols whose models
       # were already trained before the failure.
       - name: Retrain shard ${{ matrix.shard }}/12
+        env:
+          CACHE: training-cache/training_data_${{ matrix.shard }}.joblib
         run: |
-          python scripts/weekly_retrain_pipeline.py --shard ${{ matrix.shard }}/12 --no-resume || {
+          python scripts/weekly_retrain_pipeline.py \
+            --shard ${{ matrix.shard }}/12 --no-resume --training-data "$CACHE" || {
             echo "::warning::shard ${{ matrix.shard }} failed — retrying once in 5 minutes"
             sleep 300
-            python scripts/weekly_retrain_pipeline.py --shard ${{ matrix.shard }}/12
+            python scripts/weekly_retrain_pipeline.py \
+              --shard ${{ matrix.shard }}/12 --training-data "$CACHE"
           }
 
       - name: Upload shard training stats

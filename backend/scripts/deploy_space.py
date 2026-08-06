@@ -50,7 +50,15 @@ TEST_SECRET_KEYS = ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"]
 
 # Never uploaded to the Space repo. .env exclusion is non-negotiable.
 IGNORE_PATTERNS = [
-    ".env*", "venv/**", "final_models/**", "model_archives/**", "logs/**",
+    # NB: these are prefix globs, not substring matches — "final_models/**" does
+    # NOT cover final_models_rolling/ or final_models_frozen_sample/. Those two
+    # plus models/ are untracked local scratch dirs (0 files in git), so a CI
+    # deploy never saw them, but a LOCAL `deploy_space.py push` uploads the
+    # working tree and sent 356 MB of .pkl to the Space on 2026-08-06. Any new
+    # model/scratch directory must be added here explicitly.
+    ".env*", "venv/**", "logs/**",
+    "final_models/**", "final_models_*/**", "model_archives/**",
+    "models/**", "coverage/**",
     # data/ is data only — no importable code. stocks_list.py used to live here
     # and production imported it, but backend/data/ is gitignored (.gitignore:41),
     # so CI's checkout never contained the file and the deploy could not upload

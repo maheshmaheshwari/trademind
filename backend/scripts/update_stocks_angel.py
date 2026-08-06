@@ -45,7 +45,29 @@ logger = logging.getLogger(__name__)
 # Config
 # ==========================================
 TOKENS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "angel_tokens.json")
-RATE_LIMIT_SECS = 0.35  # Angel One allows ~3 req/sec
+# Angel One nominally allows ~3 req/sec, but throttles well below that under a
+# sustained 500-symbol run. 0.35s sat exactly on the nominal ceiling with no
+# headroom, and on 2026-08-06 the EOD collection was refused from the third
+# symbol onward — 60 "Access denied because of exceeding access rate" rejections
+# between 15:35:05 and 15:43:09, losing 60 of 500 stocks (coverage 440/500, 88%)
+# with no restart or competing run to blame. 0.6s halves the request rate and
+# costs about 2 extra minutes over the full universe.
+RATE_LIMIT_SECS = float(os.environ.get("ANGEL_RATE_LIMIT_SECS", "0.6"))
+
+# A throttled symbol used to be dropped for the day: the loop logged the failure
+# and moved on, so one bad window permanently cost 12% of the universe and, with
+# the EOD coverage gate in place, blocked the whole signal refresh. Rate-limit
+# rejections are transient, so retry them once at the end with a much wider gap.
+RETRY_RATE_LIMIT_SECS = float(os.environ.get("ANGEL_RETRY_RATE_LIMIT_SECS", "2.0"))
+_RATE_LIMIT_MARKERS = ("exceeding access rate", "access denied", "too many requests")
+
+
+def _is_rate_limited(err: str) -> bool:
+    """True when a fetch failed because Angel One throttled us, not because the
+    symbol is bad. Only these are worth retrying — a delisted token will fail
+    identically on the second pass and just burn quota."""
+    e = (err or "").lower()
+    return any(m in e for m in _RATE_LIMIT_MARKERS)
 
 
 def load_token_map() -> Dict:
@@ -182,6 +204,7 @@ def main(days: int = None):
     failed = 0
     total_rows = 0
     failed_symbols = []
+    rate_limited = []   # [(symbol, info)] — retried after the main pass
 
     for idx, (symbol, info) in enumerate(token_map.items(), 1):
         pct = (idx / total) * 100
@@ -221,6 +244,10 @@ def main(days: int = None):
             else:
                 failed += 1
                 failed_symbols.append(symbol)
+                # Keep throttled symbols separately — they are retryable, and a
+                # dropped symbol costs a full day of prices for that stock.
+                if _is_rate_limited(str(e)):
+                    rate_limited.append((symbol, info))
                 logger.warning(f"[{idx}/{total}] {symbol} FAILED: {e}")
                 time.sleep(RATE_LIMIT_SECS)
                 continue
@@ -240,6 +267,41 @@ def main(days: int = None):
             print(f"  ⏳ Progress: {idx}/{total} ({pct:.0f}%) — {total_rows} new rows so far")
 
         time.sleep(RATE_LIMIT_SECS)
+
+    # ── Retry pass: symbols Angel One throttled ──────────────────────────────
+    #
+    # Only rate-limited failures, and only once. A throttled symbol is a
+    # transient loss; leaving it dropped costs that stock a full day of prices,
+    # and enough of them push EOD coverage under the gate and block the entire
+    # signal refresh (2026-08-06: 60 throttled, coverage 440/500, signals held
+    # back). Retried at RETRY_RATE_LIMIT_SECS — much slower than the main pass,
+    # since being throttled is precisely the evidence we were going too fast.
+    if rate_limited:
+        wait = 30
+        print(f"\n   🔁 {len(rate_limited)} symbol(s) were rate-limited — "
+              f"pausing {wait}s, then retrying at {RETRY_RATE_LIMIT_SECS}s/request "
+              f"(~{len(rate_limited) * RETRY_RATE_LIMIT_SECS / 60:.1f} min)")
+        time.sleep(wait)
+
+        recovered = 0
+        for r_idx, (symbol, info) in enumerate(rate_limited, 1):
+            try:
+                rows = fetch_candles(smart_api, symbol=symbol, token=info["token"],
+                                     exchange="NSE", days=days_missing)
+                if rows:
+                    inserted = insert_prices_batch(rows, sync=False)
+                    total_rows += inserted
+                if symbol in failed_symbols:
+                    failed_symbols.remove(symbol)
+                failed -= 1
+                success += 1
+                recovered += 1
+                logger.info(f"   [retry {r_idx}/{len(rate_limited)}] {symbol:15s} recovered")
+            except Exception as e:
+                logger.warning(f"   [retry {r_idx}/{len(rate_limited)}] {symbol} still failing: {e}")
+            time.sleep(RETRY_RATE_LIMIT_SECS)
+
+        print(f"   🔁 Retry recovered {recovered}/{len(rate_limited)} symbol(s)")
 
     # Logout
     try:

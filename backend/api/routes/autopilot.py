@@ -18,10 +18,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from api.auth import decode_token
-from database.db import _execute, _rows_to_dicts, get_connection, release_connection, insert_notification
+from database.db import (_execute, _rows_to_dicts, get_active_signal_id, get_connection,
+                         insert_notification, release_connection)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/autopilot", tags=["Autopilot"])
+
+# Minimum upside a BUY mandate must offer, as a percent of entry. Round-trip
+# costs (brokerage 0.05% + STT 0.1% + SEBI + stamp duty) are roughly 0.165%, so
+# below this a trade cannot profit even when it reaches its target.
+MIN_UPSIDE_PCT = 0.5
 
 
 async def _get_current_user(authorization: Optional[str] = Header(None)):
@@ -169,21 +175,23 @@ def _fire_pending_mandates(user_id: int):
     """Execute all PENDING mandates for a user (called when autopilot is turned ON)."""
     conn = get_connection()
     try:
-        # Atomic claim (audit M12): a single UPDATE...WHERE status='PENDING'
-        # RETURNING * means a rapid toggle-off/on that spawns a second
-        # concurrent _fire_pending_mandates can't also claim the same rows —
-        # by the time it runs its own claim, status is no longer 'PENDING'
-        # for anything the first call already grabbed. status is set
-        # straight to 'EXECUTED' as the claim marker since the
-        # authorized_trades CHECK constraint has no separate "claimed" state;
-        # failed executions are reverted back to 'PENDING' below so they
-        # remain retryable, matching the pre-existing failure semantics.
+        # Read only — do NOT claim here. _execute_mandate does the atomic claim
+        # (SET status='EXECUTING' WHERE status='PENDING'), which is the single
+        # place that decides who owns a mandate.
+        #
+        # This used to pre-claim by setting 'EXECUTED', because the CHECK
+        # constraint had no 'EXECUTING' state. That deadlocked the two claims
+        # against each other: this call consumed the PENDING state, then
+        # _execute_mandate looked for PENDING, matched nothing, returned
+        # "Trade already claimed by another executor", and the error handler
+        # below reverted the row to PENDING. Every mandate cycled
+        # PENDING -> EXECUTED -> PENDING and no order was ever placed, so
+        # turning autopilot ON silently did nothing. 'EXECUTING' is now a
+        # permitted status, so the real claim works and this must not race it.
         cur = _execute(conn,
-            "UPDATE authorized_trades SET status = 'EXECUTED', updated_at = NOW() "
-            "WHERE user_id = ? AND status = 'PENDING' RETURNING *",
+            "SELECT * FROM authorized_trades WHERE user_id = ? AND status = 'PENDING'",
             (user_id,))
         pending = _rows_to_dicts(cur)
-        conn.commit()
     finally:
         release_connection(conn)
 
@@ -203,7 +211,13 @@ def _fire_pending_mandates(user_id: int):
             logger.warning(f"Mandate {trade['symbol']} failed: {res['error']}")
             conn = get_connection()
             try:
-                _execute(conn, "UPDATE authorized_trades SET status = 'PENDING', updated_at = NOW() WHERE id = ?", (trade["id"],))
+                # Only release a claim we actually hold. An unconditional revert
+                # would reset a row another executor had just claimed, handing
+                # the same mandate to two executors — the precise race the
+                # EXECUTING claim exists to prevent.
+                _execute(conn,
+                    "UPDATE authorized_trades SET status = 'PENDING', updated_at = NOW() "
+                    "WHERE id = ? AND status = 'EXECUTING'", (trade["id"],))
                 conn.commit()
             finally:
                 release_connection(conn)
@@ -322,24 +336,68 @@ async def authorize_trade(body: AuthorizeTradeBody, background_tasks: Background
         settings = _ensure_settings(conn, body.user_id)
         autopilot_on = settings["enabled"]
 
+        # Refuse a trade with no upside. Independent of where the numbers came
+        # from — a target at or below the entry is not a trade, whatever the
+        # model or the client believed.
+        #
+        # This is the second line of defence; generate_trades now rejects the
+        # malformed target_pct that caused it (see MIN_TARGET_PCT). It stays
+        # because that bug reached a real mandate: authorized_trades id 3,
+        # AADHARHFC, entry 518.50 / target 518.53 — three paise of upside a
+        # share, less than the round-trip fees — and nothing between the model
+        # and the user's capital questioned it.
+        if body.signal in ("BUY", "STRONG BUY") and body.entry and body.target:
+            # A minimum upside, not merely target > entry. AADHARHFC's target of
+            # 518.53 against an entry of 518.50 IS greater — by three paise — so
+            # a strict inequality would have waved it through. Round-trip costs
+            # (brokerage 0.05% + STT 0.1% + SEBI + stamp) are about 0.165%, so
+            # anything under MIN_UPSIDE_PCT cannot profit even if it works.
+            upside_pct = (body.target / body.entry - 1) * 100
+            if upside_pct < MIN_UPSIDE_PCT:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"Target ₹{body.target:,.2f} is only {upside_pct:.3f}% above "
+                            f"entry ₹{body.entry:,.2f} — below the {MIN_UPSIDE_PCT}% "
+                            f"minimum, which round-trip fees would consume."))
+            if body.sl and body.sl >= body.entry:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"Stop-loss ₹{body.sl:,.2f} is not below entry "
+                            f"₹{body.entry:,.2f} — it would trigger immediately."))
+
         # If a bracket_id is supplied the position is already open — mark EXECUTED immediately
         # so the autopilot page reflects the real state and square_off() can settle it.
         initial_status = "EXECUTED" if body.bracket_id else "PENDING"
 
         cur = _execute(conn,
+            # trade_signal_id is captured HERE, at authorisation — the signal the
+            # user actually saw and agreed to. trading_engine resolves its own
+            # link at execution time via get_active_signal_id(), which records
+            # whatever happens to be active when the order fires; for a mandate
+            # authorised on 2026-06-26 that was the 2026-06-23 signal. For
+            # "which recommendation did the user act on", only this one is true.
             """INSERT INTO authorized_trades
                (user_id, symbol, name, sector, signal, mode, qty, amount,
-                entry, target, sl, exp_profit, max_loss, cmp, bracket_id, status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                entry, target, sl, exp_profit, max_loss, cmp, bracket_id, status,
+                trade_signal_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                RETURNING *""",
             (body.user_id, body.symbol, body.name, body.sector,
              body.signal, body.mode, body.qty, body.amount,
              body.entry, body.target, body.sl,
              body.exp_profit, body.max_loss, body.cmp,
-             body.bracket_id, initial_status))
+             body.bracket_id, initial_status,
+             get_active_signal_id(body.symbol)))
         conn.commit()
         rows = _rows_to_dicts(cur)
         trade = rows[0] if rows else {}
+    except HTTPException:
+        # Deliberate 4xx (e.g. the no-upside validation above) must reach the
+        # client as itself. The bare `except Exception` below would otherwise
+        # re-wrap it as a 500, turning "target is not above entry" into an
+        # opaque server error.
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         logger.error(f"authorize_trade insert error: {e}")

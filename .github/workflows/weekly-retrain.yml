@@ -22,6 +22,19 @@ on:
   schedule:
     - cron: '30 17 * * 5'   # Friday 23:00 IST — EOD prices land by ~16:30 IST
   workflow_dispatch:
+    inputs:
+      skip_signals:
+        description: >-
+          Train and publish models but do NOT regenerate trade signals.
+          Use when the day's EOD data is incomplete: the models are unaffected
+          (they train on history to TRAIN_END, months back), but signals are
+          priced off the LATEST bar, so publishing them from a partial
+          collection replaces a good signal set with a worse one. The EOD
+          chain's coverage gate protects its own signal step; finalize calls
+          generate_trades directly and is not behind that gate.
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: weekly-retrain
@@ -80,6 +93,27 @@ jobs:
             --export-training-data training-cache \
             --export-shards 12
 
+      # The sector map now comes from nifty_constituents, not the undeployed
+      # data/angel_tokens.json, so this should never trip. It stays because the
+      # old failure was silent: an empty map degraded seven features into
+      # duplicates and constants, and every CI retrain shipped that way for
+      # months (run 30446143141, 2026-07-29: "Sector returns cached for 0
+      # sectors"). Better to fail the export than ship 500 dead-featured models.
+      - name: Fail if the sector cache is empty
+        run: |
+          python - <<'PY'
+          import joblib, sys
+          cache = joblib.load("training-cache/sector_returns.joblib")
+          live = sum(1 for s in cache.values() if getattr(s, "std", lambda: 0)() > 0)
+          print(f"sector_returns: {len(cache)} sectors, {live} with variance")
+          if not cache:
+              sys.exit("sector cache EMPTY — nifty_constituents.sector is unseeded; "
+                       "shards would train with sector features disabled")
+          if live == 0:
+              sys.exit("sector cache has entries but all series are flat — "
+                       "the returns query produced no signal")
+          PY
+
       - name: Show cache size
         run: du -sh training-cache && ls -la training-cache
 
@@ -109,12 +143,23 @@ jobs:
       # (a different context from the "Caller tuples" sort OOM fixed earlier —
       # that one is gone).
       #
-      # Shards now train from the exported cache and scan prices ZERO times, so
-      # the memory constraint that forced this down to 2 is gone. Kept at 6
-      # rather than removed: the remaining DB traffic is small (get_active_universe,
-      # corporate actions, stats writes), but this OOM has been misdiagnosed
-      # twice already, so raise it only once a full run is observed clean.
-      max-parallel: 6
+      # All 12 at once. The cap existed because every shard ran two
+      # full-history scans of prices and six concurrent ones exhausted the
+      # free-tier instance; shards now train from the exported cache and issue
+      # NO scans, so that constraint is gone. What remains per shard is a
+      # handful of small queries (get_active_universe, corporate actions,
+      # model_training_stats inserts) — trivial against max_connections=105.
+      #
+      # Capping does not make shards faster, only later: each is ~4h regardless
+      # (42 symbols x ~5.4 min, measured from run 30905939291 shard 2), so 6
+      # meant two waves and ~8h wall clock, pushing a same-day run into market
+      # hours and towards the 330-minute job cap. One wave is ~4h.
+      #
+      # Evidence this is safe: in run 31065812830 six shards loaded their cache
+      # in ~1s and ran 1.5h with zero DB errors before the run was cancelled.
+      # fail-fast: false plus finalize's always() mean a bad shard still cannot
+      # sink the others.
+      max-parallel: 12
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     defaults:
@@ -256,7 +301,41 @@ jobs:
           wc -l data/retrain_results.csv
 
       - name: Generate trade signals
+        if: ${{ !inputs.skip_signals }}
         run: python scripts/generate_trades.py
+
+      - name: Skip signal generation (skip_signals)
+        if: ${{ inputs.skip_signals }}
+        run: |
+          echo "skip_signals=true — models are trained and pushed, signals left untouched."
+          echo "The existing active signal set stays live; the next clean EOD chain refreshes it."
+
+      # Notify watchlist users that the signals just changed.
+      #
+      # signal_notifications is scheduled at 17:30 IST, which on a retrain day
+      # falls BETWEEN the two signal generations: the EOD chain writes signals
+      # from the outgoing model set at ~16:00, 17:30 notifies on those, and then
+      # this job regenerates them from the newly trained models at ~23:50 with
+      # nobody told. Users acted on a superseded set until the next day's 17:30.
+      #
+      # notify_signal_changes_job is pure DB work (reads trade_signals/watchlist,
+      # writes notifications) with no Space-specific dependency, so it runs here
+      # with the PG credentials this job already has. Its LAG-over-generated_at
+      # comparison naturally diffs the 16:00 set against this one, so it reports
+      # exactly what the retrain changed rather than repeating the 17:30 run.
+      #
+      # Non-fatal: models and signals are already published by this point, and a
+      # notification failure must not fail the retrain.
+      - name: Notify watchlist users of signal changes
+        # Nothing changed when signals were skipped — notifying would announce a
+        # diff that does not exist.
+        if: ${{ !inputs.skip_signals }}
+        continue-on-error: true
+        run: |
+          python -c "
+          from scheduler.jobs import notify_signal_changes_job
+          notify_signal_changes_job()
+          "
 
       - name: Push training stats to the store
         run: python scripts/model_store.py upload "weekly retrain stats + signals" --data-only

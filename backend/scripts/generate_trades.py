@@ -43,6 +43,22 @@ OUTPUT_DIR = "data"
 MIN_RR = 1.0            # reward:risk floor for stop placement (backtest-chosen)
 ATR_FLOOR_MULT = 1.0    # stop never tighter than this x ATR (whipsaw guard)
 
+# Smallest target the model may express, as a PERCENT. target_pct comes straight
+# from the model artifact (`h_art.get("target_pct", 2.0)`) and was used unchecked
+# in `buy_price * (1 + target_pct / 100)`, so a malformed value silently produced
+# a degenerate trade rather than an error.
+#
+# That happened: an artifact carried target_pct = 0.005 — 0.5% written as a
+# FRACTION where the formula expects a percent — which yielded entry 518.50 →
+# target 518.53, a 0.006% target. It was authorised as a real mandate
+# (authorized_trades id 3, AADHARHFC, 2026-06-30) whose entire upside was 3 paise
+# a share, less than the round-trip fees.
+#
+# The trained horizons are 1.5 / 2.5 / 3.5 / 5 / 7 / 10, so anything below 1% is
+# not a tighter target — it is a corrupt one. Reject rather than clamp: a wrong
+# unit means the artifact cannot be trusted to size the trade at all.
+MIN_TARGET_PCT = 1.0
+
 
 def calculate_trade_levels(df, signal, horizon, model_target_pct):
     """Calculate buy price, target price, and stop loss based on ATR and model horizon."""
@@ -67,8 +83,27 @@ def calculate_trade_levels(df, signal, horizon, model_target_pct):
     
     atr_pct = atr / latest_close * 100 if latest_close > 0 else 2.0
     
-    # Target % based on model horizon
-    target_pct = model_target_pct  # e.g., 0.5% for 1 week, 5% for 3 months
+    # Target % based on model horizon. Validated: see MIN_TARGET_PCT — a
+    # malformed artifact value used to flow straight into the price maths and
+    # produce a target indistinguishable from the entry.
+    target_pct = model_target_pct
+    if not target_pct or target_pct < MIN_TARGET_PCT:
+        # Same shape as the HOLD branch below, so every caller keeps working.
+        print(f"   ⚠️  [{horizon}] target_pct={target_pct!r} is below the "
+              f"{MIN_TARGET_PCT}% floor — refusing to size a trade from it "
+              f"(a fraction like 0.005 where a percent like 0.5 was expected "
+              f"produces a target equal to the entry). Forcing HOLD.")
+        return {
+            "trade_type": "HOLD",
+            "current_price": latest_close,
+            "buy_price": None,
+            "target_price": None,
+            "stop_loss": None,
+            "atr_14": round(atr, 2),
+            "atr_pct": round(atr_pct, 2),
+            "risk_reward": 0,
+            "expected_return_pct": 0,
+        }
     
     # Stop loss is derived from a minimum reward:risk (MIN_RR), not from a flat
     # ATR multiple. The target stays anchored to the model's horizon expectation

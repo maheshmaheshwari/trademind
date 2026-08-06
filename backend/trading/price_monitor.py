@@ -153,6 +153,23 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
             """, (current_price, current_value, pnl, pnl_pct,
                   datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pos_dict["id"]))
 
+            # Keep the autopilot mandates' cmp in step with the position.
+            #
+            # authorized_trades.cmp was written once at authorisation and never
+            # touched again, so it always equalled `entry`. The autopilot page
+            # renders it as the live market price, which meant every row showed
+            # a P&L of exactly +₹0 no matter how far the stock had moved — the
+            # screen looked frozen because the number genuinely was. Observed on
+            # all 8 of user 2's mandates (e.g. BAJAJFINSV cmp=1764.60 while the
+            # stock traded at 2080).
+            #
+            # Updated here rather than on read: this loop already has a live LTP
+            # (or the DB fallback), so it is the one place that knows the price.
+            _execute(conn, """
+                UPDATE authorized_trades SET cmp = ?, updated_at = NOW()
+                 WHERE user_id = ? AND symbol = ? AND status = 'EXECUTED'
+            """, (current_price, pos_dict["user_id"], symbol))
+
             # Commit now so this UPDATE's row lock is released before
             # square_off() (on its own pooled connection) takes its own
             # FOR UPDATE lock on the same row below.

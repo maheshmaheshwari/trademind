@@ -62,3 +62,6 @@ docs/
 .claude/.proven-config-version
 .claude/proven-config.json
 .claude-flow/
+
+# Local planning notes — not part of the shipped repo
+plans/

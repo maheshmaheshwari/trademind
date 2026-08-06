@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS authorized_trades (
     cmp         DOUBLE PRECISION,
     actual_pnl  DOUBLE PRECISION,
     status      TEXT DEFAULT 'PENDING'
-                    CHECK (status IN ('PENDING','EXECUTED','COMPLETED','STOPPED')),
+                    CHECK (status IN ('PENDING','EXECUTING','EXECUTED','COMPLETED','STOPPED','CANCELLED')),
     bracket_id  TEXT,
     sl_gtt_id   TEXT,
     target_gtt_id TEXT,
@@ -479,6 +479,39 @@ CREATE INDEX IF NOT EXISTS idx_portfolios_user_id ON portfolios (user_id);
 SQL_POSITIONS_ALTER = """
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 """
+
+# Migration: authorized_trades gains a link to the AI signal it was authorised
+# against, and a CANCELLED status.
+#
+# trade_signal_id: the mandate recorded only signal='BUY', never WHICH signal.
+# The link existed on orders (trading_engine resolves get_active_signal_id at
+# EXECUTION time), which is both indirect and wrong in a subtle way: it records
+# whatever signal is active when the order fires, not the one the user actually
+# saw and authorised. A mandate authorised on 2026-06-26 was tagged with the
+# 2026-06-23 signal for that reason. Captured at authorisation instead.
+#
+# CANCELLED: a PENDING mandate whose signal has disappeared, with no fresh BUY
+# to replace it, is stale — it should not sit waiting to buy on a thesis the
+# model has withdrawn. Five of user 2's mandates sat PENDING from 2026-07-30
+# with prices well past their entries (TBOTEK entry 1498.50, target 1573.40,
+# last 1667.50 — the target was exceeded while the trade was still pending).
+# The existing CHECK had no terminal state for "no longer valid".
+SQL_AUTHORIZED_TRADES_ALTER = [
+    "ALTER TABLE authorized_trades ADD COLUMN IF NOT EXISTS trade_signal_id BIGINT "
+    "REFERENCES trade_signals(id) ON DELETE SET NULL",
+    "CREATE INDEX IF NOT EXISTS idx_auth_trades_signal ON authorized_trades (trade_signal_id)",
+    "ALTER TABLE authorized_trades DROP CONSTRAINT IF EXISTS authorized_trades_status_check",
+    # EXECUTING is a real state, not a typo. _execute_mandate claims a mandate
+    # with `SET status='EXECUTING' WHERE status='PENDING'` so two concurrent
+    # executors cannot both fire the same trade — but the CHECK rejected the
+    # value, so _fire_pending_mandates worked around it by pre-claiming with
+    # 'EXECUTED' instead. That produced a deadlock between the two claims: the
+    # caller set EXECUTED, _execute_mandate then looked for PENDING, matched
+    # nothing, reported "already claimed", and the caller reverted to PENDING.
+    # Turning autopilot ON fired nothing at all.
+    "ALTER TABLE authorized_trades ADD CONSTRAINT authorized_trades_status_check "
+    "CHECK (status IN ('PENDING','EXECUTING','EXECUTED','COMPLETED','STOPPED','CANCELLED'))",
+]
 
 # Migration: an index review drops names, and step_constituents used to DELETE
 # those rows outright — leaving no record a symbol was ever a constituent, and
@@ -911,6 +944,15 @@ def init_timescale(conn) -> None:
             except Exception as e:
                 conn.rollback()
                 logger.warning(f"ALTER TABLE positions: {e}")
+
+    # authorized_trades: signal link + CANCELLED status (idempotent)
+    for stmt in SQL_AUTHORIZED_TRADES_ALTER:
+        try:
+            cur.execute(stmt)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"authorized_trades migration: {e}")
 
     # Add is_active/removed_at to nifty_constituents (idempotent ALTER TABLE)
     for stmt in SQL_NIFTY_CONSTITUENTS_ALTER.strip().split("\n"):

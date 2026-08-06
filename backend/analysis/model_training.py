@@ -37,14 +37,53 @@ import os as _os
 
 _PH = "%s"
 
-# ── Sector map from angel_tokens.json ──────────────────────────────────────
-_TOKENS_PATH = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "data", "angel_tokens.json")
+# ── Sector map, from the DB ────────────────────────────────────────────────
+#
+# nifty_constituents.sector is the source, NOT data/angel_tokens.json. This
+# module used to read that file at import time, which meant:
+#
+#   * data/ is gitignored and excluded from the Space deploy, so the file does
+#     not exist in CI or in production — the map came back empty
+#   * precompute_sector_returns() then dropped every row on `sector == NaN` and
+#     logged "Sector returns cached for 0 sectors"
+#   * all seven sector features silently degraded: alpha_vs_sector_{1,5,20}d
+#     became exact duplicates of return_{1,5,20}d, sector_momentum became a
+#     constant 0, and stock_vs_sector_vol became 10,000x stock volatility via
+#     the .clip(lower=0.0001) divide-by-zero guard
+#
+# Every CI retrain trained that way (confirmed in run 30446143141, 2026-07-29).
+# db.get_sector_map() already existed and already carried this fix for the
+# signals path — its docstring describes this exact failure — but training was
+# never migrated. CLAUDE.md is explicit that persisted data belongs in the DB;
+# the DB holds all 500 constituents with 20 sectors and no blanks.
+#
+# Loaded lazily rather than at import: a DB round-trip during module import
+# would make importing this module require a live database.
 _SECTOR_MAP: dict = {}
-try:
-    _raw = _json.load(open(_TOKENS_PATH))
-    _SECTOR_MAP = {f"{sym}.NS": info.get("sector", "Unknown") for sym, info in _raw.items()}
-except Exception:
-    pass
+
+
+def _sector_map() -> dict:
+    """symbol -> sector from nifty_constituents, resolved once per process."""
+    global _SECTOR_MAP
+    if _SECTOR_MAP:
+        return _SECTOR_MAP
+    import logging as _logging
+    log = _logging.getLogger(__name__)
+    try:
+        from database.db import get_sector_map
+        _SECTOR_MAP = dict(get_sector_map())
+    except Exception as exc:
+        log.warning(f"Sector map unavailable from the DB: {exc}")
+    if not _SECTOR_MAP:
+        # Loud, not silent. An empty map is what produced 0 sectors and seven
+        # dead features for months; it must never pass unnoticed again.
+        log.warning("Sector map is EMPTY — sector features will be disabled. "
+                    "Seed nifty_constituents (scripts/seed_nifty_constituents.py) "
+                    "or run the universe sync.")
+    else:
+        log.info(f"Sector map: {len(_SECTOR_MAP)} symbols, "
+                 f"{len(set(_SECTOR_MAP.values()))} sectors (from nifty_constituents)")
+    return _SECTOR_MAP
 
 # ── Sector returns cache (pre-computed once, reused for all stocks) ─────────
 # Dict: {sector_name: pd.Series(index=date, values=avg_daily_return)}
@@ -261,7 +300,7 @@ def precompute_sector_returns() -> None:
 
         df_all['date']         = pd.to_datetime(df_all['date'])
         df_all['daily_return'] = pd.to_numeric(df_all['daily_return'], errors='coerce')
-        df_all['sector']       = df_all['symbol'].map(_SECTOR_MAP)
+        df_all['sector']       = df_all['symbol'].map(_sector_map())
         df_all = df_all.dropna(subset=['sector', 'daily_return'])
         df_all = df_all[df_all['sector'] != 'Unknown']
 
@@ -638,7 +677,7 @@ def load_data_for_symbol(symbol: str) -> pd.DataFrame:
 
     # ── Priority 7: Sector-relative return (from pre-computed cache) ─────────
     # No DB query here — _SECTOR_RETURNS_CACHE was built once before training started
-    sector = _SECTOR_MAP.get(symbol, "")
+    sector = _sector_map().get(symbol, "")
     if sector and sector != "Unknown" and sector in _SECTOR_RETURNS_CACHE:
         try:
             sect_series = _SECTOR_RETURNS_CACHE[sector]

@@ -316,10 +316,22 @@ def execute_signal(
         # so no caller — autopilot, a future script, anything — can bypass
         # them by skipping the one HTTP route that used to be the only place
         # this ran).
-        quantity_for_check = int(investment_amount / buy_price) if buy_price > 0 else 0
+        # ONE quantity, used by the risk checks, the orders and the position.
+        #
+        # This used to be int() here and round() at order time, so the checks
+        # validated a quantity the order did not use: with 11.6 shares' worth of
+        # funding, check_order saw 11 and the order placed 12. That is a
+        # risk-control bypass (position-size and exposure limits approved for a
+        # smaller trade than executed) and it overspends the allocation, since
+        # actual_investment = quantity * buy_price then exceeds investment_amount.
+        #
+        # Floor, not round: never buy more than the user funded. It also lines
+        # the order up with authorized_trades.qty, whose disagreement left user 2
+        # with a position of 68 shares against entry orders totalling 67.
+        quantity = int(investment_amount / buy_price) if buy_price > 0 else 0
         approved, reason, checks = check_order(
             user_id=user_id, symbol=symbol, investment_amount=investment_amount,
-            quantity=quantity_for_check, mode=mode,
+            quantity=quantity, mode=mode,
         )
         if not approved:
             raise RiskCheckFailed(reason, checks)
@@ -341,8 +353,8 @@ def execute_signal(
         # A second buy for the same symbol merges via ON CONFLICT DO UPDATE below.
         _fetchone(conn, "SELECT id FROM positions WHERE user_id = ? AND symbol = ? FOR UPDATE", (user_id, symbol))
 
-        # Calculate quantity BEFORE capacity check so both use the same value.
-        quantity = round(investment_amount / buy_price)
+        # quantity was computed above, before check_order, so the risk checks,
+        # the capacity check, the orders and the position all use one value.
         if quantity < 1:
             raise ValueError(f"Investment amount ₹{investment_amount:.2f} too small for {symbol} at ₹{buy_price:.2f}")
 
@@ -711,18 +723,59 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
 
         conn.commit()
 
-        # Settle the autopilot mandate if this position was AI-managed
-        if bracket_id:
-            try:
+        # Settle EVERY autopilot mandate this position covered — not just the
+        # one whose bracket_id the position happens to carry.
+        #
+        # positions is UNIQUE(user_id, symbol) and execute_signal merges on
+        # conflict, deliberately keeping the FIRST bracket_id so price-monitor
+        # tracking is not disrupted. So a second mandate on the same symbol is
+        # folded into the same row and its bracket_id is discarded. Settling by
+        # bracket_id alone therefore closed only the first mandate and orphaned
+        # the rest at status='EXECUTED' forever, with no position behind them.
+        #
+        # Real case (user 2, BAJAJFINSV.NS): mandate 1 (56 @ 1765) created the
+        # position; mandate 2 (11 @ 1764.6) merged in; on 2026-07-31 the target
+        # hit and all 67 shares were sold, but only mandate 1 was settled — and
+        # it was credited the full 67-share P&L of 14,339.99 rather than its own
+        # 11,860.80. Mandate 2 still showed "Running" six days later against a
+        # position that no longer existed.
+        #
+        # So: settle every EXECUTED mandate for this user+symbol, and apportion
+        # the realised P&L by quantity so each mandate reports its own share.
+        try:
+            cur = _execute(conn,
+                """SELECT id, bracket_id, qty FROM authorized_trades
+                    WHERE user_id = ? AND symbol = ? AND status = 'EXECUTED'
+                    ORDER BY id""",
+                (user_id, symbol))
+            mandates = cur.fetchall()
+
+            if mandates:
                 mandate_status = "COMPLETED" if trigger == "TARGET" else "STOPPED"
-                _execute(conn,
-                    """UPDATE authorized_trades
-                       SET status = ?, actual_pnl = ?, updated_at = NOW()
-                       WHERE bracket_id = ? AND status = 'EXECUTED'""",
-                    (mandate_status, net_pnl, bracket_id))
+                total_qty = sum((m[2] or 0) for m in mandates) or 0
+                for m_id, m_bracket, m_qty in mandates:
+                    # Proportional split; falls back to an equal share if the
+                    # quantities are missing so nothing is left unsettled.
+                    share = ((m_qty or 0) / total_qty) if total_qty else (1.0 / len(mandates))
+                    # cmp is set to the EXIT price, not left at entry. The
+                    # autopilot page renders cmp as the live market price, and
+                    # price_monitor only refreshes it while status='EXECUTED';
+                    # once settled nothing touches it again, so a closed mandate
+                    # would display its entry price forever and show a P&L of
+                    # +₹0 next to a realised profit.
+                    _execute(conn,
+                        """UPDATE authorized_trades
+                           SET status = ?, actual_pnl = ?, cmp = ?, updated_at = NOW()
+                           WHERE id = ? AND status = 'EXECUTED'""",
+                        (mandate_status, round(net_pnl * share, 2), sell_price, m_id))
                 conn.commit()
-            except Exception as _e:
-                _angel_log.warning(f"Could not settle authorized_trade for bracket {bracket_id}: {_e}")
+                if len(mandates) > 1:
+                    _angel_log.info(
+                        f"Settled {len(mandates)} mandates sharing {symbol} "
+                        f"(qty {total_qty}) — P&L {net_pnl:+,.2f} apportioned by quantity"
+                    )
+        except Exception as _e:
+            _angel_log.warning(f"Could not settle authorized_trades for {symbol}: {_e}")
 
         # Get updated user
         user = _fetchone(conn, "SELECT * FROM users WHERE id = ?", (user_id,))

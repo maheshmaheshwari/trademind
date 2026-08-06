@@ -943,6 +943,220 @@ def weekly_retrain_job():
         logger.error(f"❌ Weekly retrain pipeline failed: {e}", exc_info=True)
 
 
+# Signals that still justify holding a PENDING buy mandate. Anything else —
+# HOLD, SELL, STRONG SELL, or no signal at all — means the model has withdrawn
+# the thesis the user authorised.
+_BUY_SIGNALS = ("BUY", "STRONG BUY")
+
+# How far the entry may rise above what the user authorised before the mandate
+# is cancelled instead of refreshed.
+#
+# A refresh must not quietly commit the user to a materially worse trade.
+# Cheaper than agreed is the same trade on better terms and needs no new
+# consent; materially dearer is a different trade and does.
+#
+# 2% rather than 0: a strict rule cancels on ordinary daily drift — on
+# 2026-08-06 it would have killed IDFCFIRSTB over +0.53% and ETERNAL over
+# +0.27%, which is noise, not a changed thesis. 2% still catches the real moves
+# (ELECON +4.3%, NBCC +2.8%), where the user would be buying meaningfully higher
+# for fewer shares than they approved. Those are cancelled so they re-authorise
+# deliberately. Tune with AUTOPILOT_ENTRY_DRIFT; 0 disables any upward drift.
+_ENTRY_DRIFT_TOLERANCE = float(os.environ.get("AUTOPILOT_ENTRY_DRIFT", "0.02"))
+
+
+def refresh_pending_mandates_job():
+    """Re-point PENDING mandates at the current signal, or cancel them.
+
+    A PENDING mandate is a standing instruction to buy on a recommendation the
+    model made at some point in the past. Signals are regenerated after every
+    EOD, so that recommendation goes stale within a day: five of user 2's
+    mandates sat PENDING from 2026-07-30 with prices well past their entries
+    (TBOTEK entry 1498.50, target 1573.40, last close 1667.50 — the target was
+    exceeded while the trade was still waiting to buy).
+
+    Two outcomes per mandate:
+
+      * the symbol no longer has an active BUY/STRONG BUY signal
+            -> CANCELLED. Do not keep waiting to buy on a withdrawn thesis.
+      * a newer signal exists for the same horizon
+            -> refresh entry/target/sl and re-point trade_signal_id at it.
+              `amount` is the anchor (the capital the user committed); qty is
+              recomputed from it with floor, matching execute_signal.
+
+    Horizon matters: a symbol carries one active signal PER horizon (6 of them),
+    so "the current signal" is ambiguous without knowing which one the user
+    acted on. trade_signal_id gives us that; mandates predating the column have
+    no horizon to preserve, so they track the best available BUY.
+    """
+    logger.info("⏰ Refreshing PENDING autopilot mandates against current signals...")
+    try:
+        from database.db import (get_connection, release_connection, _execute,
+                                 _rows_to_dicts, insert_notification)
+        conn = get_connection()
+        try:
+            cur = _execute(conn, """
+                SELECT a.id, a.user_id, a.symbol, a.amount, a.entry, a.target, a.sl,
+                       a.trade_signal_id, s.model_horizon AS orig_horizon
+                  FROM authorized_trades a
+                  LEFT JOIN trade_signals s ON s.id = a.trade_signal_id
+                 WHERE a.status = 'PENDING'
+                 ORDER BY a.id
+            """)
+            pending = _rows_to_dicts(cur)
+
+            cancelled = refreshed = unchanged = 0
+            for m in pending:
+                horizon = m.get("orig_horizon")
+                if horizon:
+                    cur = _execute(conn, """
+                        SELECT id, signal, buy_price, target_price, stop_loss
+                          FROM trade_signals
+                         WHERE symbol = ? AND is_active = TRUE AND model_horizon = ?
+                         ORDER BY generated_date DESC LIMIT 1
+                    """, (m["symbol"], horizon))
+                else:
+                    # No recorded horizon (legacy row): take the strongest live
+                    # buy rather than an arbitrary one.
+                    cur = _execute(conn, """
+                        SELECT id, signal, buy_price, target_price, stop_loss
+                          FROM trade_signals
+                         WHERE symbol = ? AND is_active = TRUE AND signal IN ('BUY','STRONG BUY')
+                         ORDER BY (signal = 'STRONG BUY') DESC, generated_date DESC LIMIT 1
+                    """, (m["symbol"],))
+                sig = cur.fetchone()
+
+                if not sig or sig[1] not in _BUY_SIGNALS:
+                    reason = "no active signal" if not sig else f"signal is now {sig[1]}"
+                    _execute(conn,
+                        "UPDATE authorized_trades SET status = 'CANCELLED', updated_at = NOW() "
+                        "WHERE id = ? AND status = 'PENDING'", (m["id"],))
+                    cancelled += 1
+                    logger.warning("   CANCELLED mandate %s %s — %s", m["id"], m["symbol"], reason)
+                    try:
+                        insert_notification(
+                            user_id=m["user_id"], type="signal",
+                            title=f"{m['symbol']} autopilot order cancelled",
+                            message=f"The buy recommendation was withdrawn ({reason}).",
+                            icon="XCircle", color="#EF4444")
+                    except Exception:
+                        pass
+                    continue
+
+                sig_id, _sig_name, entry, target, sl = sig
+                if sig_id == m["trade_signal_id"]:
+                    unchanged += 1
+                    continue
+
+                # Refuse to refresh into a materially worse entry — that is a
+                # different trade from the one authorised. Cheaper is always
+                # accepted; dearer only within _ENTRY_DRIFT_TOLERANCE.
+                old_entry = m["entry"] or 0
+                if old_entry and entry > old_entry * (1 + _ENTRY_DRIFT_TOLERANCE):
+                    drift = (entry / old_entry - 1) * 100
+                    _execute(conn,
+                        "UPDATE authorized_trades SET status = 'CANCELLED', updated_at = NOW() "
+                        "WHERE id = ? AND status = 'PENDING'", (m["id"],))
+                    cancelled += 1
+                    logger.warning("   CANCELLED mandate %s %s — entry moved %.2f→%.2f (+%.1f%%), "
+                                   "beyond the %.0f%% tolerance; re-authorise to buy at the new price",
+                                   m["id"], m["symbol"], old_entry, entry, drift,
+                                   _ENTRY_DRIFT_TOLERANCE * 100)
+                    try:
+                        insert_notification(
+                            user_id=m["user_id"], type="signal",
+                            title=f"{m['symbol']} autopilot order cancelled",
+                            message=(f"Entry moved ₹{old_entry:,.2f} → ₹{entry:,.2f} (+{drift:.1f}%). "
+                                     f"Re-authorise if you still want the trade."),
+                            icon="XCircle", color="#EF4444")
+                    except Exception:
+                        pass
+                    continue
+
+                # Same trade, newer numbers. amount is what the user committed,
+                # so it stays; qty follows from the new entry (floor — never buy
+                # more than funded, matching execute_signal).
+                amount = m["amount"] or 0
+                qty = int(amount / entry) if entry else 0
+                if qty < 1:
+                    _execute(conn,
+                        "UPDATE authorized_trades SET status = 'CANCELLED', updated_at = NOW() "
+                        "WHERE id = ? AND status = 'PENDING'", (m["id"],))
+                    cancelled += 1
+                    logger.warning("   CANCELLED mandate %s %s — ₹%.2f no longer buys a share at ₹%.2f",
+                                   m["id"], m["symbol"], amount, entry)
+                    continue
+
+                _execute(conn, """
+                    UPDATE authorized_trades
+                       SET trade_signal_id = ?, entry = ?, target = ?, sl = ?,
+                           qty = ?, exp_profit = ?, max_loss = ?, cmp = ?, updated_at = NOW()
+                     WHERE id = ? AND status = 'PENDING'
+                """, (sig_id, entry, target, sl, qty,
+                      round((target - entry) * qty, 2), round((entry - sl) * qty, 2),
+                      entry, m["id"]))
+                refreshed += 1
+                logger.info("   refreshed mandate %s %s — entry %.2f→%.2f target %.2f→%.2f (signal %s)",
+                            m["id"], m["symbol"], m["entry"] or 0, entry,
+                            m["target"] or 0, target, sig_id)
+
+            conn.commit()
+            logger.info("Pending mandates: %d refreshed, %d cancelled, %d unchanged (of %d)",
+                        refreshed, cancelled, unchanged, len(pending))
+        finally:
+            release_connection(conn)
+    except Exception as e:
+        logger.error(f"Pending mandate refresh failed: {e}")
+
+
+def reconcile_autopilot_job():
+    """Flag EXECUTED autopilot mandates that have no position behind them.
+
+    An EXECUTED mandate is a claim that money is currently at work. If there is
+    no row in positions for that user+symbol, that claim is false: the position
+    was closed and the mandate was not settled, so the UI shows "Running" for
+    capital that has already been returned.
+
+    This is exactly what happened to user 2's BAJAJFINSV mandate — merged into
+    another mandate's position, sold with it on 2026-07-31, and left showing
+    Running for six days. square_off now settles every mandate a position
+    covered, so this should stay silent; it exists because that failure was
+    invisible for six weeks and nothing would have reported it.
+
+    Detection only — it never mutates trades. Settling automatically would mean
+    guessing an exit price for a position nobody recorded.
+    """
+    logger.info("⏰ Reconciling autopilot mandates against positions...")
+    try:
+        from database.db import get_connection, release_connection, _execute
+        conn = get_connection()
+        try:
+            cur = _execute(conn, """
+                SELECT a.id, a.user_id, a.symbol, a.qty, a.entry, a.target,
+                       (a.updated_at AT TIME ZONE 'Asia/Kolkata')::date
+                  FROM authorized_trades a
+                 WHERE a.status = 'EXECUTED'
+                   AND NOT EXISTS (SELECT 1 FROM positions p
+                                    WHERE p.user_id = a.user_id AND p.symbol = a.symbol)
+                 ORDER BY a.id
+            """)
+            orphans = cur.fetchall()
+        finally:
+            release_connection(conn)
+
+        if not orphans:
+            logger.info("Autopilot reconciliation: no orphaned mandates")
+            return
+
+        logger.error("⚠️  %d autopilot mandate(s) are EXECUTED with NO position — "
+                     "the UI is showing them as Running against capital that is "
+                     "no longer deployed:", len(orphans))
+        for mid, uid, sym, qty, entry, target, upd in orphans:
+            logger.error("      mandate id=%s user=%s %s qty=%s entry=%s target=%s "
+                         "(last updated %s)", mid, uid, sym, qty, entry, target, upd)
+    except Exception as e:
+        logger.error(f"Autopilot reconciliation failed: {e}")
+
+
 def sync_autopilot_job():
     """Every 5 min: check GTT statuses for EXECUTED autopilot mandates and settle them."""
     logger.info("⏰ Syncing autopilot mandate statuses...")
@@ -1148,6 +1362,15 @@ def _add_all_jobs(scheduler):
     scheduler.add_job(sync_gtt_status_job, CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="gtt_sync", name="GTT Status Sync (Angel One)", misfire_grace_time=300, replace_existing=True)
     # Every 5 min: Autopilot mandate settlement
     scheduler.add_job(sync_autopilot_job, CronTrigger(hour="9-15", minute="*/5", day_of_week="mon-fri", timezone="Asia/Kolkata"), id="autopilot_sync", name="Autopilot Mandate Sync", misfire_grace_time=300, replace_existing=True)
+
+    # Once a day after the close, not every 5 min: an orphaned mandate is a
+    # standing inconsistency, not a fast-moving one, and this only reports.
+    scheduler.add_job(reconcile_autopilot_job, CronTrigger(hour=16, minute=15, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="autopilot_reconcile", name="Autopilot Mandate Reconciliation", misfire_grace_time=3600, replace_existing=True)
+
+    # 16:20 — after the EOD chain has regenerated signals (~16:00) so mandates
+    # are re-pointed at the day's fresh recommendations, and before the market
+    # reopens so nothing fires overnight on a withdrawn thesis.
+    scheduler.add_job(refresh_pending_mandates_job, CronTrigger(hour=16, minute=20, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="autopilot_refresh_pending", name="Autopilot Pending Mandate Refresh", misfire_grace_time=3600, replace_existing=True)
 
     # WEEKLY JOBS — Sunday 8 PM IST
     scheduler.add_job(cleanup_old_data_job, CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="Asia/Kolkata"), id="cleanup", name="Weekly Data Cleanup", misfire_grace_time=7200, replace_existing=True)

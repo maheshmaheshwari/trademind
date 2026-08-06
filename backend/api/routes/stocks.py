@@ -18,22 +18,37 @@ router = APIRouter()
 
 # ── Static maps loaded once at startup ────────────────────────────────────────
 
-import json, os
-_TOKENS_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "..", "data", "angel_tokens.json"
-)
+# Name/sector come from nifty_constituents, NOT data/angel_tokens.json.
+#
+# data/ is gitignored and excluded from the Space deploy, so the file does not
+# exist in production: this logged "angel_tokens.json not found for sector
+# mapping" on every boot and left _SECTOR_MAP empty, which made /api/stocks
+# report sector="Unknown" for all 500 stocks and fall back to the bare ticker
+# as the name. The DB has both fields for every active constituent.
+#
+# Lazily resolved rather than at import so the module does not require a live
+# database to be importable, and cached per process like the other maps.
 _SECTOR_MAP: dict = {}
-try:
-    with open(_TOKENS_FILE) as f:
-        _tokens = json.load(f)
-    for sym, info in _tokens.items():
-        _SECTOR_MAP[f"{sym}.NS"] = {
-            "name":   info.get("name", sym),
-            "sector": info.get("sector", "Unknown"),
+
+
+def _sector_map() -> dict:
+    """symbol -> {name, sector} for active constituents, resolved once."""
+    global _SECTOR_MAP
+    if _SECTOR_MAP:
+        return _SECTOR_MAP
+    try:
+        from database.db import get_nifty_constituents
+        _SECTOR_MAP = {
+            c["symbol"]: {"name": c.get("name") or c["symbol"].replace(".NS", ""),
+                          "sector": c.get("sector") or "Unknown"}
+            for c in get_nifty_constituents()
         }
-except FileNotFoundError:
-    logger.warning("angel_tokens.json not found for sector mapping")
+    except Exception as exc:
+        logger.warning("Could not load name/sector map from nifty_constituents: %s", exc)
+    if not _SECTOR_MAP:
+        logger.warning("Name/sector map is EMPTY — /api/stocks will report "
+                       "sector='Unknown' for every symbol")
+    return _SECTOR_MAP
 
 _HORIZON_SHORT = {
     "1 Week":    "1W",
@@ -170,7 +185,7 @@ async def get_all_stocks(
             change      = close - prev_close if prev_close else 0
             change_pct  = (change / prev_close * 100) if prev_close and prev_close > 0 else 0
 
-            info        = _SECTOR_MAP.get(symbol, {})
+            info        = _sector_map().get(symbol, {})
             sig         = sig_map.get(symbol, {})
 
             stocks.append({
@@ -579,7 +594,7 @@ async def get_stock_detail(symbol: str):
             news.append({"src": src, "time": time_str, "sent": sent_lbl, "title": title})
 
         # ── 5. Name + sector ──────────────────────────────────────────────────
-        info   = _SECTOR_MAP.get(sym, {})
+        info   = _sector_map().get(sym, {})
         name   = info.get("name",   sym.replace(".NS", ""))
         sector = info.get("sector", "Unknown")
 

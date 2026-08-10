@@ -467,23 +467,21 @@ def insert_trade_signals_batch(
              max_safe_qty, max_qty_per_user, max_investment_per_user, min_qty,
              recommended_volume, consumed_volume,
              model_name, model_horizon, model_accuracy, model_precision,
-             top_drivers, sentiment, generated_date, generated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+             top_drivers, sentiment, generated_date, generated_at, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        # is_active is in the update list because a conflicting row may already be
+        # is_active = FALSE — a third run of the day re-emitting a horizon that the
+        # second run dropped collides with the first run's row, which the second
+        # run retired. Without this it would stay retired and the fresh signal
+        # would never be served.
         sql = _on_conflict_replace(
             base_sql, ["symbol", "generated_date", "model_horizon"],
             ["signal", "confidence", "trade_type", "buy_price", "target_price",
              "stop_loss", "risk_reward", "expected_return_pct", "current_price",
              "atr_14", "atr_pct", "model_name",
-             "model_accuracy", "model_precision", "top_drivers", "sentiment", "generated_at"],
+             "model_accuracy", "model_precision", "top_drivers", "sentiment",
+             "generated_at", "is_active"],
         )
-        # Deactivate all previous signals for each symbol before inserting new ones
-        symbols = [t["symbol"] for t in trades]
-        if symbols:
-            placeholders = ",".join(["?" ] * len(symbols))
-            _execute(conn,
-                f"UPDATE trade_signals SET is_active = FALSE WHERE symbol IN ({placeholders}) AND generated_date < ?",
-                (*symbols, generated_date),
-            )
 
         count = 0
         for t in trades:
@@ -520,9 +518,35 @@ def insert_trade_signals_batch(
                 t.get("model", {}).get("accuracy"), t.get("model", {}).get("precision"),
                 json.dumps(t.get("top_drivers", [])),
                 json.dumps(t.get("sentiment", {})),
-                generated_date, generated_at,
+                generated_date, generated_at, True,
             ))
             count += 1
+
+        # Retire everything this run did not just write.
+        #
+        # Runs AFTER the inserts, and is scoped by run rather than by symbol.
+        # Both details are load-bearing:
+        #
+        #  - After, because the consumed_volume carry-forward above reads
+        #    is_active = TRUE; deactivating first would blank capacity tracking.
+        #  - By run (generated_date + generated_at), because the old
+        #    "symbol IN (batch) AND generated_date < ?" left two classes of row
+        #    stranded at is_active = TRUE, and the API serves on is_active:
+        #      1. Same-date re-runs. The upsert key includes model_horizon, so a
+        #         re-run overwrote only the horizons it re-emitted; horizons its
+        #         models no longer picked survived. The 2026-08-07 weekly retrain
+        #         left 144 such rows from that morning's EOD run live alongside
+        #         its own 1,867 (123 symbols).
+        #      2. Symbols absent from the batch entirely — never touched by a
+        #         symbol-scoped UPDATE, so their last signals stayed active
+        #         forever (ANURAS.NS was serving 2026-08-04 signals on 08-10).
+        #    Scoping by run covers both: the newest run defines the live set.
+        _execute(conn,
+            "UPDATE trade_signals SET is_active = FALSE "
+            "WHERE is_active = TRUE AND NOT (generated_date = ? AND generated_at = ?)",
+            (generated_date, generated_at),
+        )
+
         conn.commit()
         logger.info(f"Stored {count} trade signals for {generated_date}")
         return count

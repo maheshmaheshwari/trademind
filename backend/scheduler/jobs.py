@@ -332,8 +332,8 @@ def collect_eod_data_job():
     # universe, and step 3 used to run regardless. On 2026-08-05 that published
     # a full signal set built from 479/500 prices and indicators for just 130
     # stocks ("✅ [2/3] Indicators done (130 stocks)") — and because
-    # insert_trade_signals_batch deactivates the previous set per symbol, those
-    # partial-input signals replaced good ones as the live recommendations.
+    # insert_trade_signals_batch retires every signal its own run did not write,
+    # those partial-input signals replaced good ones as the live recommendations.
     #
     # Stale signals are far safer than confidently wrong ones, so abort instead.
     # Raising (rather than quietly skipping) marks the job failed, which lets the

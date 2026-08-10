@@ -336,12 +336,11 @@ def deactivate_signals(symbols: List[str], dry_run: bool = False) -> int:
     """Mark every live trade_signals row for these symbols is_active = FALSE.
 
     Retiring a model does NOT retire its signals on its own, and the two have to
-    happen together. insert_trade_signals_batch() only deactivates symbols that
-    appear in the batch it is handed, and generate_trades.py builds that batch by
-    enumerating final_models/*.pkl — so archiving a de-indexed model is precisely
-    what strands its last signals at is_active = TRUE permanently. The symbol can
-    never appear in a future batch, so nothing ever clears the flag, and the API
-    keeps serving a stock that left the index.
+    happen together. insert_trade_signals_batch() now retires every row its own
+    run did not write, so a de-indexed symbol's signals do get cleared — but only
+    at the next generate_trades.py run, which may be a day away. Between the
+    archive and that run the API would keep serving a stock that left the index,
+    so retire the signals here, at the moment the model is archived.
 
     Matches both stored forms: trade_signals holds 'SYMBOL.NS' while the pkl
     filenames are bare 'SYMBOL'.

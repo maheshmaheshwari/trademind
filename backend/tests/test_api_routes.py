@@ -168,3 +168,152 @@ def test_backtest_summary_route_db_backed(api_client):
     assert ms["high_quality_models"] == 1   # AAA (acc>=.70 & prec>=.70)
     models = {m["model"] for m in ms["by_model_type"]}
     assert models == {"XGBoost", "RandForest"}
+
+
+# ---------------------------------------------------------------------------
+# insert_trade_signals_batch — is_active bookkeeping
+#
+# The API serves on is_active (db.get_trade_signals_formatted, stocks.py), so a
+# row the newest run did not write must not stay live. Two ways that used to
+# leak, both observed in production on 2026-08-07/08-10 — see the comment in
+# insert_trade_signals_batch.
+# ---------------------------------------------------------------------------
+
+def _trade(symbol="AAA.NS", signal="BUY", horizon="1 Month", confidence=80.0,
+           recommended_volume=100):
+    """Minimal trade dict in the shape generate_trades.py hands to the batch insert."""
+    return {
+        "symbol": symbol, "name": f"{symbol} Ltd.", "signal": signal,
+        "confidence": confidence,
+        "trade": {"type": "LONG", "buy_price": 100.0, "target_price": 110.0,
+                  "stop_loss": 95.0, "risk_reward": 2.0, "expected_return_pct": 10.0},
+        "price": {"current": 100.0, "atr_14": 2.5, "atr_pct": 2.5},
+        "position": {"avg_daily_volume": 500000, "daily_turnover_cr": 5.0,
+                     "liquidity": "HIGH", "max_safe_qty": 100, "max_qty_per_user": 10,
+                     "max_investment_per_user": 10000.0, "min_qty": 1,
+                     "recommended_volume": recommended_volume},
+        "model": {"name": "XGBoost", "horizon": horizon,
+                  "accuracy": 82.0, "precision": 74.0},
+        "top_drivers": ["RSI"], "sentiment": {},
+    }
+
+
+def _active_rows(conn):
+    cur = _execute(conn,
+        "SELECT symbol, model_horizon, generated_date, is_active FROM trade_signals "
+        "ORDER BY symbol, model_horizon")
+    return {(r[0], r[1], str(r[2])): r[3] for r in cur.fetchall()}
+
+
+def test_same_date_rerun_retires_horizons_it_no_longer_emits():
+    """The 2026-08-07 weekly retrain case: a second run on the SAME date whose
+    models pick different best horizons. The upsert key includes model_horizon,
+    so dropped horizons are never overwritten — they must be retired instead."""
+    from database.db import insert_trade_signals_batch
+    conn = get_connection()
+    try:
+        insert_trade_signals_batch(
+            [_trade(horizon="1 Month"), _trade(horizon="1 Week", signal="SELL")],
+            _TODAY, f"{_TODAY} 10:00:00")
+        # Retrained models now favour 1 Month only.
+        insert_trade_signals_batch(
+            [_trade(horizon="1 Month", signal="STRONG BUY", confidence=95.0)],
+            _TODAY, f"{_TODAY} 22:30:00")
+
+        rows = _active_rows(conn)
+        assert rows[("AAA.NS", "1 Month", _TODAY)] is True
+        assert rows[("AAA.NS", "1 Week", _TODAY)] is False, \
+            "dropped horizon from the same date stayed live"
+
+        # The surviving row carries the newer run's values.
+        cur = _execute(conn,
+            "SELECT signal, confidence FROM trade_signals "
+            "WHERE symbol=? AND model_horizon=? AND generated_date=?",
+            ("AAA.NS", "1 Month", _TODAY))
+        assert cur.fetchone()[:2] == ("STRONG BUY", 95.0)
+    finally:
+        release_connection(conn)
+
+
+def test_symbol_absent_from_batch_is_retired():
+    """A symbol that drops out of a run (de-indexed, training failed) used to keep
+    its last signals active forever — the UPDATE was scoped to batch symbols."""
+    from database.db import insert_trade_signals_batch
+    conn = get_connection()
+    try:
+        insert_trade_signals_batch(
+            [_trade(symbol="AAA.NS"), _trade(symbol="GONE.NS")],
+            "2026-08-04", "2026-08-04 16:00:00")
+        insert_trade_signals_batch(
+            [_trade(symbol="AAA.NS")], "2026-08-05", "2026-08-05 16:00:00")
+
+        rows = _active_rows(conn)
+        assert rows[("GONE.NS", "1 Month", "2026-08-04")] is False, \
+            "symbol absent from the newer batch stayed live"
+        assert rows[("AAA.NS", "1 Month", "2026-08-04")] is False
+        assert rows[("AAA.NS", "1 Month", "2026-08-05")] is True
+    finally:
+        release_connection(conn)
+
+
+def test_reemitted_horizon_is_reactivated():
+    """Guards the upsert trap: run 3 re-emits a horizon that run 2 retired, so it
+    collides with run 1's now-inactive row. Without is_active in the ON CONFLICT
+    update list the fresh signal would be written but never served."""
+    from database.db import insert_trade_signals_batch
+    conn = get_connection()
+    try:
+        insert_trade_signals_batch(
+            [_trade(horizon="1 Month"), _trade(horizon="1 Week")],
+            _TODAY, f"{_TODAY} 10:00:00")
+        insert_trade_signals_batch(
+            [_trade(horizon="1 Month")], _TODAY, f"{_TODAY} 16:00:00")
+        insert_trade_signals_batch(
+            [_trade(horizon="1 Week", signal="STRONG SELL")],
+            _TODAY, f"{_TODAY} 22:00:00")
+
+        rows = _active_rows(conn)
+        assert rows[("AAA.NS", "1 Week", _TODAY)] is True, \
+            "re-emitted horizon stayed retired"
+        assert rows[("AAA.NS", "1 Month", _TODAY)] is False
+    finally:
+        release_connection(conn)
+
+
+def test_consumed_volume_survives_a_same_date_rerun():
+    """The carry-forward reads is_active = TRUE, so retiring must happen after the
+    inserts, not before — otherwise capacity tracking resets on every refresh."""
+    from database.db import insert_trade_signals_batch
+    conn = get_connection()
+    try:
+        insert_trade_signals_batch([_trade()], _TODAY, f"{_TODAY} 10:00:00")
+        _execute(conn, "UPDATE trade_signals SET consumed_volume = 42 WHERE symbol = ?",
+                 ("AAA.NS",))
+        conn.commit()
+
+        insert_trade_signals_batch([_trade()], _TODAY, f"{_TODAY} 16:00:00")
+
+        cur = _execute(conn,
+            "SELECT consumed_volume FROM trade_signals WHERE symbol=? AND is_active = TRUE",
+            ("AAA.NS",))
+        assert cur.fetchone()[0] == 42
+    finally:
+        release_connection(conn)
+
+
+def test_signals_route_serves_only_the_newest_run(api_client):
+    """End-to-end: the route reads is_active, so the orphan rows must not surface."""
+    from database.db import insert_trade_signals_batch
+    insert_trade_signals_batch(
+        [_trade(horizon="1 Month"), _trade(horizon="1 Week", signal="SELL")],
+        _TODAY, f"{_TODAY} 10:00:00")
+    insert_trade_signals_batch(
+        [_trade(horizon="1 Month", signal="STRONG BUY", confidence=95.0)],
+        _TODAY, f"{_TODAY} 22:30:00")
+
+    resp = api_client.get("/api/signals/all")
+    assert resp.status_code == 200
+    signals = resp.json().get("signals") or []
+    horizons = [s.get("horizon_long") for s in signals]
+    assert horizons == ["1 Month"], f"stale horizon served: {horizons}"
+    assert signals[0].get("raw_signal") == "STRONG BUY"

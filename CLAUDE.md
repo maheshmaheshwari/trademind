@@ -184,6 +184,53 @@ LOG_LEVEL=INFO
 
 ---
 
+## Production config (HF Space secrets)
+
+`backend/.env` is **never uploaded** — `deploy_space.py`'s `IGNORE_PATTERNS`
+excludes `.env*`, non-negotiably. The Space reads everything from its own secret
+store instead, and the authoritative list of what gets copied there is
+`SECRET_KEYS` in `backend/scripts/deploy_space.py`:
+
+```bash
+cd backend && source venv/bin/activate
+python scripts/deploy_space.py secrets   # upserts every SECRET_KEYS entry from .env
+```
+
+**Adding a variable to `.env` is half the job — add it to `SECRET_KEYS` too, then
+re-run that command.** Editing the list alone pushes nothing. A variable missing
+from the list is simply absent in production while working on every dev machine,
+which is invisible until the feature fails only in prod. It has bitten three
+times: `ALPHAVANTAGE_API_KEY` and `NEWSAPI_KEY` (collectors erroring ~500× a
+run), and `BROKER_ENCRYPTION_KEY` (every broker credential save/read 500ing,
+found 2026-08-11).
+
+Required in production — the Space is broken or silently degraded without these:
+
+| Variable | What breaks |
+|---|---|
+| `PGHOST` `PGPORT` `PGDATABASE` `PGUSER` `PGPASSWORD` | `db.py` falls back to SQLite and `nifty500.db` is not deployed — the API serves an empty database |
+| `JWT_SECRET` | `api/auth.py` raises — all auth dead |
+| `BROKER_ENCRYPTION_KEY` | `broker_routes.py` `_get_fernet()` raises; deliberately has **no** fallback to `JWT_SECRET` |
+| `HF_TOKEN` + `MODEL_KEY` | `api/server.py` startup only calls `sync_models()` when **both** are set — otherwise the Space boots with no models |
+| `CORS_ALLOWED_ORIGINS` | Falls back to localhost dev origins. Currently masked because the Vercel proxy calls the Space server-to-server (no CORS), so this only bites a browser hitting the Space directly. `*` is rejected at startup (`allow_credentials=True`) |
+| `ANGEL_*` | No price collection and no live LTP — Angel One is the sole price source |
+
+Optional: `HF_MODELS_REPO` (defaults to `{whoami}/trademind-models`),
+`RESEND_*` (email), `ALPHAVANTAGE_API_KEY` / `NEWSAPI_KEY` (news),
+`TEST_PG*` (pushed from `.env.test` for the `/api/health/testdb` ping).
+`SPACE_ID` is platform-set — `scheduler/jobs.py` keys off it to hand the Friday
+retrain to GitHub Actions.
+
+The GitHub Actions workflows do **not** read the Space's store —
+`weekly-retrain.yml` and `deploy-backend.yml` have their own repository secrets.
+A rotated credential must be updated in both places.
+
+> Fuller notes live in `docs/DEPLOYMENT.md`, but `docs/` is gitignored
+> (`.gitignore:57`) — that file is local-only, so this section is the version
+> that travels with the repo.
+
+---
+
 ## API Base URL
 
 Backend listens on `http://localhost:8000`. Frontend calls it via `src/api.ts`.

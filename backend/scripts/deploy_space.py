@@ -35,6 +35,11 @@ SECRET_KEYS = [
     "ANGEL_TOTP_SECRET",
     "JWT_SECRET", "HF_TOKEN", "MODEL_KEY", "HF_MODELS_REPO",
     "CORS_ALLOWED_ORIGINS",
+    # Same omission as the two below, found 2026-08-11. broker_routes.py's
+    # _get_fernet() raises RuntimeError when it is unset — deliberately, with no
+    # fallback to JWT_SECRET — so every broker credential save/read 500s on the
+    # Space while working on every dev machine.
+    "BROKER_ENCRYPTION_KEY",
     "RESEND_API_KEY", "RESEND_FROM_EMAIL",
     # Both live in .env and work locally, but were never in this list, so the
     # Space never received them. The collectors then failed there while passing

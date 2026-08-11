@@ -11,6 +11,23 @@ import os
 
 os.environ["APP_ENV"] = "test"
 
+# api/server.py builds its CORS allow-list at import time from
+# CORS_ALLOWED_ORIGINS, falling back to the local dev origins when unset. A
+# developer's real backend/.env sets that variable to the deployed frontend
+# domains, so test_cors_preflight_allowed_origin — which asks for
+# http://localhost:5173 — got a 400 locally while passing in CI, where no .env
+# exists. Pin the allow-list so the CORS tests assert on a known configuration
+# instead of on whatever happens to be in the developer's environment.
+#
+# Set here for the same reason APP_ENV is: it has to land before anything
+# imports api.server (the api_client fixture does so lazily). load_dotenv()
+# leaves variables already present in the environment alone, so .env cannot
+# clobber this. Keep the value out of .env.test too — db.py reloads that file
+# with override=True.
+os.environ["CORS_ALLOWED_ORIGINS"] = (
+    "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173"
+)
+
 import pytest
 
 from database.db import get_connection, init_database, release_connection, _execute

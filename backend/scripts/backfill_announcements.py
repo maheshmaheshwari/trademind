@@ -207,6 +207,10 @@ def run_nse(symbols: List[str], from_date: date, to_date: date,
         symbols=symbols,
         skip_existing=skip_covered,
         score=score,
+        # Never DDL from a shard — concurrent CREATE/ALTER against the same
+        # catalog rows raises "tuple concurrently updated". The workflow's
+        # prepare job bootstraps the schema once, single-threaded.
+        ensure_schema=False,
     )
 
 

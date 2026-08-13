@@ -136,6 +136,14 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
+      # The ONLY place this run touches DDL. init_database() issues
+      # CREATE TABLE / CREATE INDEX / ALTER TABLE, and shards running that
+      # concurrently against the same catalog rows makes PostgreSQL raise
+      # "tuple concurrently updated" — which killed nse shard 1 of run
+      # 31693641690. prepare is a single job, so it cannot race itself.
+      - name: Ensure schema (single-threaded — shards must not do this)
+        run: python -c "from database.db import init_database; init_database()"
+
       - id: plan_bse
         name: Plan BSE shards
         run: python scripts/backfill_announcements.py --plan bse >> "$GITHUB_OUTPUT"

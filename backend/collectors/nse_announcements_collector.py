@@ -318,7 +318,7 @@ def collect_daily(lookback_days: int = 2) -> dict:
 def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None,
                  skip_existing: bool = True, start_idx: int = 0, end_idx: int = None,
                  to_date: Optional[str] = None, symbols: Optional[List[str]] = None,
-                 score: bool = True) -> Dict:
+                 score: bool = True, ensure_schema: bool = True) -> Dict:
     """Backfill NSE announcements over [from_date, to_date] (both dd-mm-yyyy).
 
     score=False stores rows with sentiment NULL for a later batch FinBERT pass
@@ -329,8 +329,17 @@ def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None
     skip_existing compares against what is already stored: a symbol is skipped
     only when its oldest stored announcement is already at or before from_date,
     so re-running with an earlier from_date genuinely deepens coverage.
+
+    ensure_schema=False skips the init_database() bootstrap. Sharded callers
+    MUST pass False: init_database() issues CREATE TABLE / CREATE INDEX / ALTER
+    TABLE, and concurrent shards running that DDL against the same catalog rows
+    make PostgreSQL raise "tuple concurrently updated". That killed nse shard 1
+    of run 31693641690 while shards 2-4 happened to serialise. The default stays
+    True so running this collector standalone against a fresh database still
+    bootstraps.
     """
-    init_database()
+    if ensure_schema:
+        init_database()
 
     # Load all symbols
     if symbols is not None:

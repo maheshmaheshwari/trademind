@@ -1,0 +1,61 @@
+{
+  "_mirrors": "GET https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w?segment=Equity&status=Active - parsed by collectors/bse_announcements_collector.py:parse_scrip_list(). The real response is a bare JSON array of ~5,000 active equities; this keeps 4 of them. 'scrip_id' is BSE's ticker and is what we match NSE symbols on; 'SCRIP_CD' is the numeric code the announcements endpoint wants.",
+  "Table": [
+    {
+      "SCRIP_CD": "500002",
+      "Scrip_Name": "ABB India Ltd",
+      "Status": "Active",
+      "GROUP": "A",
+      "FACE_VALUE": "2.00",
+      "ISIN_NUMBER": "INE117A01022",
+      "INDUSTRY": null,
+      "scrip_id": "ABB",
+      "Segment": "Equity",
+      "NSURL": "https://www.bseindia.com/stock-share-price/abb-india-ltd/abb/500002/",
+      "Issuer_Name": "ABB India Limited",
+      "Mktcap": "160202.73"
+    },
+    {
+      "SCRIP_CD": "500180",
+      "Scrip_Name": "HDFC Bank Ltd",
+      "Status": "Active",
+      "GROUP": "A",
+      "FACE_VALUE": "1.00",
+      "ISIN_NUMBER": "INE040A01034",
+      "INDUSTRY": null,
+      "scrip_id": "HDFCBANK",
+      "Segment": "Equity",
+      "NSURL": "https://www.bseindia.com/stock-share-price/hdfc-bank-ltd/hdfcbank/500180/",
+      "Issuer_Name": "HDFC Bank Ltd.",
+      "Mktcap": "1157003.25"
+    },
+    {
+      "SCRIP_CD": "500325",
+      "Scrip_Name": "Reliance Industries Ltd",
+      "Status": "Active",
+      "GROUP": "A",
+      "FACE_VALUE": "10.00",
+      "ISIN_NUMBER": "INE002A01018",
+      "INDUSTRY": null,
+      "scrip_id": "RELIANCE",
+      "Segment": "Equity",
+      "NSURL": "https://www.bseindia.com/stock-share-price/reliance-industries-ltd/reliance/500325/",
+      "Issuer_Name": "Reliance Industries Ltd",
+      "Mktcap": "1771409.32"
+    },
+    {
+      "SCRIP_CD": "532540",
+      "Scrip_Name": "Tata Consultancy Services Ltd",
+      "Status": "Active",
+      "GROUP": "A",
+      "FACE_VALUE": "1.00",
+      "ISIN_NUMBER": "INE467B01029",
+      "INDUSTRY": null,
+      "scrip_id": "TCS",
+      "Segment": "Equity",
+      "NSURL": "https://www.bseindia.com/stock-share-price/tata-consultancy-services-ltd/tcs/532540/",
+      "Issuer_Name": "Tata Consultancy Services Ltd.",
+      "Mktcap": "886431.44"
+    }
+  ]
+}

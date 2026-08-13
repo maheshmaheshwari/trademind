@@ -1,0 +1,272 @@
+# Deepen news history behind the 2023-01-01 wall, from the exchanges themselves.
+#
+# news_sentiment starts at 2023-01-01 while prices reach back to 2010, so every
+# pre-2023 training row has no sentiment feature to read. GDELT cannot close
+# that gap: its DOC 2.0 API rejects any start date before 2017 outright
+# ("Invalid query start date"). Corporate announcements can, and they are the
+# better input anyway — exact timestamps, an explicit symbol per row, and no
+# headline-to-company matching to get wrong.
+#
+# Two archives, tiled so nothing is fetched twice (a company files the same
+# event to both exchanges, and overlapping windows would double its weight in
+# the daily sentiment aggregate):
+#
+#   BSE  2010-01-01 .. 2017-12-31   api.bseindia.com, paginated 50/page
+#   NSE  2018-01-01 .. 2022-12-31   nseindia.com, one request per symbol
+#
+# Manual only. This is a one-off backfill, not a cadence — once a symbol's
+# history reaches the start date the collectors skip it, so a re-run is cheap
+# but pointless. The daily announcement job keeps the recent end current.
+#
+# Four jobs:
+#   prepare   size both matrices from the live constituent count
+#   bse       matrix — fetch only, ~25 min a shard (measured 24.7s/symbol)
+#   nse       matrix — fetch only, ~10 min a shard
+#   score     one FinBERT pass over everything the shards left unscored
+#
+# Why shards must not score: score_pending_news() claims every globally
+# unscored row, so two shards scoring at once would process the same headlines
+# twice. Fetch in parallel, score once — the same split sync-universe.yml uses
+# for its GDELT shards. It also keeps torch off the critical path in 13 runners.
+#
+# Nothing to merge between shards: both collectors write straight to
+# news_sentiment, and uq_news_url_pubdate makes a re-fetch a no-op rather than
+# a duplicate.
+#
+# Secrets required: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD.
+# No Angel One, no HF store — neither collector needs a key or a model.
+name: Backfill announcements (NSE + BSE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Which archive to fetch'
+        type: choice
+        options: [both, bse, nse]
+        default: both
+      from_date:
+        description: 'Override start date YYYY-MM-DD (default BSE 2010-01-01 / NSE 2018-01-01)'
+        type: string
+        required: false
+      to_date:
+        description: 'Override end date YYYY-MM-DD (default BSE 2017-12-31 / NSE 2022-12-31)'
+        type: string
+        required: false
+      no_skip:
+        description: 'Re-fetch symbols whose stored history already reaches the start date'
+        type: boolean
+        default: false
+
+concurrency:
+  group: backfill-announcements
+  cancel-in-progress: false
+
+env:
+  PGHOST: ${{ secrets.PGHOST }}
+  PGPORT: ${{ secrets.PGPORT }}
+  PGDATABASE: ${{ secrets.PGDATABASE }}
+  PGUSER: ${{ secrets.PGUSER }}
+  PGPASSWORD: ${{ secrets.PGPASSWORD }}
+
+jobs:
+  # ── 1. Size the matrices from the live constituent count ────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      bse_matrix: ${{ steps.plan_bse.outputs.matrix }}
+      bse_shards: ${{ steps.plan_bse.outputs.shards }}
+      bse_count: ${{ steps.plan_bse.outputs.count }}
+      nse_matrix: ${{ steps.plan_nse.outputs.matrix }}
+      nse_shards: ${{ steps.plan_nse.outputs.shards }}
+      nse_count: ${{ steps.plan_nse.outputs.count }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # CPU torch first, as everywhere else: requirements.txt pins torch, and
+      # the default index would drag in the multi-GB CUDA wheel. Nothing in
+      # these jobs runs a model — the fetch path never touches transformers —
+      # but the pin still has to resolve.
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - id: plan_bse
+        name: Plan BSE shards
+        run: python scripts/backfill_announcements.py --plan bse >> "$GITHUB_OUTPUT"
+
+      - id: plan_nse
+        name: Plan NSE shards
+        run: python scripts/backfill_announcements.py --plan nse >> "$GITHUB_OUTPUT"
+
+      - name: Show plan
+        run: |
+          echo "source: ${{ inputs.source }}"
+          echo "BSE: ${{ steps.plan_bse.outputs.count }} symbols -> ${{ steps.plan_bse.outputs.shards }} shard(s)"
+          echo "NSE: ${{ steps.plan_nse.outputs.count }} symbols -> ${{ steps.plan_nse.outputs.shards }} shard(s)"
+
+  # ── 2. BSE archive, 2010 onwards, sharded ───────────────────────────────────
+  bse:
+    needs: prepare
+    if: ${{ inputs.source != 'nse' && needs.prepare.outputs.bse_count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      # BSE serves an unauthenticated public API with no published rate limit.
+      # Four concurrent shards is polite for a one-off backfill and keeps the
+      # write load on Timescale Cloud modest.
+      max-parallel: 4
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.bse_matrix) }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: BSE fetch, shard ${{ matrix.shard }}
+        run: |
+          python scripts/backfill_announcements.py \
+            --source bse \
+            --shard ${{ matrix.shard }}/${{ needs.prepare.outputs.bse_shards }} \
+            --fetch-only \
+            ${{ inputs.from_date && format('--from-date {0}', inputs.from_date) || '' }} \
+            ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }} \
+            ${{ inputs.no_skip && '--no-skip' || '' }}
+
+  # ── 3. NSE archive, 2018-2022, sharded ──────────────────────────────────────
+  nse:
+    needs: prepare
+    if: ${{ inputs.source != 'bse' && needs.prepare.outputs.nse_count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      # NSE 403s unattended clients that hit it hard; each shard reseeds its
+      # cookie jar, so keep the fleet small.
+      max-parallel: 3
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.nse_matrix) }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: NSE fetch, shard ${{ matrix.shard }}
+        run: |
+          python scripts/backfill_announcements.py \
+            --source nse \
+            --shard ${{ matrix.shard }}/${{ needs.prepare.outputs.nse_shards }} \
+            --fetch-only \
+            ${{ inputs.from_date && format('--from-date {0}', inputs.from_date) || '' }} \
+            ${{ inputs.to_date && format('--to-date {0}', inputs.to_date) || '' }} \
+            ${{ inputs.no_skip && '--no-skip' || '' }}
+
+  # ── 4. One FinBERT pass over everything the shards left unscored ────────────
+  # always(): a shard that 403s mid-run still leaves thousands of usable
+  # unscored rows, and an unscored row is invisible to the sentiment feature —
+  # so score whatever landed rather than discarding a partial fetch.
+  score:
+    needs: [prepare, bse, nse]
+    if: ${{ always() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Score pending headlines
+        run: python scripts/backfill_announcements.py --score-only
+
+      # Prints the per-year table AND asserts on it. Printing alone let the job
+      # go green whether it landed 780,000 rows or zero, which defeats the
+      # point of having a verification step at all.
+      - name: Coverage after backfill
+        run: |
+          python - <<'PY'
+          import sys
+          from database.db import get_connection, release_connection, _execute
+          conn = get_connection()
+          cur = _execute(conn, """
+              SELECT EXTRACT(year FROM published_at)::int AS y,
+                     COUNT(*) FILTER (WHERE source = 'BSE') AS bse,
+                     COUNT(*) FILTER (WHERE source = 'NSE') AS nse,
+                     COUNT(*) FILTER (WHERE sentiment IS NULL) AS unscored
+              FROM news_sentiment GROUP BY y ORDER BY y
+          """)
+          rows = cur.fetchall()
+          print(f"{'year':>6} {'BSE':>9} {'NSE':>9} {'unscored':>9}")
+          for y, bse, nse, unscored in rows:
+              print(f"{y:>6} {bse:>9,} {nse:>9,} {unscored:>9,}")
+
+          pre2023   = [r for r in rows if r[0] and r[0] < 2023]
+          deepened  = sum((r[1] or 0) + (r[2] or 0) for r in pre2023)
+          unscored  = sum(r[3] or 0 for r in rows)
+          print(f"\npre-2023 announcement rows: {deepened:,}")
+          print(f"unscored rows remaining:    {unscored:,}")
+
+          problems = []
+          # The entire purpose of the run. Zero here means every shard failed,
+          # or skip_covered skipped everything — either way, not a success.
+          if deepened == 0:
+              problems.append("no pre-2023 announcement rows exist — the fetch shards stored nothing")
+          # An unscored row is invisible to the sentiment feature, so a partial
+          # scoring pass is a partial backfill. --score-only is resumable.
+          if unscored:
+              problems.append(f"{unscored:,} rows still unscored — re-run the score job (--score-only is resumable)")
+          release_connection(conn)
+
+          if problems:
+              for p in problems:
+                  print(f"::error::{p}")
+              sys.exit(1)
+          print("\nCoverage checks passed.")
+          PY

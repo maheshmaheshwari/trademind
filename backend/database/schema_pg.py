@@ -832,6 +832,13 @@ SQL_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_ti_symbol          ON technical_indicators (symbol);",
     "CREATE INDEX IF NOT EXISTS idx_news_symbol_pub    ON news_sentiment (symbol, published_at DESC);",
     "CREATE INDEX IF NOT EXISTS idx_news_sentiment_col ON news_sentiment (sentiment);",
+    # The only thing stopping every news collector from re-inserting the same
+    # article on each run: insert_news() and the announcement collectors all
+    # end in "ON CONFLICT DO NOTHING", which is a no-op without a matching
+    # unique index. Found live on prod but missing from this file — a fresh
+    # environment built from schema_pg.py alone would silently accumulate
+    # duplicates. url is nullable (a few legacy rows have none), hence partial.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_news_url_pubdate ON news_sentiment (url, published_at) WHERE url IS NOT NULL;",
     "CREATE INDEX IF NOT EXISTS idx_ts_date_signal     ON trade_signals (generated_date DESC, signal);",
     "CREATE INDEX IF NOT EXISTS idx_ts_confidence      ON trade_signals (confidence DESC);",
     "CREATE INDEX IF NOT EXISTS idx_ts_symbol          ON trade_signals (symbol);",

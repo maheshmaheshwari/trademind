@@ -329,7 +329,7 @@ def bootstrap_gdelt(
 # ---------------------------------------------------------------------------
 # Public function: score_pending_news
 # ---------------------------------------------------------------------------
-def score_pending_news(batch_limit: int = 2000) -> int:
+def score_pending_news(batch_limit: int = 2000, shard: Optional[str] = None) -> int:
     """
     Score news headlines that have no sentiment yet using FinBERT batch inference.
 
@@ -339,6 +339,16 @@ def score_pending_news(batch_limit: int = 2000) -> int:
 
     Args:
         batch_limit: Maximum number of headlines to process per call.
+        shard:       "i/N" — claim only rows where MOD(id, N) = i-1. Without it
+                     this claims EVERY globally unscored row, so two concurrent
+                     callers process the same headlines twice. Sharding on the
+                     primary key partitions the backlog with no coordination
+                     and no shared cursor.
+
+                     This exists because FinBERT on a CPU runner measures ~2.7
+                     rows/sec: a 315k-row backfill is ~32 hours, which no single
+                     6-hour CI job can finish. Scoring has to fan out the same
+                     way fetching does.
 
     Returns:
         Number of headlines successfully scored.
@@ -349,12 +359,20 @@ def score_pending_news(batch_limit: int = 2000) -> int:
         logger.error("analysis.sentiment not found — cannot score pending news")
         return 0
 
+    # MOD(), not the % operator: db.py's _execute rewrites ? to %s, so a literal
+    # % in the SQL collides with psycopg2's own placeholder parsing.
+    if shard:
+        i, n = (int(x) for x in shard.split("/"))
+        sql = ("SELECT id, headline FROM news_sentiment "
+               "WHERE sentiment IS NULL AND MOD(id, ?) = ? LIMIT ?")
+        params = (n, i - 1, batch_limit)
+    else:
+        sql = "SELECT id, headline FROM news_sentiment WHERE sentiment IS NULL LIMIT ?"
+        params = (batch_limit,)
+
     conn = get_connection()
     try:
-        rows = _execute(conn,
-            "SELECT id, headline FROM news_sentiment WHERE sentiment IS NULL LIMIT ?",
-            (batch_limit,),
-        ).fetchall()
+        rows = _execute(conn, sql, params).fetchall()
     except Exception as exc:
         logger.error(f"score_pending_news: DB read error: {exc}")
         release_connection(conn)

@@ -138,7 +138,10 @@ chain on a holiday.
 **Angel One's corporate action behaviour (important):** Angel One sometimes retroactively adjusts historical candles after a split or bonus. This means for some stocks the price history is already adjusted by Angel One, and for others it is not. The `apply_corporate_action_adjustments()` function in `model_training.py` detects this automatically — it checks the actual price ratio on the ex-date and skips adjustment if Angel One already did it, to avoid double-adjusting.
 
 News/sentiment sources (secondary, not price data):
-- GDELT — news headlines bootstrap (`collectors/gdelt_collector.py`)
+- GDELT — `collectors/gdelt_collector.py`. **Non-functional in practice** —
+  every request 429s and it has produced zero rows (see "Historical news
+  depth" below). Its `score_pending_news()` is still very much live, though:
+  that is the FinBERT scorer every other collector depends on.
 - RSS feeds — `collectors/rss_collector.py`
 - NSE announcements — `collectors/nse_announcements_collector.py`
 - BSE announcements — `collectors/bse_announcements_collector.py`
@@ -149,16 +152,26 @@ News/sentiment sources (secondary, not price data):
 `news_sentiment` starts at **2023-01-01**; `prices` reaches back to 2010. Three
 hard limits shape what can close that gap:
 
-- **GDELT cannot.** Its DOC 2.0 API rejects any start date before 2017 —
-  a 2016-01-01 query returns `Invalid query start date`, 2017-01-02 returns
-  articles.
-- **NSE's announcements API bottoms out around 2018.**
-- **BSE's reaches 2010** — the deepest free source, and the reason
-  `bse_announcements_collector.py` exists.
+- **GDELT cannot help — it does not answer at all.** Measured 2026-08-13:
+  three fetches (RELIANCE 2019-03, TCS 2019-03, INFY 2021-06) each returned
+  429 on the *first* call with no prior traffic, exhausted the 60/120/180s
+  retry ladder, and yielded zero articles — ~411s per request for nothing.
+  `news_sentiment` has never held a single GDELT-sourced row; the media rows
+  all come from RSS, Economic Times, yfinance and alphavantage. Don't plan a
+  backfill around it, at any date range or symbol count.
+- **Both exchange archives reach the whole range.** NSE returns 2012 Q1
+  announcements and BSE serves post-2018 fine. An earlier version of this
+  section claimed NSE "bottoms out around 2018" — that was wrong.
+- **BSE is materially deeper before 2018**, which is why it takes the early
+  window and `bse_announcements_collector.py` exists. Measured on the same
+  symbol and quarter: RELIANCE 2015 Q1 → BSE 171 rows vs NSE 33; TCS 2012 Q1 →
+  32 vs 19; INFY 2012 Q1 → 12 vs 12.
 
 So the two archives tile rather than overlap (**BSE 2010-01-01 → 2017-12-31,
-NSE 2018-01-01 → 2022-12-31**, existing data from 2023). A company files the
-same event to both exchanges, so overlapping windows would store it twice and
+NSE 2018-01-01 → 2022-12-31**, existing data from 2023). The boundary year is a
+coverage choice, but the *disjointness* is not optional: a company files the
+same event to both exchanges under different URLs, so `uq_news_url_pubdate`
+cannot dedupe across sources — overlapping windows would store it twice and
 double its weight in the `news_daily_sentiment` aggregate.
 
 `scripts/backfill_announcements.py` drives both plus the scoring pass, and

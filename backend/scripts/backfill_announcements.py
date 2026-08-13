@@ -6,25 +6,51 @@ news_sentiment table currently starts at. Drives the two exchange collectors
 and the single FinBERT scoring pass, and sizes the CI shard matrices.
 
 WHY THESE TWO SOURCES
-    GDELT cannot go deeper. Its DOC 2.0 API rejects any start date before
-    2017 outright ("Invalid query start date" — a 2016-01-01 query fails while
-    2017-01-02 returns articles), so the collector that produced most of our
-    media rows has no earlier data to give.
+    GDELT is not an option — not because of a date floor, but because it does
+    not answer at all. Measured 2026-08-13: three fetches (RELIANCE 2019-03,
+    TCS 2019-03, INFY 2021-06) each returned 429 on the first call, exhausted
+    the full 60/120/180s retry ladder, and yielded zero articles; average 411s
+    per request for nothing. The first call was throttled with no prior traffic,
+    so this is not a burnt quota. news_sentiment has never held a single
+    GDELT-sourced row — an earlier version of this docstring called it "the
+    collector that produced most of our media rows", which the database
+    contradicts (media rows come from RSS, Economic Times, yfinance and
+    alphavantage). Whether its pre-2017 date floor is real is now untestable
+    and moot.
 
     Announcements are also the better input for this model: exact timestamps,
     an explicit symbol on every row, and no headline-to-company matching to get
     wrong — unlike media archives, where the matching is where the accuracy
     goes.
 
+    Consequence worth knowing: pre-2023 history is announcements-only, while
+    2023-onward carries announcements AND press coverage. news_count therefore
+    means something different either side of that boundary.
+
 WINDOWS — THE TWO SOURCES TILE, THEY DO NOT OVERLAP
-    BSE  2010-01-01 .. 2017-12-31   archive reaches 2010
-    NSE  2018-01-01 .. 2022-12-31   NSE's API bottoms out around 2018;
-                                    2023-01-01 onward is already collected
-    A company files the same event to both exchanges, so overlapping the
-    windows would store every announcement twice and double its weight in the
-    daily sentiment aggregate. The defaults tile deliberately. Override with
-    --from-date/--to-date on a fresh database, where there is nothing above to
-    collide with.
+    BSE  2010-01-01 .. 2017-12-31   materially deeper coverage before 2018
+    NSE  2018-01-01 .. 2022-12-31   2023-01-01 onward is already collected
+
+    An earlier version of this docstring said NSE's API "bottoms out around
+    2018". That is wrong — NSE returns 2012 Q1 announcements for TCS, INFY,
+    HDFCBANK and RELIANCE, and BSE serves post-2018 fine (63 rows for TCS in
+    2019 Q1). Both archives cover the whole range; the split is a coverage
+    choice, not a limit. Measured head-to-head on the same symbol and quarter,
+    BSE is equal or richer before 2018, sometimes by a wide margin:
+
+        symbol    period   BSE   NSE
+        TCS       2012Q1    32    19
+        TCS       2015Q1    45    40
+        INFY      2012Q1    12    12
+        RELIANCE  2012Q1    26    18
+        RELIANCE  2015Q1   171    33
+
+    What the tiling is actually for: a company files the same event to both
+    exchanges under different URLs, so uq_news_url_pubdate cannot dedupe across
+    sources. Overlapping windows would store that event twice and double its
+    weight in the daily sentiment aggregate. Keep the windows disjoint wherever
+    the boundary sits. Override with --from-date/--to-date only on a fresh
+    database, where there is nothing above to collide with.
 
 FETCH IN PARALLEL, SCORE ONCE
     Shards store rows unscored. score_pending_news() claims every globally
@@ -135,16 +161,22 @@ def run_nse(symbols: List[str], from_date: date, to_date: date,
     )
 
 
-def run_scoring(batch_limit: int) -> int:
-    """FinBERT over every unscored row, whatever collector wrote it."""
+def run_scoring(batch_limit: int, shard: Optional[str] = None) -> int:
+    """FinBERT over every unscored row, whatever collector wrote it.
+
+    With `shard` ("i/N") this claims only MOD(id, N) = i-1, so shards can run
+    concurrently without processing each other's headlines. Unsharded it takes
+    the whole backlog, which is correct for the nightly job and hopeless for a
+    backfill: measured ~2.7 rows/sec on a CPU runner, 315k rows is ~32 hours.
+    """
     from collectors.gdelt_collector import score_pending_news
     total = 0
     while True:
-        scored = score_pending_news(batch_limit)
+        scored = score_pending_news(batch_limit, shard=shard)
         total += scored
         if scored < batch_limit:
             break
-        logger.info("scored %d so far…", total)
+        logger.info("scored %d so far%s…", total, f" (shard {shard})" if shard else "")
     return total
 
 
@@ -172,6 +204,9 @@ def main():
                    help="re-fetch symbols whose stored history already reaches --from-date")
     p.add_argument("--score-batch", type=int, default=2000,
                    help="headlines per FinBERT batch (default 2000)")
+    p.add_argument("--score-shard", type=str, default=None, metavar="i/N",
+                   help="score only rows where MOD(id, N) = i-1. Scoring shards "
+                        "may run concurrently; fetch shards may not score at all")
     p.add_argument("--plan", choices=["nse", "bse"], default=None,
                    help="print count/shards/matrix as GitHub Actions output lines and exit")
     p.add_argument("--symbols-per-shard", type=int, default=None,
@@ -190,7 +225,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     if args.score_only:
-        total = run_scoring(args.score_batch)
+        total = run_scoring(args.score_batch, shard=args.score_shard)
         logger.info("Scoring pass complete: %d headlines scored", total)
         return
 
@@ -250,7 +285,7 @@ def main():
                            src.upper(), len(failed), ", ".join(failed))
 
     if not args.fetch_only:
-        total = run_scoring(args.score_batch)
+        total = run_scoring(args.score_batch, shard=args.score_shard)
         logger.info("Scoring pass complete: %d headlines scored", total)
     else:
         logger.info("Fetch-only — run --score-only once every shard has finished")

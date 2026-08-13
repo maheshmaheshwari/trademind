@@ -8,7 +8,7 @@ from collections import defaultdict
 from fastapi import APIRouter
 from database.db import (
     get_connection, release_connection, _execute, _rows_to_dicts,
-    get_latest_model_training_stats,
+    get_latest_close_map, get_latest_model_training_stats,
 )
 
 router = APIRouter(prefix="/api/backtest", tags=["Backtest"])
@@ -61,11 +61,18 @@ def _load_latest_from_db() -> dict:
             return {}
 
         cur = _execute(conn,
-            "SELECT symbol, signal, confidence, model_horizon, expected_return_pct, "
+            "SELECT symbol, name, signal, confidence, model_horizon, model_name, "
+            "model_accuracy, expected_return_pct, "
             "buy_price, target_price, stop_loss, risk_reward, generated_at "
             "FROM trade_signals WHERE generated_date = ? AND is_active = TRUE ORDER BY confidence DESC",
             (latest_date,))
         rows = _rows_to_dicts(cur)
+
+        # Current market price for the top-signals table — same latest-close
+        # source every other screen uses, not the signal's own snapshot.
+        close_map = get_latest_close_map([r["symbol"] for r in rows], conn=conn)
+        for r in rows:
+            r["current_price"] = close_map.get(r["symbol"])
 
         cur2 = _execute(conn, "SELECT MAX(generated_at) FROM trade_signals WHERE generated_date = ?", (latest_date,))
         gen_at_row = cur2.fetchone()

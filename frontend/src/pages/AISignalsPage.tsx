@@ -19,6 +19,10 @@ const SECTOR_COLORS: Record<string, string> = {
 const PER_PAGE = 12;
 
 function fmtAgo(m: number) { return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`; }
+function inr(n: number | null | undefined, dec = 2) {
+  if (n == null) return '—';
+  return '₹' + n?.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
 
 export default function AISignalsPage() {
   const [search,       setSearch]  = useState('');
@@ -150,6 +154,7 @@ export default function AISignalsPage() {
               <tr>
                 <Th label="Stock"       sortKey="symbol"     sort={sort} onToggle={toggle} />
                 <Th label="Sector"      sortKey="sector"     sort={sort} onToggle={toggle} />
+                <Th label="CMP"         sortKey="current_price" sort={sort} onToggle={toggle} align="right" />
                 <PlainTh>Signal</PlainTh>
                 <Th label="Confidence"  sortKey="confidence" sort={sort} onToggle={toggle} />
                 <Th label="Model"       sortKey="accuracy"   sort={sort} onToggle={toggle} />
@@ -161,8 +166,8 @@ export default function AISignalsPage() {
               </tr>
             </thead>
             <tbody>
-              {loading ? <SkeletonRows cols={10} rows={10} /> : rows.length === 0 ? (
-                <tr><td colSpan={10} className="text-center py-[50px] px-5 text-ink-3">
+              {loading ? <SkeletonRows cols={11} rows={10} /> : rows.length === 0 ? (
+                <tr><td colSpan={11} className="text-center py-[50px] px-5 text-ink-3">
                   No signals match your filters. Try lowering the confidence threshold.
                 </td></tr>
               ) : (rows ?? []).map(s => (
@@ -172,6 +177,7 @@ export default function AISignalsPage() {
                     <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 border border-line"
                       style={{ color: SECTOR_COLORS[s?.sector ?? ''] ?? 'var(--text-2)' }}>{s?.sector}</span>
                   </Td>
+                  <Td align="right" mono>{inr(s?.current_price)}</Td>
                   <Td><SignalBadge signal={s?.signal} /></Td>
                   <Td><div className="min-w-[130px]"><Conf value={s?.confidence} /></div></Td>
                   <Td><ModelQuality accuracy={s?.accuracy} precision={s?.precision} size={12} /></Td>

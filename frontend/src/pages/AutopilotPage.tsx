@@ -87,7 +87,8 @@ function RecommendedTrades({ userId }: { userId: number }) {
       await authorize({
         user_id: userId, symbol: r.symbol, name: r.name ?? r.symbol,
         signal: 'BUY', mode: 'PAPER', qty: r.qty, amount: r.investment,
-        entry: r.buy_price, target: r.target_price, sl: r.stop_loss, cmp: r.buy_price,
+        entry: r.buy_price, target: r.target_price, sl: r.stop_loss,
+        cmp: r.current_price ?? r.buy_price,
         exp_profit: Math.round(((r.target_price - r.buy_price) * r.qty) || 0),
         max_loss: Math.round(((r.buy_price - r.stop_loss) * r.qty) || 0),
       } as any).unwrap();
@@ -100,7 +101,7 @@ function RecommendedTrades({ userId }: { userId: number }) {
     }
   }
 
-  if (isLoading) return <Card><SkeletonRows cols={7} rows={4} /></Card>;
+  if (isLoading) return <Card><SkeletonRows cols={8} rows={4} /></Card>;
   if (!recs.length) return null;
 
   return (
@@ -125,8 +126,8 @@ function RecommendedTrades({ userId }: { userId: number }) {
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="text-ink-3 text-[11px] uppercase tracking-[.05em]">
-              {['#', 'Stock', 'Conf', 'Model acc / prec', 'Horizon', 'Qty', 'Investment', 'R:R', 'Entry / Target / SL', ''].map((h, i) => (
-                <th key={i} className="text-left font-semibold px-4 py-2" style={{ textAlign: i >= 5 && i <= 7 ? 'right' : 'left' }}>{h}</th>
+              {['#', 'Stock', 'CMP', 'Conf', 'Model acc / prec', 'Horizon', 'Qty', 'Investment', 'R:R', 'Entry / Target / SL', ''].map((h, i) => (
+                <th key={i} className="text-left font-semibold px-4 py-2" style={{ textAlign: i === 2 || (i >= 6 && i <= 8) ? 'right' : 'left' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -137,6 +138,7 @@ function RecommendedTrades({ userId }: { userId: number }) {
                 <tr key={r?.symbol} className="border-t border-line">
                   <td className="px-4 py-2 font-mono text-ink-3">{r?.rank}</td>
                   <td className="px-4 py-2"><SymbolCell symbol={r?.symbol} name={r?.name} showSector={false} /></td>
+                  <td className="px-4 py-2 text-right font-mono tabular-nums text-ink">{inr(r?.current_price)}</td>
                   <td className="px-4 py-2 font-mono font-semibold" style={{ color: 'var(--green)' }}>{r?.confidence}%</td>
                   <td className="px-4 py-2 font-mono text-[12px] text-ink-2 tabular-nums">
                     {r?.model_accuracy != null ? `${r.model_accuracy}%` : '—'} / {r?.model_precision != null ? `${r.model_precision}%` : '—'}
@@ -347,9 +349,9 @@ export default function AutopilotPage() {
           <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr>
-                {['Stock', 'Signal', 'Authorized ₹', 'Qty', 'Entry → Target', 'Exp. Profit', 'Max Loss', 'Live / Realized P&L', 'Status', 'Action'].map(h => (
+                {['Stock', 'Signal', 'Authorized ₹', 'Qty', 'Entry → Target', 'CMP', 'Exp. Profit', 'Max Loss', 'Live / Realized P&L', 'Status', 'Action'].map(h => (
                   <th key={h} className="text-left text-[11px] font-semibold tracking-[.04em] uppercase text-ink-3 border-b border-line whitespace-nowrap sticky top-0 bg-surface z-[1]"
-                    style={{ padding: 'calc(11px * var(--u)) 14px', textAlign: ['Authorized ₹', 'Qty', 'Entry → Target', 'Exp. Profit', 'Max Loss', 'Live / Realized P&L', 'Action'].includes(h) ? 'right' : 'left' }}>
+                    style={{ padding: 'calc(11px * var(--u)) 14px', textAlign: ['Authorized ₹', 'Qty', 'Entry → Target', 'CMP', 'Exp. Profit', 'Max Loss', 'Live / Realized P&L', 'Action'].includes(h) ? 'right' : 'left' }}>
                     {h}
                   </th>
                 ))}
@@ -357,10 +359,10 @@ export default function AutopilotPage() {
             </thead>
             <tbody>
               {loadTrades ? (
-                <SkeletonRows cols={10} rows={6} />
+                <SkeletonRows cols={11} rows={6} />
               ) : trades.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={11}>
                     <div className="text-center py-14 text-ink-3">
                       <BrainCircuit size={34} className="mx-auto mb-3 opacity-40" />
                       <p className="font-semibold text-ink m-0 mb-1">No authorized trades{filter !== 'All' ? ` in "${filter}"` : ''}</p>
@@ -378,7 +380,11 @@ export default function AutopilotPage() {
               ) : (trades ?? []).map(t => {
                 const meta = statusMeta(t?.status);
                 const pnl  = livePnl(t);
-                const canRevoke = t?.status === 'EXECUTED' || t?.status === 'PENDING';
+                const isOpen = t?.status === 'EXECUTED' || t?.status === 'PENDING';
+                const canRevoke = isOpen;
+                const cmpColor = t?.cmp != null && t?.entry != null
+                  ? (t.cmp >= t.entry ? 'text-gain' : 'text-loss')
+                  : 'text-ink';
                 return (
                   <tr key={t?.id} className="border-b border-line transition-colors hover:bg-surface-2">
                     <td style={{ padding: 'calc(12px * var(--u)) 14px' }}>
@@ -402,6 +408,13 @@ export default function AutopilotPage() {
                       <span className="text-ink-2">{inr(t?.entry, 0)}</span>
                       <span className="text-ink-3"> → </span>
                       <span className="text-gain">{inr(t?.target, 0)}</span>
+                    </td>
+                    {/* CMP is only a live market price while the mandate is open —
+                        for a closed one it is whatever the price was when it closed. */}
+                    <td className="text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
+                      {isOpen && t?.cmp != null
+                        ? <span className={cmpColor}>{inr(t.cmp)}</span>
+                        : <span className="text-ink-3">—</span>}
                     </td>
                     <td className="text-right font-mono tabular-nums font-semibold text-gain" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
                       +{inr(t?.exp_profit, 0)}

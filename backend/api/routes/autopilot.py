@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from api.auth import decode_token
 from database.db import (_execute, _rows_to_dicts, get_active_signal_id, get_connection,
-                         insert_notification, release_connection)
+                         get_latest_close_map, insert_notification, release_connection)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/autopilot", tags=["Autopilot"])
@@ -315,6 +315,21 @@ async def list_trades(user_id: int, status: Optional[str] = None, user=Depends(_
                 "SELECT * FROM authorized_trades WHERE user_id = ? ORDER BY created_at DESC",
                 (user_id,))
         rows = _rows_to_dicts(cur)
+
+        # `cmp` is written at authorisation and then only refreshed by
+        # price_monitor, which walks open *positions* — so a PENDING mandate
+        # (no position yet) keeps the entry price forever and would render as a
+        # current price that never moves. Overlay the latest close for those.
+        # EXECUTED rows keep theirs: price_monitor's LTP is fresher than a close.
+        stale = [r for r in rows
+                 if r.get("status") == "PENDING" or r.get("cmp") is None]
+        if stale:
+            close_map = get_latest_close_map(
+                sorted({r["symbol"] for r in stale}), conn=conn)
+            for r in stale:
+                if close_map.get(r["symbol"]) is not None:
+                    r["cmp"] = close_map[r["symbol"]]
+
         return {"data": rows, "total": len(rows)}
     finally:
         release_connection(conn)

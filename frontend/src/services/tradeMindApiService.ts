@@ -96,6 +96,7 @@ export interface AllSignal {
   horizon: string;
   horizon_long: string;
   expReturn: number | null;
+  current_price: number | null;
   buy_price: number | null;
   target_price: number | null;
   stop_loss: number | null;

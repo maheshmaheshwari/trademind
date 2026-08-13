@@ -141,6 +141,51 @@ def test_signals_all_route_db_backed(api_client, monkeypatch):
     assert body["signals"][0]["signal"] == "BUY"
 
 
+def test_signals_all_current_price_comes_from_prices_not_the_signal(api_client, monkeypatch):
+    """CMP on the signal lists is the latest `prices` bar, not the signal's own
+    current_price snapshot — otherwise a day the generator did not run would
+    render a stale figure under a "current price" heading."""
+    import api.routes.signals as signals_module
+    from database.db import insert_prices_batch
+    monkeypatch.setattr(signals_module, "_cache", {"date": None, "payload": None, "ts": 0.0})
+
+    conn = get_connection()
+    try:
+        # Signal was generated when the stock was at 100.
+        _insert_trade_signal(conn, symbol="CMPSTOCK.NS", current_price=100.0)
+    finally:
+        release_connection(conn)
+
+    # …the stock has since moved to 137.40, over two bars.
+    insert_prices_batch([
+        ("CMPSTOCK.NS", "NSE", "2026-08-11", None, 100, 101, 99, 100.0, 1000, "1d"),
+        ("CMPSTOCK.NS", "NSE", "2026-08-12", None, 130, 138, 129, 137.40, 1200, "1d"),
+    ])
+
+    resp = api_client.get("/api/signals/all")
+    assert resp.status_code == 200
+    sig = next(s for s in resp.json()["signals"] if s["symbol"] == "CMPSTOCK.NS")
+    assert sig["current_price"] == 137.40
+
+
+def test_signals_all_current_price_is_null_without_price_bars(api_client, monkeypatch):
+    """A signal for a symbol with no price rows reports null rather than 0 — the
+    UI renders an em dash, which is honest; ₹0.00 would not be."""
+    import api.routes.signals as signals_module
+    monkeypatch.setattr(signals_module, "_cache", {"date": None, "payload": None, "ts": 0.0})
+
+    conn = get_connection()
+    try:
+        _insert_trade_signal(conn, symbol="NOPRICE.NS")
+    finally:
+        release_connection(conn)
+
+    resp = api_client.get("/api/signals/all")
+    assert resp.status_code == 200
+    sig = next(s for s in resp.json()["signals"] if s["symbol"] == "NOPRICE.NS")
+    assert sig["current_price"] is None
+
+
 def test_backtest_summary_route_db_backed(api_client):
     """Model stats come from model_training_stats (latest run_id only), signal
     stats from trade_signals — both DB-backed, no file inputs. Seed one run and

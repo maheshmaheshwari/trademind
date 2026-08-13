@@ -76,6 +76,11 @@ function inrCompact(n: number) {
   return '₹' + Math.round(n).toLocaleString('en-IN');
 }
 
+function inr(n: number | null | undefined, dec = 2) {
+  if (n == null) return '—';
+  return '₹' + n?.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
 function StrategyBacktest({ isDark }: { isDark: boolean }) {
   const { data, isLoading } = useGetStrategyBacktestQuery();
 
@@ -476,20 +481,26 @@ export default function BacktestPage() {
           <table className="w-full text-[13px]">
             <thead>
               <tr className="border-b border-line">
-                {['Stock', 'Signal', 'Confidence', 'Expected Return', 'Model', 'Accuracy', 'Horizon'].map(h => (
-                  <th key={h} className="text-left text-[11px] font-semibold uppercase tracking-[.07em] text-ink-3 pb-2.5 pr-4 whitespace-nowrap">{h}</th>
+                {['Stock', 'CMP', 'Signal', 'Confidence', 'Expected Return', 'Model', 'Accuracy', 'Horizon'].map(h => (
+                  <th key={h} className={`text-[11px] font-semibold uppercase tracking-[.07em] text-ink-3 pb-2.5 pr-4 whitespace-nowrap ${h === 'CMP' ? 'text-right' : 'text-left'}`}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {(ss?.top_signals ?? []).map((t: any, i: number) => {
                 const sigColor = SIGNAL_COLORS[t?.signal ?? ''] ?? '#3B82F6';
-                const expRet = t?.trade?.expected_return_pct ?? 0;
+                // /api/backtest/summary returns flat trade_signals rows, so the
+                // nested `trade`/`model` shape only exists on the formatted
+                // signal payloads — fall back to the flat column either way.
+                const expRet = t?.trade?.expected_return_pct ?? t?.expected_return_pct ?? 0;
                 return (
                   <tr key={(t?.symbol ?? '') + i} className="border-b border-line/50 hover:bg-surface-hover/50 transition-colors">
                     <td className="py-2.5 pr-4">
                       <div className="font-semibold text-ink">{t?.symbol?.replace?.('.NS', '')}</div>
                       {t?.name && <div className="text-[11px] text-ink-3 truncate max-w-[120px]">{t?.name}</div>}
+                    </td>
+                    <td className="py-2.5 pr-4 text-right font-mono tabular-nums text-ink-2 whitespace-nowrap">
+                      {t?.current_price != null ? inr(t.current_price) : '—'}
                     </td>
                     <td className="py-2.5 pr-4">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background: sigColor + '1A', color: sigColor }}>
@@ -510,11 +521,11 @@ export default function BacktestPage() {
                         {expRet >= 0 ? '+' : ''}{fmt(expRet)}%
                       </span>
                     </td>
-                    <td className="py-2.5 pr-4 text-ink-2">{t?.model?.name ?? '—'}</td>
+                    <td className="py-2.5 pr-4 text-ink-2">{t?.model?.name ?? t?.model_name ?? '—'}</td>
                     <td className="py-2.5 pr-4">
-                      <span className="font-mono text-[12px] text-ink-2">{fmt(t?.model?.accuracy ?? 0)}%</span>
+                      <span className="font-mono text-[12px] text-ink-2">{fmt(t?.model?.accuracy ?? t?.model_accuracy ?? 0)}%</span>
                     </td>
-                    <td className="py-2.5 text-ink-3">{t?.model?.horizon ?? '—'}</td>
+                    <td className="py-2.5 text-ink-3">{t?.model?.horizon ?? t?.model_horizon ?? '—'}</td>
                   </tr>
                 );
               })}

@@ -17,7 +17,8 @@ cash come from the user's virtual balance + open positions.
 Backtest basis: first-come selection lost money (~-5% CAGR); this conviction-
 ranked + concurrency-capped construction produced +10-17% CAGR vs a flat market.
 """
-from database.db import get_connection, release_connection, _execute, _rows_to_dicts
+from database.db import (get_connection, get_latest_close_map, release_connection,
+                         _execute, _rows_to_dicts)
 
 # Defaults mirror the best backtested config (Cap 8, conviction-ranked).
 MAX_CONCURRENT = 8      # total open positions the strategy holds at once
@@ -129,6 +130,12 @@ def recommend_trades(user_id: int,
             avail -= cost
             slots -= 1
             held.add(sym)
+
+        # Current market price, so the user can see how far the stock has moved
+        # from the entry the sizing was computed at before authorising.
+        close_map = get_latest_close_map([r["symbol"] for r in recs], conn=conn)
+        for r in recs:
+            r["current_price"] = close_map.get(r["symbol"])
 
         return {
             "recommendations": recs,

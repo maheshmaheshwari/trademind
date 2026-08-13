@@ -713,7 +713,14 @@ def get_user_signal_history(user_id: int, limit: int = 50) -> List[Dict]:
             ORDER BY o.created_at DESC
             LIMIT ?
         """, (user_id, limit))
-        return _rows_to_dicts(cur)
+        rows = _rows_to_dicts(cur)
+        # Current market price, so a signal acted on weeks ago can be read
+        # against where the stock trades now — not only its entry/target/SL.
+        close_map = get_latest_close_map(
+            sorted({r["symbol"] for r in rows}), conn=conn)
+        for r in rows:
+            r["current_price"] = close_map.get(r["symbol"])
+        return rows
     finally:
         release_connection(conn)
 
@@ -1010,6 +1017,52 @@ def get_latest_date(symbol: str) -> Optional[str]:
         return str(val) if val else None
     finally:
         release_connection(conn)
+
+
+def get_latest_close_map(symbols: Optional[List[str]] = None, conn=None) -> Dict[str, float]:
+    """Latest daily close per symbol — the app's single definition of "current price".
+
+    This is the same latest-`prices` row `/api/stocks` serves as `price`, so a
+    stock shows the same number on every screen that displays a current price.
+    Pass `symbols` to restrict the scan; omit it for the whole universe. Pass
+    `conn` to reuse a connection the caller already holds instead of taking a
+    second one from the pool.
+    """
+    own_conn = conn is None
+    if own_conn:
+        conn = get_connection()
+    try:
+        params: tuple = ()
+        # The filter belongs inside the subquery, not on the outer join: that is
+        # what stops the per-symbol MAX(date) from scanning the whole universe.
+        # The join then restricts the outer side for free.
+        symbol_filter = ""
+        if symbols is not None:
+            if not symbols:
+                return {}
+            symbol_filter = " AND symbol IN (" + ",".join("?" for _ in symbols) + ")"
+            params = tuple(symbols)
+        sql = f"""
+            SELECT p.symbol, p.close
+            FROM prices p
+            INNER JOIN (
+                SELECT symbol, MAX(date) AS max_date
+                FROM prices
+                WHERE interval = '1d'{symbol_filter}
+                GROUP BY symbol
+            ) latest
+              ON p.symbol = latest.symbol
+             AND p.date   = latest.max_date
+             AND p.interval = '1d'
+        """
+        cur = _execute(conn, sql, params)
+        return {row[0]: float(row[1]) for row in cur.fetchall() if row[1] is not None}
+    except Exception as e:
+        logger.error(f"get_latest_close_map failed: {e}")
+        return {}
+    finally:
+        if own_conn:
+            release_connection(conn)
 
 
 def get_trade_signals_formatted(

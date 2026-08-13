@@ -393,15 +393,15 @@ export default function TradesPage() {
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr>
-                  {['Symbol', 'Signal', 'Horizon', 'Buy Price', 'Target', 'SL', 'Traded At', 'Order Status', 'Signal Status'].map((h, i) => (
-                    <th key={h} style={{ ...thS, textAlign: i >= 3 && i <= 5 ? 'right' : 'left' }}>{h}</th>
+                  {['Symbol', 'Signal', 'Horizon', 'Buy Price', 'Target', 'SL', 'CMP', 'Traded At', 'Order Status', 'Signal Status'].map((h, i) => (
+                    <th key={h} style={{ ...thS, textAlign: i >= 3 && i <= 6 ? 'right' : 'left' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {loadSig ? <SkeletonRows cols={9} rows={6} /> :
+                {loadSig ? <SkeletonRows cols={10} rows={6} /> :
                  signalHist.length === 0 ? (
-                  <tr><td colSpan={9} className="text-center py-[50px] px-5 text-ink-3">
+                  <tr><td colSpan={10} className="text-center py-[50px] px-5 text-ink-3">
                     No AI signals acted on yet. Execute a signal from the AI Signals page.
                   </td></tr>
                 ) : (signalHist ?? []).map((s: any, i: number) => (
@@ -423,6 +423,9 @@ export default function TradesPage() {
                     </td>
                     <td style={{ ...tdS, textAlign: 'right' }} className="font-mono text-loss tabular-nums">
                       {s?.stop_loss ? inr(s.stop_loss) : '—'}
+                    </td>
+                    <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">
+                      {s?.current_price != null ? inr(s.current_price) : '—'}
                     </td>
                     <td style={tdS} className="text-[12px] text-ink-3">
                       {s?.traded_at ? new Date(s.traded_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}

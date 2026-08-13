@@ -14,7 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 
 from database.db import (
     get_top_signals, get_connection, release_connection, _execute, _rows_to_dicts,
-    get_sector_map,
+    get_sector_map, get_latest_close_map,
 )
 from api.rate_limit import limiter
 from api.routes.trading import get_current_user as _get_current_user
@@ -52,6 +52,11 @@ def _build_signals_payload() -> dict:
         release_connection(conn)
 
     sector_map = get_sector_map()
+    # Current price comes from the latest `prices` bar rather than the signal's
+    # own current_price snapshot: a signal keeps the price it was generated at,
+    # so on any day the generator did not run it would show a stale number under
+    # a "CMP" heading. One query for the universe, not one per signal.
+    close_map = get_latest_close_map()
     now_utc = datetime.now(timezone.utc)
     out = []
     latest_gen_at = None
@@ -96,6 +101,7 @@ def _build_signals_payload() -> dict:
             "horizon":      horizon,
             "horizon_long": horizon_l,
             "expReturn":    r.get("expected_return_pct"),
+            "current_price": close_map.get(r.get("symbol", "")),
             "buy_price":    r.get("buy_price"),
             "target_price": r.get("target_price"),
             "stop_loss":    r.get("stop_loss"),

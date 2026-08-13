@@ -38,11 +38,17 @@
 # globally unscored row, so two of them at once would process the same headlines
 # twice. It also keeps torch off the critical path in 13 fetch runners.
 #
-# Scoring is instead its own sharded stage, partitioned on MOD(id, 8) so the
+# Scoring is instead its own sharded stage, partitioned on MOD(id, 12) so the
 # shards cannot collide. This is not optional: FinBERT on a CPU runner measures
 # ~2.7 rows/sec, so a 315k-row backfill is ~32 hours — the first attempt at a
-# single score job was cancelled at 184 minutes having done 9.5%. Eight shards
-# puts each at roughly 4 hours.
+# single score job was cancelled at 184 minutes having done 9.5%.
+#
+# Twelve shards, not eight, because the timeout has nowhere to grow: 350 min is
+# already near GitHub's 360-minute hard ceiling. At 8 shards each takes ~243 min
+# and only tolerates a 30% slowdown before timing out — and 8 concurrent writers
+# on one table is exactly what would cause that slowdown. 12 puts a shard at
+# ~162 min, roughly 116% headroom, for the same total compute. If shards ever do
+# time out, add shards; raising the timeout is not an option.
 #
 # Nothing to merge between shards: both collectors write straight to
 # news_sentiment, and uq_news_url_pubdate makes a re-fetch a no-op rather than
@@ -224,7 +230,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     defaults:
       run:
         working-directory: backend
@@ -242,10 +248,10 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
-      - name: Score pending headlines, shard ${{ matrix.shard }}/8
+      - name: Score pending headlines, shard ${{ matrix.shard }}/12
         run: |
           python scripts/backfill_announcements.py \
-            --score-only --score-shard ${{ matrix.shard }}/8
+            --score-only --score-shard ${{ matrix.shard }}/12
 
   # ── 5. Verify once every scoring shard has landed ───────────────────────────
   # Separate job because the assertion is only meaningful after ALL shards

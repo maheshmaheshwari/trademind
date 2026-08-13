@@ -400,18 +400,41 @@ def score_pending_news(batch_limit: int = 2000, shard: Optional[str] = None) -> 
         for row_id, (score_str, conf) in zip(ids, scored_pairs)
     ]
 
-    try:
-        from database.db import _executemany
-        _executemany(conn,
-            "UPDATE news_sentiment SET sentiment=?, confidence=? WHERE id=?",
-            updates,
-        )
-        conn.commit()
-    except Exception as exc:
-        logger.error(f"score_pending_news: commit error: {exc}")
-        conn.rollback()
-        release_connection(conn)
-        return 0
+    # Retry once, then RAISE. Returning 0 here was actively harmful: run_scoring
+    # loops until a call returns fewer than batch_limit, so a single failed
+    # write ended the whole shard's loop and the driver then reported "scoring
+    # complete" and exited 0 — a green check over an abandoned shard. It also
+    # discarded a batch of finished FinBERT inference (~12 min of compute at the
+    # measured 2.7 rows/sec), since the headlines are scored before the write.
+    #
+    # Callers are safe: both scheduler jobs wrap this in try/except and log.
+    from database.db import _executemany
+    last_exc = None
+    for attempt in (1, 2):
+        try:
+            _executemany(conn,
+                "UPDATE news_sentiment SET sentiment=?, confidence=? WHERE id=?",
+                updates,
+            )
+            conn.commit()
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            # Guarded — rollback on a dead connection raises and would mask exc.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(
+                f"score_pending_news: write attempt {attempt}/2 failed: {exc}")
+            release_connection(conn)
+            conn = get_connection() if attempt == 1 else None
+
+    if last_exc is not None:
+        raise RuntimeError(
+            f"score_pending_news: write failed after 2 attempts "
+            f"({len(updates)} scored headlines lost): {last_exc}")
 
     release_connection(conn)
     logger.info(f"score_pending_news: {len(updates)} headlines scored")

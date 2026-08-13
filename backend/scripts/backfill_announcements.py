@@ -202,8 +202,12 @@ def main():
                    help="skip fetching, only run FinBERT over unscored rows")
     p.add_argument("--no-skip", action="store_true",
                    help="re-fetch symbols whose stored history already reaches --from-date")
-    p.add_argument("--score-batch", type=int, default=2000,
-                   help="headlines per FinBERT batch (default 2000)")
+    p.add_argument("--score-batch", type=int, default=500,
+                   help="headlines per FinBERT batch (default 500). Smaller than "
+                        "the scheduler's 2000 on purpose: eight scoring shards "
+                        "write concurrently, and a 2000-row UPDATE is both more "
+                        "likely to exceed the 30s statement_timeout and more "
+                        "expensive to lose when it does")
     p.add_argument("--score-shard", type=str, default=None, metavar="i/N",
                    help="score only rows where MOD(id, N) = i-1. Scoring shards "
                         "may run concurrently; fetch shards may not score at all")

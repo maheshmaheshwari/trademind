@@ -596,15 +596,12 @@ def collect_fii_fo_job():
         logger.error("FII/DII F&O collection failed: %s", e, exc_info=True)
 
 
-def collect_index_data_job():
-    """Daily job: collect index data (Nifty 50, 500, Sensex, VIX)."""
-    logger.info("⏰ Running index data collection...")
-    try:
-        from collectors.price_collector import collect_index_data
-        result = collect_index_data(period="5d")
-        logger.info(f"Index data done: {result}")
-    except Exception as e:
-        logger.error(f"Index data collection failed: {e}")
+# collect_index_data_job (16:05, "legacy") was removed. It ran
+# collectors/price_collector.py, which downloads OHLCV from yfinance and writes
+# it straight into `prices` — the one remaining scheduled path by which
+# non-Angel-One price data entered the table (see CLAUDE.md: Angel One is the
+# sole price source). It duplicated collect_index_data_eod_job, which collects
+# the same four indices via Angel One five minutes earlier at 16:00.
 
 
 def cleanup_old_data_job():
@@ -1307,8 +1304,6 @@ def _add_all_jobs(scheduler):
     scheduler.add_job(collect_eod_data_job, CronTrigger(hour=15, minute=35, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="eod_data", name="EOD Price Collection", misfire_grace_time=3600, replace_existing=True)
     # 16:00 — Index data (NIFTY50/500, SENSEX, VIX via Angel One)
     scheduler.add_job(collect_index_data_eod_job, CronTrigger(hour=16, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="index_data_eod", name="Index & Market Overview", misfire_grace_time=3600, replace_existing=True)
-    # 16:05 — Legacy index collector (price_collector.py fallback)
-    scheduler.add_job(collect_index_data_job, CronTrigger(hour=16, minute=5, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="index_data", name="Index Data Collection (legacy)", misfire_grace_time=3600, replace_existing=True)
     # NOTE: indicators + trade signals are now chained inside collect_eod_data_job (step 2 & 3)
     # 18:00 — NSE delivery % (NSE uploads bhavcopy ~5:30 PM IST)
     scheduler.add_job(collect_delivery_job, CronTrigger(hour=18, minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"), id="delivery_data", name="NSE Delivery % Collection", misfire_grace_time=3600, replace_existing=True)
@@ -1613,7 +1608,6 @@ RECOVERABLE_JOBS.update({
     # Daily weekday jobs — 24h lookback covers today + yesterday
     "eod_data":             ("EOD Price Collection",                        15, 35, collect_eod_data_job,          "mon-fri", 24),
     "index_data_eod":       ("Index & Market Overview",                     16,  0, collect_index_data_eod_job,    "mon-fri", 24),
-    "index_data":           ("Index Data Collection (legacy)",              16,  5, collect_index_data_job,        "mon-fri", 24),
     "fii_dii_live":         ("FII/DII Data (live)",                         17,  0, collect_fii_data_job,          "mon-fri", 24),
     "fii_dii_fo":           ("FII/DII F&O Volume",                          17, 30, collect_fii_fo_job,            "mon-fri", 24),
     "daily_news":           ("Daily News Collection",                       16, 30, collect_news_job,              "mon-fri", 24),

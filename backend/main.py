@@ -48,12 +48,17 @@ def cmd_setup():
     # Step 2: Download historical price data (2 years)
     print("\n📊 Step 2: Downloading 2 years of price data...")
     print("   This will take about 15-20 minutes. Please be patient.\n")
-    from collectors.price_collector import collect_all_stocks, collect_index_data
-    collect_all_stocks(interval="1d", period="2y")
+    # Angel One is the sole price source (see CLAUDE.md). This used to call
+    # collectors/price_collector.py, which downloads from yfinance and writes
+    # into `prices` — running setup would have filled the table with data from
+    # the wrong provider.
+    from scripts.update_stocks_angel import main as collect_prices_angel
+    collect_prices_angel(days=730)
 
     # Step 3: Download index data
     print("\n📈 Step 3: Downloading index data...")
-    collect_index_data(period="2y")
+    from collectors.index_collector import collect_index_daily
+    collect_index_daily()
 
     # Step 4: Calculate indicators
     print("\n🔬 Step 4: Calculating technical indicators...")
@@ -75,10 +80,11 @@ def cmd_collect():
     """Run one full manual collection cycle."""
     print("\n🔄 Running full collection cycle...\n")
 
-    # Collect prices
-    from collectors.price_collector import collect_eod_data, collect_index_data
-    collect_eod_data()
-    collect_index_data(period="5d")
+    # Collect prices — Angel One only (see cmd_setup)
+    from scripts.update_stocks_angel import main as collect_prices_angel
+    from collectors.index_collector import collect_index_daily
+    collect_prices_angel(days=5)
+    collect_index_daily()
 
     # Calculate indicators
     from analysis.signals import process_all_stocks

@@ -47,7 +47,7 @@ import logging
 import os
 import sys
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import requests
@@ -75,6 +75,22 @@ ANNOUNCEMENTS_URL = f"{BSE_API}/AnnSubCategoryGetData/w"
 # Public announcement permalink — the browser-facing page for a NEWSID. Not
 # fetched by us; it exists so a stored row is traceable back to the filing.
 ANN_PERMALINK = "https://www.bseindia.com/corporates/anndet_new.aspx?newsid={newsid}"
+
+# How close to from_date a symbol's oldest stored announcement has to be for
+# the window to count as already fetched.
+#
+# Without this the check was `covered <= from_date` — an exact-date comparison
+# against a calendar date nobody files on. The BSE window opens 2010-01-01, a
+# holiday; the earliest announcement in the entire archive is 2010-01-04. So
+# ZERO symbols ever matched and every re-run re-fetched all 351 of them over
+# HTTP to insert nothing, which is what timed out the DB on run 2.
+#
+# A month of slack: a company that filed anything in the first weeks of the
+# window clearly had that window collected. Symbols whose first filing is later
+# (late listings, thin filers) still re-fetch — we cannot tell "listed in 2015"
+# from "only got fetched back to 2015" without real coverage tracking — but
+# those are cheap, returning few rows. --no-skip forces a full re-fetch.
+COVERAGE_GRACE_DAYS  = 31
 
 PAGE_SIZE            = 50      # fixed server-side; ROWCNT is the range total
 FROM_DATE            = "2010-01-01"
@@ -382,7 +398,7 @@ def backfill(symbols: List[str], from_date: date, to_date: date,
         symbol_ns = f"{symbol}.NS"
         if skip_covered:
             covered = earliest_covered(symbol_ns)
-            if covered and covered <= from_date:
+            if covered and covered <= from_date + timedelta(days=COVERAGE_GRACE_DAYS):
                 logger.debug("[%d/%d] %s: already covered from %s",
                              idx, len(symbols), symbol, covered)
                 continue

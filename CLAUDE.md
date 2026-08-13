@@ -168,7 +168,13 @@ hard limits shape what can close that gap:
   32 vs 19; INFY 2012 Q1 → 12 vs 12.
 
 So the two archives tile rather than overlap (**BSE 2010-01-01 → 2017-12-31,
-NSE 2018-01-01 → 2022-12-31**, existing data from 2023). The boundary year is a
+NSE 2018-01-01 → today**). NSE runs to the present on purpose, overlapping the
+daily job to top up what it missed — 2026-06 and 2026-07 collected ~2,000
+announcements each against a ~3,300/month baseline. Re-fetches dedupe away via
+`uq_news_url_pubdate`, so the overlap costs nothing. **That top-up needs
+`--no-skip` / `no_skip=true`**: the skip check reads only a symbol's *oldest*
+stored row, so 60% of symbols already pass it from the 2018 backfill, and
+interior gaps are invisible to any min/max coverage check. The boundary year is a
 coverage choice, but the *disjointness* is not optional: a company files the
 same event to both exchanges under different URLs, so `uq_news_url_pubdate`
 cannot dedupe across sources — overlapping windows would store it twice and

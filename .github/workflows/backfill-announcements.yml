@@ -15,7 +15,14 @@
 # the daily sentiment aggregate):
 #
 #   BSE  2010-01-01 .. 2017-12-31   api.bseindia.com, paginated 50/page
-#   NSE  2018-01-01 .. 2022-12-31   nseindia.com, one request per symbol
+#   NSE  2018-01-01 .. today        nseindia.com, one request per symbol
+#
+# NSE deliberately runs to the present, overlapping the daily job, to top up
+# what it missed — 2026-06 and 2026-07 collected ~2,000 announcements each
+# against a ~3,300/month baseline. Re-fetches dedupe away, so the overlap is
+# free. That top-up needs no_skip=true: the skip check only reads a symbol's
+# OLDEST row, so 60% of symbols already pass it from the 2018 backfill, and
+# interior gaps are invisible to any min/max check regardless.
 #
 # Both archives actually reach back to at least 2012 and forward past 2018 —
 # the boundary is a coverage choice, not a limit. BSE measures equal or richer
@@ -71,7 +78,7 @@ on:
         type: string
         required: false
       to_date:
-        description: 'Override end date YYYY-MM-DD (default BSE 2017-12-31 / NSE 2022-12-31)'
+        description: 'Override end date YYYY-MM-DD (default BSE 2017-12-31 / NSE today)'
         type: string
         required: false
       no_skip:

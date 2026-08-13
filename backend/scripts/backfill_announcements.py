@@ -29,7 +29,21 @@ WHY THESE TWO SOURCES
 
 WINDOWS — THE TWO SOURCES TILE, THEY DO NOT OVERLAP
     BSE  2010-01-01 .. 2017-12-31   materially deeper coverage before 2018
-    NSE  2018-01-01 .. 2022-12-31   2023-01-01 onward is already collected
+    NSE  2018-01-01 .. today        overlaps the daily job on purpose, to top
+                                    up whatever it missed (both build URLs via
+                                    _ann_url, so re-fetches dedupe away)
+
+    From 2018 the two sources OVERLAP rather than tile — see BSE_TO for the
+    measurement behind that. Each exchange holds announcements the other does
+    not, so running both maximises coverage; the price is inflated count
+    features (news_count and friends) on dates where both carry the same event.
+    Within a source, re-fetches still dedupe on uq_news_url_pubdate.
+
+    Topping up 2023+ needs --no-skip. The skip check only inspects a symbol's
+    OLDEST stored row, so 60% of symbols already satisfy it from the 2018
+    backfill and get skipped. Interior gaps — 2026-06 and 2026-07 collected at
+    roughly half the usual monthly rate — are invisible to any min/max coverage
+    check, so only a full re-fetch fills them.
 
     An earlier version of this docstring said NSE's API "bottoms out around
     2018". That is wrong — NSE returns 2012 Q1 announcements for TCS, INFY,
@@ -90,18 +104,53 @@ logger = logging.getLogger(__name__)
 # ── Default windows ───────────────────────────────────────────────────────────
 
 BSE_FROM = "2010-01-01"
-BSE_TO   = "2017-12-31"
+# Runs to today, same as NSE. The windows deliberately OVERLAP from 2018 on —
+# an earlier version of this file forbade that, on the grounds that a company
+# files the same event to both exchanges and the resulting duplicate would
+# double-weight it. Measured, that is only half true:
+#
+#   TCS      2019Q1  BSE 63 rows / 43 dates, NSE 55 / 41  -> 40 shared,  3 BSE-only
+#   RELIANCE 2019Q1  BSE 61 rows / 39 dates, NSE 33 / 23  -> 23 shared, 16 BSE-only
+#
+# BSE carries announcements on dates NSE has nothing for — 41% of RELIANCE's
+# dates. That is coverage, not duplication.
+#
+# The cost is real but narrower than first claimed: avg_sentiment is a mean, so
+# a near-duplicate row barely moves it. What inflates on shared dates is the
+# COUNT features — news_count, positive_count/negative_count, mkt_news_count.
+# Anything reading those across the 2018 boundary is comparing a one-exchange
+# count to a two-exchange count.
+BSE_TO   = date.today().isoformat()
 NSE_FROM = "2018-01-01"
-NSE_TO   = "2022-12-31"
+# Runs to today, not to a fixed 2022-12-31. The daily job covers 2023 onward,
+# but it covers it imperfectly: 2026-06 and 2026-07 landed ~2,000 announcements
+# each against a ~3,300/month baseline, roughly half the daily rate of the
+# months either side. Carrying the window to the present lets a backfill top up
+# whatever the daily job missed. Safe to overlap the daily job because both
+# build URLs through _ann_url(), so re-fetched rows collide on
+# uq_news_url_pubdate and are dropped.
+#
+# BSE_TO stays at 2017-12-31 and must not follow: BSE and NSE give the same
+# filing different URLs, so the index cannot dedupe across sources and
+# overlapping windows would double-weight every dual-filed event.
+NSE_TO   = date.today().isoformat()
 
 # ── Shard sizing ──────────────────────────────────────────────────────────────
-# BSE is the expensive one: eight calendar-year windows per symbol, each paged
-# 50 rows at a time. Measured 24.7s/symbol over TCS/INFY/ITC/WIPRO (4,678 rows
-# for 2010-2017), so all 500 is ~3.2h serially — past a comfortable job length.
-# 60/shard puts a shard at ~25 min. NSE answers a whole multi-year range in one
-# request per symbol (~4s including the politeness sleep), ~35 min for 500, so
-# it splits four ways just to stay under an hour.
-SYMBOLS_PER_BSE_SHARD = 60
+# BSE is the expensive one: one calendar-year window per symbol per year, each
+# paged 50 rows at a time, so its cost scales with the window length. Measured
+# 24.7s/symbol over TCS/INFY/ITC/WIPRO for 2010-2017 (8 years).
+#
+# Halved from 60 to 30 when BSE_TO moved from 2017-12-31 to today: the window
+# went from 8 years to ~16.6, doubling per-symbol cost, which would have taken a
+# 60-symbol shard from ~25 min to ~52 min against the job's 90-minute timeout —
+# a 1.7x margin. 30/shard restores roughly the original ~26 min and 3.4x margin.
+# max-parallel is unchanged, so this adds waves rather than concurrent load on
+# BSE.
+#
+# NSE answers a whole multi-year range in one request per symbol (~4s including
+# the politeness sleep) regardless of how long that range is, so widening its
+# window does not change its sizing.
+SYMBOLS_PER_BSE_SHARD = 30
 SYMBOLS_PER_NSE_SHARD = 125
 
 
@@ -201,7 +250,13 @@ def main():
     p.add_argument("--score-only", action="store_true",
                    help="skip fetching, only run FinBERT over unscored rows")
     p.add_argument("--no-skip", action="store_true",
-                   help="re-fetch symbols whose stored history already reaches --from-date")
+                   help="re-fetch symbols whose stored history already reaches "
+                        "--from-date. REQUIRED to top up 2023+ NSE gaps: the skip "
+                        "check only looks at a symbol's OLDEST stored row, so 60%% "
+                        "of symbols already satisfy it from the 2018 backfill and "
+                        "would be skipped. Interior gaps (2026-06/07 ran at half "
+                        "the usual rate) are invisible to any min/max coverage "
+                        "check, so a full re-fetch is the only way to fill them")
     p.add_argument("--score-batch", type=int, default=500,
                    help="headlines per FinBERT batch (default 500). Smaller than "
                         "the scheduler's 2000 on purpose: eight scoring shards "

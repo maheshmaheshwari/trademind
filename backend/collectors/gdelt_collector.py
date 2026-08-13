@@ -361,13 +361,25 @@ def score_pending_news(batch_limit: int = 2000, shard: Optional[str] = None) -> 
 
     # MOD(), not the % operator: db.py's _execute rewrites ? to %s, so a literal
     # % in the SQL collides with psycopg2's own placeholder parsing.
+    # published_at comes along for the UPDATE's WHERE clause, not for scoring.
+    # news_sentiment is a hypertable partitioned on published_at with 203 chunks
+    # after the 2010-2022 backfill, and there is NO index on id. So
+    # "WHERE id = ?" alone cannot exclude chunks and sequential-scans all 203 to
+    # find one row: EXPLAIN shows 204 scan nodes at cost 27,176, versus 3 nodes
+    # at cost 126 once published_at is included — 216x cheaper.
+    #
+    # This, not FinBERT, was the real cost of scoring. The measured ~2.7 rows/sec
+    # that the shard count was sized around was the write path scanning the whole
+    # hypertable per row, which is also why it was identical on a CPU runner and
+    # on a local GPU.
     if shard:
         i, n = (int(x) for x in shard.split("/"))
-        sql = ("SELECT id, headline FROM news_sentiment "
+        sql = ("SELECT id, headline, published_at FROM news_sentiment "
                "WHERE sentiment IS NULL AND MOD(id, ?) = ? LIMIT ?")
         params = (n, i - 1, batch_limit)
     else:
-        sql = "SELECT id, headline FROM news_sentiment WHERE sentiment IS NULL LIMIT ?"
+        sql = ("SELECT id, headline, published_at FROM news_sentiment "
+               "WHERE sentiment IS NULL LIMIT ?")
         params = (batch_limit,)
 
     conn = get_connection()
@@ -387,6 +399,7 @@ def score_pending_news(batch_limit: int = 2000, shard: Optional[str] = None) -> 
 
     ids       = [r[0] for r in rows]
     headlines = [r[1] or "" for r in rows]
+    pubs      = [r[2] for r in rows]
 
     try:
         scored_pairs = analyze_sentiment_batch(headlines)
@@ -396,8 +409,8 @@ def score_pending_news(batch_limit: int = 2000, shard: Optional[str] = None) -> 
         return 0
 
     updates = [
-        (score_str, float(conf), row_id)
-        for row_id, (score_str, conf) in zip(ids, scored_pairs)
+        (score_str, float(conf), row_id, pub)
+        for row_id, pub, (score_str, conf) in zip(ids, pubs, scored_pairs)
     ]
 
     # Retry once, then RAISE. Returning 0 here was actively harmful: run_scoring
@@ -413,7 +426,8 @@ def score_pending_news(batch_limit: int = 2000, shard: Optional[str] = None) -> 
     for attempt in (1, 2):
         try:
             _executemany(conn,
-                "UPDATE news_sentiment SET sentiment=?, confidence=? WHERE id=?",
+                "UPDATE news_sentiment SET sentiment=?, confidence=? "
+                "WHERE id=? AND published_at=?",
                 updates,
             )
             conn.commit()

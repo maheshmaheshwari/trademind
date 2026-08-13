@@ -141,7 +141,42 @@ News/sentiment sources (secondary, not price data):
 - GDELT — news headlines bootstrap (`collectors/gdelt_collector.py`)
 - RSS feeds — `collectors/rss_collector.py`
 - NSE announcements — `collectors/nse_announcements_collector.py`
+- BSE announcements — `collectors/bse_announcements_collector.py`
 - FinBERT — sentiment scoring (`analysis/sentiment.py`)
+
+### Historical news depth
+
+`news_sentiment` starts at **2023-01-01**; `prices` reaches back to 2010. Three
+hard limits shape what can close that gap:
+
+- **GDELT cannot.** Its DOC 2.0 API rejects any start date before 2017 —
+  a 2016-01-01 query returns `Invalid query start date`, 2017-01-02 returns
+  articles.
+- **NSE's announcements API bottoms out around 2018.**
+- **BSE's reaches 2010** — the deepest free source, and the reason
+  `bse_announcements_collector.py` exists.
+
+So the two archives tile rather than overlap (**BSE 2010-01-01 → 2017-12-31,
+NSE 2018-01-01 → 2022-12-31**, existing data from 2023). A company files the
+same event to both exchanges, so overlapping windows would store it twice and
+double its weight in the `news_daily_sentiment` aggregate.
+
+`scripts/backfill_announcements.py` drives both plus the scoring pass, and
+`.github/workflows/backfill-announcements.yml` runs it sharded. **Fetch shards
+must pass `--fetch-only`**: `score_pending_news()` claims every globally
+unscored row, so concurrent scorers redo each other's work. Score once, after.
+
+Worth knowing before spending on depth: 450 of 537 symbols have no price bars
+before 2023, so pre-2023 news only pays off for the ~7 symbols whose history
+starts in 2010 — or after a deeper price backfill.
+
+Dedupe for every news collector rides on the partial unique index
+`uq_news_url_pubdate (url, published_at) WHERE url IS NOT NULL`. Without it the
+`ON CONFLICT DO NOTHING` these collectors all end in is a silent no-op. It also
+means **a URL must identify one filing, not one symbol-day** — the NSE backfill
+previously gave every announcement the same symbol-scoped URL, so a day on
+which a company filed results *and* a board-meeting notice kept only one of
+them.
 
 ---
 
@@ -311,6 +346,29 @@ APP_ENV=test python -c "from database.db import get_connection; print(get_connec
 - `tests/test_external_api_contracts.py` — feeds the Angel One/yfinance fixtures into the actual parsing functions (`scripts/update_stocks_angel.py:fetch_candles`, `collectors/yfinance_news_collector.py:collect_stock`, etc.) with a fake API object standing in for `SmartConnect`/`yf.Ticker`, and checks the resulting DB rows — this is what would catch an Angel One/yfinance response-shape change before it breaks a live job.
 
 Run everything: `cd backend && APP_ENV=test pytest -v`.
+
+That works only because `pytest.ini` sets `pythonpath = .`. `conftest.py`
+imports `database.db`, which needs `backend/` on `sys.path`; the bare `pytest`
+console script does not add the cwd (`python -m pytest` does). **Remove that
+line and collection dies with `ModuleNotFoundError: No module named
+'database'` before a single test runs.**
+
+Expect the full suite to take **~60 minutes** — 264 tests at roughly 4 per
+minute, every one round-tripping to the Timescale Cloud test instance, with
+per-test truncation and network latency dominating (CPU sits at ~2%). It is
+slow, not hung: `TestSquareOff` alone takes ~3 minutes for 6 tests. Practical
+consequences:
+
+- Run it in the background and watch the log; a foreground run will hit any
+  10-minute command timeout, and a long background run may be killed before it
+  finishes (this has happened at 82%).
+- **Never pipe the run through `tail`.** That buffers all output until exit, so
+  a long run shows nothing at all, and the reported exit code is `tail`'s — a
+  killed pytest still looks like `exit 0`.
+- Before concluding anything is stuck, add `-o faulthandler_timeout=45` to get a
+  stack dump of what is actually blocking.
+- To finish an interrupted run, re-run only the files that hadn't completed
+  rather than starting the whole suite over.
 
 ---
 

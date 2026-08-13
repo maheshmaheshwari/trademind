@@ -50,6 +50,10 @@ logger = logging.getLogger(__name__)
 
 FROM_DATE          = "01-01-2023"          # dd-mm-yyyy for NSE API
 SLEEP_BETWEEN_STOCKS = 1.0                 # seconds — polite, no stated rate limit
+# Days of slack when deciding a symbol's window is already collected. Kept in
+# step with the BSE collector's constant of the same name, which carries the
+# full rationale.
+COVERAGE_GRACE_DAYS  = 31
 BATCH_SIZE         = 128                   # FinBERT batch size (larger = faster on MPS)
 
 NSE_URL = "https://www.nseindia.com/api/corporate-announcements"
@@ -368,7 +372,10 @@ def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None
 
         if skip_existing:
             covered = earliest_covered(symbol_ns)
-            if covered and covered.replace(tzinfo=None) <= from_dt:
+            # Grace window, not an exact-date match — see COVERAGE_GRACE_DAYS in
+            # the BSE collector for why the strict form skipped nothing and made
+            # every re-run a full re-fetch.
+            if covered and covered.replace(tzinfo=None) <= from_dt + timedelta(days=COVERAGE_GRACE_DAYS):
                 skipped += 1
                 continue
 

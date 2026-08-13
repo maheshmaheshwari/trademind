@@ -167,18 +167,27 @@ hard limits shape what can close that gap:
   symbol and quarter: RELIANCE 2015 Q1 → BSE 171 rows vs NSE 33; TCS 2012 Q1 →
   32 vs 19; INFY 2012 Q1 → 12 vs 12.
 
-So the two archives tile rather than overlap (**BSE 2010-01-01 → 2017-12-31,
-NSE 2018-01-01 → today**). NSE runs to the present on purpose, overlapping the
-daily job to top up what it missed — 2026-06 and 2026-07 collected ~2,000
-announcements each against a ~3,300/month baseline. Re-fetches dedupe away via
-`uq_news_url_pubdate`, so the overlap costs nothing. **That top-up needs
-`--no-skip` / `no_skip=true`**: the skip check reads only a symbol's *oldest*
-stored row, so 60% of symbols already pass it from the 2018 backfill, and
-interior gaps are invisible to any min/max coverage check. The boundary year is a
-coverage choice, but the *disjointness* is not optional: a company files the
-same event to both exchanges under different URLs, so `uq_news_url_pubdate`
-cannot dedupe across sources — overlapping windows would store it twice and
-double its weight in the `news_daily_sentiment` aggregate.
+Both archives now run to the present (**BSE 2010-01-01 → today, NSE 2018-01-01 →
+today**), overlapping each other from 2018 and overlapping the daily job.
+
+An earlier version of this section said the windows must stay disjoint, because
+a company files the same event to both exchanges under different URLs and
+`uq_news_url_pubdate` cannot dedupe across sources. The dedupe part is true; the
+conclusion was not. Measured on 2019 Q1, **each exchange holds announcements the
+other lacks** — BSE covered 16 of RELIANCE's 39 dates that NSE had nothing for
+(TCS: 3 of 43). Running both maximises coverage.
+
+The cost is narrower than first claimed. `avg_sentiment` is a mean, so a
+near-duplicate row barely moves it; what inflates on shared dates are the
+**count** features — `news_count`, `positive_count`/`negative_count`,
+`mkt_news_count`. Anything comparing those across the 2018 boundary is comparing
+a one-exchange count to a two-exchange count. Within a source, re-fetches still
+dedupe.
+
+**Topping up needs `--no-skip` / `no_skip=true`**: the skip check reads only a
+symbol's *oldest* stored row, so 60% of symbols already pass it from the 2018
+backfill, and interior gaps (2026-06/07 ran at ~half the usual monthly rate)
+are invisible to any min/max coverage check.
 
 `scripts/backfill_announcements.py` drives both plus the scoring pass, and
 `.github/workflows/backfill-announcements.yml` runs it sharded. **Fetch shards

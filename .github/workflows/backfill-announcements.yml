@@ -2,10 +2,13 @@
 #
 # news_sentiment starts at 2023-01-01 while prices reach back to 2010, so every
 # pre-2023 training row has no sentiment feature to read. GDELT cannot close
-# that gap: its DOC 2.0 API rejects any start date before 2017 outright
-# ("Invalid query start date"). Corporate announcements can, and they are the
-# better input anyway — exact timestamps, an explicit symbol per row, and no
-# headline-to-company matching to get wrong.
+# that gap — not because of a date floor but because it does not answer at all:
+# measured 2026-08-13, three fetches each 429'd on the first call, exhausted the
+# 60/120/180s retry ladder and returned zero articles (~411s per request for
+# nothing), and news_sentiment has never held a single GDELT-sourced row.
+# Corporate announcements can, and they are the better input anyway — exact
+# timestamps, an explicit symbol per row, and no headline-to-company matching
+# to get wrong.
 #
 # Two archives, tiled so nothing is fetched twice (a company files the same
 # event to both exchanges, and overlapping windows would double its weight in
@@ -13,6 +16,13 @@
 #
 #   BSE  2010-01-01 .. 2017-12-31   api.bseindia.com, paginated 50/page
 #   NSE  2018-01-01 .. 2022-12-31   nseindia.com, one request per symbol
+#
+# Both archives actually reach back to at least 2012 and forward past 2018 —
+# the boundary is a coverage choice, not a limit. BSE measures equal or richer
+# before 2018 (RELIANCE 2015 Q1: 171 rows vs NSE's 33), so it takes the deep
+# window. What matters is only that the windows stay disjoint: the same event
+# filed to both exchanges gets different URLs, so the unique index cannot
+# dedupe it across sources.
 #
 # Manual only. This is a one-off backfill, not a cadence — once a symbol's
 # history reaches the start date the collectors skip it, so a re-run is cheap
@@ -24,10 +34,15 @@
 #   nse       matrix — fetch only, ~10 min a shard
 #   score     one FinBERT pass over everything the shards left unscored
 #
-# Why shards must not score: score_pending_news() claims every globally
-# unscored row, so two shards scoring at once would process the same headlines
-# twice. Fetch in parallel, score once — the same split sync-universe.yml uses
-# for its GDELT shards. It also keeps torch off the critical path in 13 runners.
+# Why FETCH shards must not score: unsharded, score_pending_news() claims every
+# globally unscored row, so two of them at once would process the same headlines
+# twice. It also keeps torch off the critical path in 13 fetch runners.
+#
+# Scoring is instead its own sharded stage, partitioned on MOD(id, 8) so the
+# shards cannot collide. This is not optional: FinBERT on a CPU runner measures
+# ~2.7 rows/sec, so a 315k-row backfill is ~32 hours — the first attempt at a
+# single score job was cancelled at 184 minutes having done 9.5%. Eight shards
+# puts each at roughly 4 hours.
 #
 # Nothing to merge between shards: both collectors write straight to
 # news_sentiment, and uq_news_url_pubdate makes a re-fetch a no-op rather than
@@ -205,7 +220,11 @@ jobs:
     needs: [prepare, bse, nse]
     if: ${{ always() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     defaults:
       run:
         working-directory: backend
@@ -223,8 +242,36 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
-      - name: Score pending headlines
-        run: python scripts/backfill_announcements.py --score-only
+      - name: Score pending headlines, shard ${{ matrix.shard }}/8
+        run: |
+          python scripts/backfill_announcements.py \
+            --score-only --score-shard ${{ matrix.shard }}/8
+
+  # ── 5. Verify once every scoring shard has landed ───────────────────────────
+  # Separate job because the assertion is only meaningful after ALL shards
+  # finish — running it inside a shard would fire while siblings still have
+  # rows outstanding. always() so a timed-out shard still gets measured rather
+  # than hiding how far the run actually got.
+  verify:
+    needs: [prepare, bse, nse, score]
+    if: ${{ always() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # No torch here — this job only reads counts.
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
       # Prints the per-year table AND asserts on it. Printing alone let the job
       # go green whether it landed 780,000 rows or zero, which defeats the

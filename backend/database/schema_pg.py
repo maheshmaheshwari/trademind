@@ -850,6 +850,17 @@ SQL_INDEXES = [
     # environment built from schema_pg.py alone would silently accumulate
     # duplicates. url is nullable (a few legacy rows have none), hence partial.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_news_url_pubdate ON news_sentiment (url, published_at) WHERE url IS NOT NULL;",
+    # The scoring loop's claim query: "WHERE sentiment IS NULL AND MOD(id, N) = i
+    # LIMIT n". MOD() is not indexable, so without a partial index this scans
+    # ever more rows as the backlog drains — each scored row is one more the
+    # planner must skip to find the next unscored one. It eventually exceeds the
+    # 30s statement_timeout, which is how 11 of 12 scoring shards in run
+    # 31693641690 died mid-pass with 477k rows still unscored.
+    #
+    # Partial on the predicate so the index SHRINKS as rows get scored, which is
+    # exactly inverse to the problem. Cheap to maintain: a row leaves the index
+    # once, when it is scored, and never returns.
+    "CREATE INDEX IF NOT EXISTS idx_news_unscored ON news_sentiment (id) WHERE sentiment IS NULL;",
     "CREATE INDEX IF NOT EXISTS idx_ts_date_signal     ON trade_signals (generated_date DESC, signal);",
     "CREATE INDEX IF NOT EXISTS idx_ts_confidence      ON trade_signals (confidence DESC);",
     "CREATE INDEX IF NOT EXISTS idx_ts_symbol          ON trade_signals (symbol);",

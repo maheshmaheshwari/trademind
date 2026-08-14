@@ -382,13 +382,32 @@ def score_pending_news(batch_limit: int = 2000, shard: Optional[str] = None) -> 
                "WHERE sentiment IS NULL LIMIT ?")
         params = (batch_limit,)
 
+    # Retry once, then RAISE — same reasoning as the write path below, and the
+    # same bug: returning 0 here ends run_scoring()'s loop, so the shard reports
+    # "Scoring pass complete" and exits green having abandoned its remaining
+    # rows. That is exactly what happened to 11 of 12 shards in run
+    # 31693641690: each scored ~60k rows, hit a SELECT timeout, and went green
+    # leaving 477k rows unscored.
     conn = get_connection()
-    try:
-        rows = _execute(conn, sql, params).fetchall()
-    except Exception as exc:
-        logger.error(f"score_pending_news: DB read error: {exc}")
-        release_connection(conn)
-        return 0
+    rows = None
+    last_exc = None
+    for attempt in (1, 2):
+        try:
+            rows = _execute(conn, sql, params).fetchall()
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(
+                f"score_pending_news: read attempt {attempt}/2 failed: {exc}")
+            release_connection(conn)
+            conn = get_connection() if attempt == 1 else None
+    if last_exc is not None:
+        raise RuntimeError(f"score_pending_news: read failed after 2 attempts: {last_exc}")
 
     if not rows:
         logger.info("score_pending_news: no pending rows")

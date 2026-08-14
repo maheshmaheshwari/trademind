@@ -354,6 +354,31 @@ CREATE INDEX IF NOT EXISTS idx_strategy_backtest_gen ON strategy_backtest_result
 # Space deploy, so /api/market/sectors crashed in production with
 # ModuleNotFoundError. Reference data belongs in the DB (see CLAUDE.md); seed
 # it with scripts/seed_nifty_constituents.py.
+SQL_BACKFILL_COVERAGE = """
+CREATE TABLE IF NOT EXISTS backfill_coverage (
+    symbol      TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    from_date   DATE NOT NULL,
+    to_date     DATE NOT NULL,
+    rows_stored INTEGER,
+    fetched_at  TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (symbol, source)
+);
+"""
+# Records which window has actually been fetched per (symbol, source), so the
+# backfill can skip work it has genuinely already done.
+#
+# The previous approach inferred coverage from the data — "skip if the oldest
+# stored row is at/near from_date". That cannot distinguish "listed in 2018"
+# from "only ever fetched back to 2018", so it skipped nothing for any symbol
+# that listed after the window opened, i.e. most of the universe. Run
+# 31771174759 re-fetched 16 years for 360ONE, ADANIENSOL, AUBANK and the rest
+# despite every one of them already being complete, which is what exhausted the
+# database.
+#
+# Coverage is a fact about what the collector did, not a guess from the rows it
+# left behind, so it is stored rather than derived.
+
 SQL_NIFTY_CONSTITUENTS = """
 CREATE TABLE IF NOT EXISTS nifty_constituents (
     symbol      TEXT PRIMARY KEY,
@@ -693,6 +718,13 @@ CREATE INDEX IF NOT EXISTS idx_app_logs_level ON app_logs (level, time DESC);
 # Hypertable conversion + compression
 # ---------------------------------------------------------------------------
 
+# Applied on every init_database() so an existing hypertable picks up a widened
+# interval; create_hypertable(if_not_exists) cannot do this. Only affects chunks
+# created after the call.
+SQL_CHUNK_INTERVALS = [
+    ("news_sentiment", "1 year"),
+]
+
 SQL_HYPERTABLES = [
     # prices: partition monthly by date
     """
@@ -708,10 +740,23 @@ SQL_HYPERTABLES = [
         if_not_exists => TRUE
     );
     """,
-    # news_sentiment: partition monthly by published_at
+    # news_sentiment: partition YEARLY by published_at.
+    #
+    # Was monthly, which was fine while the table held 2023-onward only. The
+    # 2010-2026 announcement backfill turned that into 203 chunks, and any query
+    # WITHOUT a published_at predicate cannot exclude chunks — it plans across
+    # all 203, opening each chunk relation and its four indexes. On a 256MB
+    # shared_buffers instance with concurrent shards doing that per symbol, the
+    # server ran out of memory outright: run 31771174759 died with
+    # "out of memory ... Failed on request of size 56 in memory context
+    # ExecutorState" inside earliest_covered(), a query that reads one value.
+    #
+    # Yearly puts the same span at ~17 chunks. Only affects NEWLY created
+    # chunks — the existing 203 stay until the table is rebuilt, so this caps
+    # the damage rather than undoing it.
     """
     SELECT create_hypertable('news_sentiment', 'published_at',
-        chunk_time_interval => INTERVAL '1 month',
+        chunk_time_interval => INTERVAL '1 year',
         if_not_exists => TRUE
     );
     """,
@@ -892,6 +937,7 @@ SQL_REGULAR_TABLES = [
     SQL_NOTIFICATION_PREFERENCES, SQL_BROKER_CONNECTIONS,
     SQL_AV_COVERAGE_TRACKER,
     SQL_CORPORATE_ACTIONS, SQL_DELIVERY_DATA, SQL_MARKET_HOLIDAYS,
+    SQL_BACKFILL_COVERAGE,
 ]
 
 SQL_HYPERTABLE_TABLES = [
@@ -1016,6 +1062,18 @@ def init_timescale(conn) -> None:
         except Exception as e:
             conn.rollback()
             logger.warning(f"Hypertable already exists or error: {e}")
+
+    # create_hypertable(if_not_exists => TRUE) is a no-op on an existing table,
+    # so it will NOT widen the interval of a hypertable that already exists.
+    # set_chunk_time_interval does, for chunks created from here on.
+    for table, interval in SQL_CHUNK_INTERVALS:
+        try:
+            cur.execute(
+                "SELECT set_chunk_time_interval(%s, INTERVAL %s);", (table, interval))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"set_chunk_time_interval({table}): {e}")
 
     # Retention policies
     for sql in SQL_RETENTION:

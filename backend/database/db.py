@@ -1394,6 +1394,59 @@ def upsert_nifty_constituents(rows: List[Dict]) -> int:
         release_connection(conn)
 
 
+def get_backfill_coverage(symbol: str, source: str):
+    """(from_date, to_date) already fetched for this symbol/source, or None.
+
+    Reads backfill_coverage — a record of what the collector actually did —
+    rather than inferring coverage from the rows in news_sentiment. Inference
+    cannot tell "listed in 2018" from "only fetched back to 2018", so it never
+    skipped late-listing symbols and every re-run re-fetched the full window.
+
+    It is also far cheaper: backfill_coverage is a small regular table, while
+    the old MIN(published_at) probe had no time predicate and so planned across
+    every chunk of the news_sentiment hypertable.
+    """
+    conn = get_connection()
+    try:
+        cur = _execute(conn,
+            "SELECT from_date, to_date FROM backfill_coverage WHERE symbol = ? AND source = ?",
+            (symbol, source))
+        row = cur.fetchone()
+        return (row[0], row[1]) if row else None
+    except Exception as exc:
+        # Never let a bookkeeping failure stop a fetch — worst case we re-fetch.
+        logger.warning(f"get_backfill_coverage({symbol}, {source}): {exc}")
+        return None
+    finally:
+        release_connection(conn)
+
+
+def record_backfill_coverage(symbol: str, source: str, from_date, to_date,
+                             rows_stored: int = 0) -> None:
+    """Record/extend the window fetched for this symbol/source.
+
+    Widens rather than replaces: a later run over a narrower window must not
+    shrink what we know was already covered.
+    """
+    conn = get_connection()
+    try:
+        _execute(conn,
+            """INSERT INTO backfill_coverage (symbol, source, from_date, to_date, rows_stored, fetched_at)
+               VALUES (?, ?, ?, ?, ?, NOW())
+               ON CONFLICT (symbol, source) DO UPDATE SET
+                   from_date   = LEAST(backfill_coverage.from_date, EXCLUDED.from_date),
+                   to_date     = GREATEST(backfill_coverage.to_date, EXCLUDED.to_date),
+                   rows_stored = EXCLUDED.rows_stored,
+                   fetched_at  = NOW()""",
+            (symbol, source, from_date, to_date, rows_stored))
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        logger.warning(f"record_backfill_coverage({symbol}, {source}): {exc}")
+    finally:
+        release_connection(conn)
+
+
 def get_active_universe() -> List[str]:
     """The tradable universe: current Nifty 500 constituents only.
 

@@ -166,10 +166,14 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      # BSE serves an unauthenticated public API with no published rate limit.
-      # Four concurrent shards is polite for a one-off backfill and keeps the
-      # write load on Timescale Cloud modest.
-      max-parallel: 4
+      # BSE serves an unauthenticated public API with no published rate limit,
+      # so this cap is about politeness — but the binding constraint turned out
+      # to be the database, not BSE. Dropped 4 -> 2 after run 31771174759: four
+      # concurrent shards on a 256MB-shared_buffers instance, each planning
+      # queries across 203 chunks, exhausted server memory outright
+      # ("out of memory ... in memory context ExecutorState" on a query reading
+      # one value). Raise this again only after the chunk count comes down.
+      max-parallel: 2
       matrix:
         shard: ${{ fromJSON(needs.prepare.outputs.bse_matrix) }}
     defaults:

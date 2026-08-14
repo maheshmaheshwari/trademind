@@ -59,6 +59,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.db import (  # noqa: E402
     get_active_universe, get_connection, release_connection, _execute, _executemany,
+    get_backfill_coverage, record_backfill_coverage,
 )
 
 load_dotenv()
@@ -397,10 +398,16 @@ def backfill(symbols: List[str], from_date: date, to_date: date,
 
         symbol_ns = f"{symbol}.NS"
         if skip_covered:
-            covered = earliest_covered(symbol_ns)
-            if covered and covered <= from_date + timedelta(days=COVERAGE_GRACE_DAYS):
-                logger.debug("[%d/%d] %s: already covered from %s",
-                             idx, len(symbols), symbol, covered)
+            # backfill_coverage records what was actually fetched. The old probe
+            # (earliest stored row vs from_date) could not tell a late listing
+            # from a shallow fetch, so it skipped nothing for any symbol that
+            # listed after the window opened — which re-fetched 16 years per
+            # symbol and exhausted the database in run 31771174759.
+            cov = get_backfill_coverage(symbol_ns, "BSE")
+            if cov and cov[0] <= from_date + timedelta(days=COVERAGE_GRACE_DAYS) \
+                   and cov[1] >= to_date - timedelta(days=COVERAGE_GRACE_DAYS):
+                logger.debug("[%d/%d] %s: already covered %s..%s",
+                             idx, len(symbols), symbol, cov[0], cov[1])
                 continue
 
         try:
@@ -415,12 +422,19 @@ def backfill(symbols: List[str], from_date: date, to_date: date,
                 logger.info("[%d/%d] %s (scrip %s): 0 announcements in window",
                             idx, len(symbols), symbol, scrip_code)
                 empty.append(symbol)
+                # An empty window is still a fetched window. Without this the
+                # symbol re-fetches on every run forever — and "nothing to
+                # find" is exactly the case where re-fetching buys nothing.
+                record_backfill_coverage(symbol_ns, "BSE", from_date, to_date, 0)
                 time.sleep(SLEEP_BETWEEN_STOCKS)
                 continue
 
             stored = store(rows)
             total_rows += stored
             processed += 1
+            # Only after store() has committed — recording coverage for a symbol
+            # whose rows failed to land would make the next run skip a gap.
+            record_backfill_coverage(symbol_ns, "BSE", from_date, to_date, stored)
             logger.info("[%d/%d] %s (scrip %s): %d announcements %s to %s",
                         idx, len(symbols), symbol, scrip_code, stored,
                         from_date, to_date)

@@ -38,7 +38,8 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database.db import init_database, insert_news, get_connection, release_connection, _execute
+from database.db import (init_database, insert_news, get_connection, release_connection,
+                         _execute, get_backfill_coverage, record_backfill_coverage)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -370,6 +371,9 @@ def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None
                 f"{'' if score else ' (unscored)'}…")
 
     from_dt = datetime.strptime(from_date, "%d-%m-%Y")
+    # to_date is optional and means "today" when absent — resolve it here so the
+    # coverage check and the coverage record both use the same concrete date.
+    to_dt = datetime.strptime(to_date, "%d-%m-%Y") if to_date else datetime.now()
     session      = _make_session()
     total_rows   = 0
     failed       = []
@@ -380,11 +384,12 @@ def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None
         symbol_ns = f"{symbol}.NS"
 
         if skip_existing:
-            covered = earliest_covered(symbol_ns)
-            # Grace window, not an exact-date match — see COVERAGE_GRACE_DAYS in
-            # the BSE collector for why the strict form skipped nothing and made
-            # every re-run a full re-fetch.
-            if covered and covered.replace(tzinfo=None) <= from_dt + timedelta(days=COVERAGE_GRACE_DAYS):
+            # backfill_coverage over an inferred probe — see the BSE collector
+            # for why inferring from stored rows skipped nothing for symbols
+            # that listed after the window opened.
+            cov = get_backfill_coverage(symbol_ns, "NSE")
+            if cov and cov[0] <= from_dt.date() + timedelta(days=COVERAGE_GRACE_DAYS) \
+                   and cov[1] >= to_dt.date() - timedelta(days=COVERAGE_GRACE_DAYS):
                 skipped += 1
                 continue
 
@@ -478,6 +483,10 @@ def backfill_all(from_date: str = FROM_DATE, symbol_filter: Optional[str] = None
                         f"{symbol} batch insert failed after 2 attempts: {last_exc}")
 
             total_rows += inserted
+            # After the insert has committed (or there was nothing to insert) —
+            # an empty window is still a fetched window, and recording it is
+            # what stops thin filers re-fetching on every run.
+            record_backfill_coverage(symbol_ns, "NSE", from_dt.date(), to_dt.date(), inserted)
             logger.info(f"[{idx}/{total}] {symbol}: {len(announcements)} announcements → {inserted} stored")
 
         except Exception as e:

@@ -498,3 +498,108 @@ def test_execute_signal_concurrent_same_symbol_merges_consistently(api_client):
     assert positions[0][1] == pytest.approx(actual_investment * n, abs=0.01)
     assert balance == pytest.approx(1000000.0 - n * (actual_investment + fees), abs=0.01), \
         "balance should be debited exactly once per successful buy"
+
+
+# ---------------------------------------------------------------------------
+# Paper entries fill at min(market, entry) — a BUY LIMIT can never fill worse
+# than its limit price. JINDALSAW.NS was booked at its ₹272 signal entry while
+# the stock traded at ₹264.75, inflating the cost basis by ₹7.25 a share.
+#
+# APP_ENV=test blocks the live-LTP path (trading_engine._live_ltp), so the
+# seeded `prices` row is the market price these tests exercise.
+# ---------------------------------------------------------------------------
+
+def _seed_price(symbol, close):
+    """One daily bar dated today — the DB fallback trading_engine._market_price reads."""
+    conn = get_connection()
+    try:
+        _execute(conn,
+            "INSERT INTO prices (symbol, date, open, high, low, close, volume, interval) "
+            "VALUES (?,?,?,?,?,?,?,'1d') ON CONFLICT DO NOTHING",
+            (symbol, _TODAY, close, close, close, close, 10000))
+        conn.commit()
+    finally:
+        release_connection(conn)
+
+
+def test_execute_signal_fills_at_market_when_market_is_below_entry(api_client):
+    token, user_id = _register(api_client, "cheaperfilltest")
+    _seed_price("JINDALSAW.NS", 264.75)
+
+    resp = api_client.post(
+        "/api/trading/execute-signal",
+        json={
+            "user_id": user_id, "symbol": "JINDALSAW.NS", "name": "Jindal Saw Ltd.",
+            "investment_amount": 101240.0, "buy_price": 272.0,
+            "target_price": 291.0, "stop_loss": 264.0, "mode": "PAPER",
+        },
+        headers=_auth_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "executed"
+
+    # Filled at the market, not at the (dearer) signal entry.
+    assert body["position"]["buy_price"] == pytest.approx(264.75)
+    assert body["position"]["signal_price"] == pytest.approx(272.0)
+
+    # Quantity still follows the authorised entry — an order buys a quantity,
+    # so a cheaper fill costs less, it does not buy more shares.
+    quantity = int(101240.0 / 272.0)
+    assert body["position"]["quantity"] == quantity
+    assert body["position"]["invested"] == pytest.approx(round(quantity * 264.75, 2), abs=0.01)
+
+    conn = get_connection()
+    try:
+        pos = _execute(conn,
+            "SELECT avg_buy_price, invested_amount FROM positions WHERE user_id = ? AND symbol = ?",
+            (user_id, "JINDALSAW.NS")).fetchone()
+        entry = _execute(conn,
+            "SELECT price, fill_price FROM orders "
+            "WHERE user_id = ? AND symbol = ? AND order_purpose = 'ENTRY'",
+            (user_id, "JINDALSAW.NS")).fetchone()
+    finally:
+        release_connection(conn)
+
+    assert pos[0] == pytest.approx(264.75), "cost basis must be the fill, not the signal entry"
+    assert pos[1] == pytest.approx(round(quantity * 264.75, 2), abs=0.01)
+    # The order keeps both: price is the limit it was placed at, fill_price what it got.
+    assert entry[0] == pytest.approx(272.0)
+    assert entry[1] == pytest.approx(264.75)
+
+
+def test_execute_signal_fills_at_entry_when_market_is_above_entry(api_client):
+    """The other half of min(market, entry): a dearer market never fills a paper
+    entry above the price the user authorised."""
+    token, user_id = _register(api_client, "dearerfilltest")
+    _seed_price("BEL.NS", 300.0)
+
+    resp = api_client.post(
+        "/api/trading/execute-signal",
+        json={
+            "user_id": user_id, "symbol": "BEL.NS", "name": "Bharat Electronics Ltd.",
+            "investment_amount": 30000.0, "buy_price": 280.0,
+            "target_price": 310.0, "stop_loss": 265.0, "mode": "PAPER",
+        },
+        headers=_auth_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["position"]["buy_price"] == pytest.approx(280.0)
+
+
+def test_execute_signal_falls_back_to_entry_without_a_market_price(api_client):
+    """No live session and no stored bar (prices is truncated per test) — the
+    signal's entry is the only number available, so it is used unchanged."""
+    token, user_id = _register(api_client, "nomarketpricetest")
+
+    resp = api_client.post(
+        "/api/trading/execute-signal",
+        json={
+            "user_id": user_id, "symbol": "NOPRICE.NS", "name": "No Price Ltd.",
+            "investment_amount": 10000.0, "buy_price": 200.0,
+            "target_price": 220.0, "stop_loss": 190.0, "mode": "PAPER",
+        },
+        headers=_auth_headers(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["position"]["buy_price"] == pytest.approx(200.0)

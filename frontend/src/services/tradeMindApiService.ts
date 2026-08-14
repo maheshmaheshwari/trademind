@@ -217,7 +217,8 @@ export interface AuthorizedTrade {
   mode: 'PAPER' | 'LIVE';
   qty: number;
   amount: number;
-  entry: number;
+  entry: number;              // the price the user authorized
+  fill_price?: number | null; // what the entry actually filled at; null until executed
   target: number;
   sl: number;
   exp_profit: number;

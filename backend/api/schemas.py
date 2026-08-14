@@ -228,7 +228,8 @@ class ExecutePositionOut(BaseModel):
     symbol: str
     name: Optional[str] = None
     quantity: int
-    buy_price: float
+    buy_price: float          # what the entry actually filled at
+    signal_price: Optional[float] = None   # the signal's entry; > buy_price when the market was cheaper
     invested: float
     target: float
     stop_loss: float

@@ -142,6 +142,10 @@ def _execute_mandate(trade: dict) -> dict:
         gtt_info      = exec_result.get("gtt") or {}
         sl_gtt_id     = str(gtt_info.get("sl_rule_id"))    if gtt_info.get("sl_rule_id")     else None
         target_gtt_id = str(gtt_info.get("target_rule_id")) if gtt_info.get("target_rule_id") else None
+        # What the entry actually filled at — below `entry` whenever the market
+        # was cheaper than the authorised price. Recorded so the mandate's P&L
+        # is computed off the real cost basis and agrees with the position's.
+        fill_price    = (exec_result.get("position") or {}).get("buy_price")
 
         # Update the authorized_trades row
         conn = get_connection()
@@ -149,9 +153,9 @@ def _execute_mandate(trade: dict) -> dict:
             _execute(conn,
                 """UPDATE authorized_trades
                    SET status = 'EXECUTED', bracket_id = ?, sl_gtt_id = ?, target_gtt_id = ?,
-                       updated_at = NOW()
+                       fill_price = ?, updated_at = NOW()
                    WHERE id = ?""",
-                (bracket_id, sl_gtt_id, target_gtt_id, trade["id"]))
+                (bracket_id, sl_gtt_id, target_gtt_id, fill_price, trade["id"]))
             conn.commit()
         finally:
             release_connection(conn)

@@ -191,7 +191,22 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
                 # position so one already-closed position doesn't abort the
                 # rest of the batch (audit finding C2).
                 try:
-                    result = square_off(uid, symbol, sell_price=sl, trigger="STOP_LOSS")
+                    # Exit at the market, not at the SL price. A stop triggers
+                    # AT the stop and fills at whatever the market is offering —
+                    # on a gap that is materially worse. Booking every stop at
+                    # `sl` regardless invented the same fill trading_engine's
+                    # entry path used to: a stock that opens at ₹240 against an
+                    # SL of ₹264 was squared off at ₹264, hiding ₹24 a share of
+                    # real loss and understating every drawdown stat built on it.
+                    #
+                    # min(), so the ordinary case is unchanged: when price drifts
+                    # down through the stop, current_price is a hair below `sl`
+                    # and that is what fills. Only a gap moves the number.
+                    #
+                    # The TARGET branch below deliberately does NOT do this — see
+                    # the comment there.
+                    exit_price = min(current_price, sl)
+                    result = square_off(uid, symbol, sell_price=exit_price, trigger="STOP_LOSS")
                     result["trigger"] = "STOP_LOSS"
                     result["trigger_price"] = current_price
                     result["price_source"] = price_source
@@ -207,6 +222,14 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
                     f"(Target: ₹{target:.2f}) [{price_source}]"
                 )
                 try:
+                    # Sells at `target`, NOT at current_price — the opposite of
+                    # the SL branch above, and deliberately so. The target leg is
+                    # a LIMIT sell resting at `target`, so it fills at `target`
+                    # the moment the stock trades through it. This loop only
+                    # samples every 5 minutes, so current_price here can be well
+                    # past the target after a run-up the resting order would have
+                    # been filled long before — booking that price would credit a
+                    # gain the user could never have captured.
                     result = square_off(uid, symbol, sell_price=target, trigger="TARGET")
                     result["trigger"] = "TARGET"
                     result["trigger_price"] = current_price

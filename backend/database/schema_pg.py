@@ -511,6 +511,17 @@ SQL_AUTHORIZED_TRADES_ALTER = [
     # Turning autopilot ON fired nothing at all.
     "ALTER TABLE authorized_trades ADD CONSTRAINT authorized_trades_status_check "
     "CHECK (status IN ('PENDING','EXECUTING','EXECUTED','COMPLETED','STOPPED','CANCELLED'))",
+    # fill_price: what the entry actually filled at, which is not `entry`.
+    # `entry` is the price the user authorised and must stay untouched — the
+    # drift check in refresh_pending_mandates_job compares against it, and it is
+    # the audit record of what was approved. But a BUY LIMIT fills at the market
+    # when the market is cheaper (trading_engine._paper_fill_price), so the
+    # mandate's cost basis and the position's stopped agreeing: the autopilot
+    # page computes (cmp - entry) * qty, so JINDALSAW authorised at ₹272 and
+    # filled at ₹264.75 would report a P&L ₹2,697 worse than the portfolio page
+    # shows for the very same trade. NULL for mandates predating this column and
+    # for anything not yet executed — readers fall back to `entry`.
+    "ALTER TABLE authorized_trades ADD COLUMN IF NOT EXISTS fill_price DOUBLE PRECISION",
 ]
 
 # Migration: an index review drops names, and step_constituents used to DELETE

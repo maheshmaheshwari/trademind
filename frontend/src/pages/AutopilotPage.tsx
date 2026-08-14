@@ -223,10 +223,19 @@ export default function AutopilotPage() {
     }
   }
 
-  const livePnl = (t: AuthorizedTrade) =>
-    t?.status === 'EXECUTED' && t?.cmp != null && t?.entry != null
-      ? (t.cmp - t.entry) * (t?.qty ?? 0)
+  // Cost basis is what the entry actually FILLED at, not what was authorized.
+  // A buy limit fills at the market when the market is cheaper, so the two
+  // differ — and P&L measured against `entry` disagreed with the Portfolio
+  // page's for the same trade. Falls back to `entry` for mandates authorized
+  // before fill_price was recorded.
+  const costBasis = (t: AuthorizedTrade) => t?.fill_price ?? t?.entry ?? null;
+
+  const livePnl = (t: AuthorizedTrade) => {
+    const basis = costBasis(t);
+    return t?.status === 'EXECUTED' && t?.cmp != null && basis != null
+      ? (t.cmp - basis) * (t?.qty ?? 0)
       : t?.actual_pnl ?? null;
+  };
 
   return (
     <div className="flex flex-col dgap animate-page-in">
@@ -382,8 +391,9 @@ export default function AutopilotPage() {
                 const pnl  = livePnl(t);
                 const isOpen = t?.status === 'EXECUTED' || t?.status === 'PENDING';
                 const canRevoke = isOpen;
-                const cmpColor = t?.cmp != null && t?.entry != null
-                  ? (t.cmp >= t.entry ? 'text-gain' : 'text-loss')
+                const basis = costBasis(t);
+                const cmpColor = t?.cmp != null && basis != null
+                  ? (t.cmp >= basis ? 'text-gain' : 'text-loss')
                   : 'text-ink';
                 return (
                   <tr key={t?.id} className="border-b border-line transition-colors hover:bg-surface-2">
@@ -404,8 +414,19 @@ export default function AutopilotPage() {
                     <td className="text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
                       {t?.qty}
                     </td>
+                    {/* Shows the fill, not the authorized entry, so this column and
+                        the P&L beside it are measured off the same number. When the
+                        fill came in cheaper, the authorized price is kept in the
+                        tooltip rather than shown — the row is already dense. */}
                     <td className="text-right font-mono tabular-nums text-[12px]" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      <span className="text-ink-2">{inr(t?.entry, 0)}</span>
+                      <span
+                        className="text-ink-2"
+                        title={t?.fill_price != null && t?.entry != null && t.fill_price !== t.entry
+                          ? `Filled at ${inr(t.fill_price)} · authorized at ${inr(t.entry)}`
+                          : undefined}
+                      >
+                        {inr(basis ?? t?.entry, 0)}
+                      </span>
                       <span className="text-ink-3"> → </span>
                       <span className="text-gain">{inr(t?.target, 0)}</span>
                     </td>

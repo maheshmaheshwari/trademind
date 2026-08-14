@@ -208,27 +208,42 @@ def get_user_by_username(username: str) -> Optional[Dict]:
 # ANGEL ONE LIVE ORDER HELPERS
 # ==========================================
 
+_TOKEN_MAP: Optional[Dict] = None
+_TOKEN_MAP_LOCK = threading.Lock()
+
+
+def _angel_token(symbol: str) -> Optional[Dict]:
+    """Angel One instrument-token entry for a symbol, or None. Map is read once and cached."""
+    global _TOKEN_MAP
+    if _TOKEN_MAP is None:
+        with _TOKEN_MAP_LOCK:
+            if _TOKEN_MAP is None:
+                tokens_file = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "data", "angel_tokens.json"
+                )
+                try:
+                    with open(tokens_file) as f:
+                        _TOKEN_MAP = json.load(f)
+                except Exception:
+                    _angel_log.error("angel_tokens.json not found")
+                    _TOKEN_MAP = {}
+
+    short = symbol.replace(".NS", "").upper()
+    token_info = _TOKEN_MAP.get(short)
+    if not token_info:
+        _angel_log.error(f"No Angel One token for {short}")
+    return token_info
+
+
 def _place_angel_buy(symbol: str, quantity: int, price: float) -> Optional[str]:
     """
     Place a real BUY LIMIT order on Angel One using the cached session.
     Returns the Angel One order_id on success, None on failure.
     B9: Session is cached and reused — no fresh login per call.
     """
-    tokens_file = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "angel_tokens.json"
-    )
-    try:
-        with open(tokens_file) as f:
-            token_map = json.load(f)
-    except Exception:
-        _angel_log.error("angel_tokens.json not found")
-        return None
-
-    short = symbol.replace(".NS", "").upper()
-    token_info = token_map.get(short)
+    token_info = _angel_token(symbol)
     if not token_info:
-        _angel_log.error(f"No Angel One token for {short}")
         return None
 
     try:
@@ -264,6 +279,118 @@ def _place_angel_buy(symbol: str, quantity: int, price: float) -> Optional[str]:
 
 
 # ==========================================
+# PAPER FILL PRICE
+# ==========================================
+
+def _live_ltp(symbol: str) -> float:
+    """
+    Last traded price from Angel One via the cached session, or 0.0.
+
+    Deliberately not collectors.ltp_fetcher.fetch_ltp_batch: that opens a fresh
+    SmartConnect session per call, and autopilot fires pending mandates in a
+    loop — one full login per mandate would be both slow on a user-facing
+    request and a good way to get rate-limited. This reuses the same 6-hour
+    session the LIVE order path uses.
+    """
+    # Tests must never reach the live Angel One API (same rule as
+    # price_monitor._fetch_live_prices).
+    if os.getenv("APP_ENV") == "test":
+        return 0.0
+
+    from trading.price_monitor import _is_market_open
+    if not _is_market_open():
+        return 0.0
+
+    token_info = _angel_token(symbol)
+    if not token_info:
+        return 0.0
+
+    try:
+        smart_api = _angel_cache.get()
+        if smart_api is None:
+            return 0.0
+        short = symbol.replace(".NS", "").upper()
+        data = smart_api.ltpData(
+            exchange="NSE",
+            tradingsymbol=token_info.get("trading_symbol", f"{short}-EQ"),
+            symboltoken=token_info["token"],
+        )
+        if data and data.get("status") and data.get("data"):
+            return float(data["data"].get("ltp") or 0.0)
+    except Exception as e:
+        err = str(e).lower()
+        if "401" in err or "unauthorized" in err or "session" in err or "token" in err:
+            _angel_cache.invalidate()
+        _angel_log.warning(f"Live LTP lookup failed for {symbol}: {e}")
+    return 0.0
+
+
+def _market_price(symbol: str) -> float:
+    """
+    Best available tradable price for `symbol` right now: live Angel One LTP
+    during market hours, else the most recent stored close. Returns 0.0 when
+    neither is available (no session, and the stored close missing or too stale).
+
+    The DB fallback is price_monitor's, which already refuses multi-day-old
+    closes — the same rule that keeps stale data from driving SL/Target should
+    keep it from pricing an entry. Imported inside the function because
+    price_monitor imports square_off from this module at import time.
+    """
+    try:
+        ltp = _live_ltp(symbol)
+        if ltp > 0:
+            return ltp
+    except Exception as e:
+        _angel_log.warning(f"Live LTP unavailable for {symbol}: {e}")
+
+    conn = get_connection()
+    try:
+        from trading.price_monitor import _get_db_price
+        return float(_get_db_price(conn, symbol) or 0.0)
+    except Exception as e:
+        _angel_log.warning(f"DB price lookup failed for {symbol}: {e}")
+        return 0.0
+    finally:
+        release_connection(conn)
+
+
+def _paper_fill_price(symbol: str, buy_price: float) -> float:
+    """
+    Price a PAPER entry actually fills at, given the signal's entry price.
+
+    A real entry is a BUY LIMIT at `buy_price`, so it can never fill *worse*
+    than that: with the market below the limit it fills at the market price,
+    and above the limit it does not fill at that moment at all. Paper used to
+    book every entry at `buy_price` regardless, which invented fills that live
+    trading would never produce — JINDALSAW.NS was filled at ₹272 while the
+    stock traded at ₹264.75, overstating the cost basis by ₹7.25 a share and
+    understating the position's P&L from the first tick.
+
+    So: fill at min(market, entry).
+
+    The market > entry case is still booked at `entry` rather than rejected —
+    paper deliberately assumes the limit eventually fills at the price the user
+    authorised, since a mandate that silently never executes is worse feedback
+    than one filled at its stated entry. It is the optimistic half of the
+    simulation; the pessimistic half (never filling better than the market) is
+    what this function adds.
+
+    Falls back to `buy_price` when no market price is available at all —
+    without a reference the signal's entry is the only number we have.
+    """
+    market = _market_price(symbol)
+    if market <= 0:
+        _angel_log.info(f"No market price for {symbol} — filling paper entry at signal entry ₹{buy_price:,.2f}")
+        return buy_price
+    fill = round(min(market, buy_price), 2)
+    if fill < buy_price:
+        _angel_log.info(
+            f"{symbol}: market ₹{market:,.2f} below entry ₹{buy_price:,.2f} — filling paper entry at ₹{fill:,.2f}"
+        )
+    return fill
+
+
+# ==========================================
 # BRACKET ORDER EXECUTION
 # ==========================================
 
@@ -292,6 +419,14 @@ def execute_signal(
     """
     if mode == "LIVE":
         raise ValueError("Live trading is not yet available. Please use PAPER mode.")
+
+    # Resolve the paper fill price BEFORE taking the connection and the per-user
+    # advisory lock — it may do an Angel One LTP round-trip, and holding the lock
+    # across a network call would serialise every one of this user's trades behind it.
+    #
+    # LIVE keeps buy_price untouched: there the entry really is a LIMIT at that
+    # price (_place_angel_buy) and the true fill comes back from the broker.
+    fill_price = _paper_fill_price(symbol, buy_price) if mode == "PAPER" else buy_price
 
     conn = get_connection()
     angel_order_id = None
@@ -328,6 +463,12 @@ def execute_signal(
         # Floor, not round: never buy more than the user funded. It also lines
         # the order up with authorized_trades.qty, whose disagreement left user 2
         # with a position of 68 shares against entry orders totalling 67.
+        #
+        # Sized off buy_price (the authorised entry), NOT fill_price: an order is
+        # placed for a quantity, so a cheaper fill buys the same shares for less
+        # money, it does not silently buy more of them. Sizing off the fill would
+        # also re-open the authorized_trades.qty disagreement above, and since
+        # fill_price <= buy_price the spend stays within investment_amount either way.
         quantity = int(investment_amount / buy_price) if buy_price > 0 else 0
         approved, reason, checks = check_order(
             user_id=user_id, symbol=symbol, investment_amount=investment_amount,
@@ -377,7 +518,7 @@ def execute_signal(
             if rec_vol > 0 and quantity > remaining:
                 raise PartialCapacityError(symbol, quantity, remaining)
 
-        actual_investment = round(quantity * buy_price, 2)
+        actual_investment = round(quantity * fill_price, 2)
         bracket_id = f"BRK_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         now = _now()
 
@@ -392,6 +533,7 @@ def execute_signal(
         trade_signal_id = get_active_signal_id(symbol)
 
         # 1. BUY order — PAPER: immediately EXECUTED; LIVE: PLACED until Angel One confirms
+        # price = the limit (the authorised entry); fill_price = what it actually filled at.
         entry_status = "EXECUTED" if mode == "PAPER" else "PLACED"
         _execute(conn, """
             INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
@@ -399,7 +541,7 @@ def execute_signal(
                 order_id, trade_signal_id, created_at, updated_at)
             VALUES (?, ?, ?, ?, 'BUY', 'ENTRY', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (user_id, bracket_id, symbol, name, quantity, buy_price,
-              entry_status, mode, signal, confidence, horizon, buy_price, fees,
+              entry_status, mode, signal, confidence, horizon, fill_price, fees,
               None, trade_signal_id, now, now))
 
         # ---- GTT or PAPER pending orders ----
@@ -460,7 +602,7 @@ def execute_signal(
                 current_value  = positions.current_value  + EXCLUDED.current_value,
                 current_price  = EXCLUDED.current_price,
                 updated_at     = EXCLUDED.updated_at
-        """, (user_id, symbol, name, quantity, buy_price, buy_price,
+        """, (user_id, symbol, name, quantity, fill_price, fill_price,
               target_price, stop_loss, actual_investment, actual_investment, mode, bracket_id, now, now))
 
         # Deduct from virtual balance
@@ -567,7 +709,7 @@ def execute_signal(
             user_id=user_id,
             type="trade",
             title=f"Order placed — {symbol}",
-            message=f"{mode} BUY · {quantity} shares @ ₹{buy_price:,.2f} · "
+            message=f"{mode} BUY · {quantity} shares @ ₹{fill_price:,.2f} · "
                     f"Target ₹{target_price:,.2f} · SL ₹{stop_loss:,.2f}",
             icon="ShoppingCart",
             color="#3B82F6",
@@ -588,7 +730,8 @@ def execute_signal(
             "symbol": symbol,
             "name": name,
             "quantity": quantity,
-            "buy_price": buy_price,
+            "buy_price": fill_price,
+            "signal_price": buy_price,
             "invested": actual_investment,
             "target": target_price,
             "stop_loss": stop_loss,

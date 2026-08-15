@@ -83,6 +83,15 @@ def _scheduler_log_write(
         logger.warning("scheduler_log write skipped for %s/%s — no scheduled_at "
                        "(the row could never be matched by a later update)", job_id, status)
         return
+
+    # A failure row with no reason is unactionable, and prod is full of them:
+    # 7,815 failed rows, 99.9% with an empty error_msg (audit #7). Callers do
+    # pass str(event.exception), but that is '' for any exception carrying no
+    # message, which stores NULL and loses the fact that anything happened.
+    # Enforced here rather than per-caller so no write path can bypass it.
+    if status in ("failed", "permanently_failed") and not (error_msg or "").strip():
+        error_msg = (f"{status} with no exception message captured "
+                     f"(job_id={job_id}, attempt={attempt})")
     try:
         from database.db import get_connection, release_connection, _execute
         conn = get_connection()
@@ -152,20 +161,40 @@ def run_recovery_queue():
 
     now_ist = datetime.now(IST)
 
-    # Reset stale 'running' entries
+    # Sweep stale non-terminal entries (audit #7).
+    #
+    # Three changes from the original, all of which that audit found mattered:
+    #
+    #   'pending' is swept too. It was not, so 55 rows sat pending — some since
+    #   2026-06-23 — never reaching a terminal state and never being retried.
+    #
+    #   error_msg is populated. A failure row with no reason is unactionable,
+    #   and this sweeper was itself a source of them: prod holds 7,815 failed
+    #   rows of which 99.9% have an empty error_msg, which is why real failures
+    #   were invisible among them.
+    #
+    #   COALESCE(started_at, scheduled_at) — a 'pending' row may never have had
+    #   started_at set, so keying on started_at alone would never match it.
     try:
         conn = get_connection()
         try:
-            _execute(conn, """
-                UPDATE scheduler_log SET status = 'failed'
-                WHERE status = 'running'
-                  AND started_at < ?
+            cur = _execute(conn, """
+                UPDATE scheduler_log
+                SET status = 'failed',
+                    error_msg = COALESCE(NULLIF(error_msg, ''),
+                                         'swept: no completion recorded within 30 min '
+                                         '(was ' || status || ')')
+                WHERE status IN ('running', 'pending')
+                  AND COALESCE(started_at, scheduled_at) < ?
             """, (now_ist - timedelta(minutes=30),))
+            swept = cur.rowcount
             conn.commit()
+            if swept:
+                logger.info("Swept %d stale scheduler_log rows to failed", swept)
         finally:
             release_connection(conn)
     except Exception as exc:
-        logger.debug("Stale running reset skipped: %s", exc)
+        logger.debug("Stale run sweep skipped: %s", exc)
 
     recovery_tasks = []
 
@@ -608,7 +637,9 @@ def cleanup_old_data_job():
     """Weekly job: remove intraday data older than 30 days."""
     logger.info("⏰ Running data cleanup...")
     try:
-        from database.db import get_connection, _execute
+        # release_connection is used in the finally below — omitting it raised
+        # NameError there on every run, leaking a pool slot each time (audit #1).
+        from database.db import get_connection, release_connection, _execute
         conn = get_connection()
         try:
             cursor = _execute(conn,

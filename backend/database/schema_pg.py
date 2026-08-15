@@ -505,6 +505,22 @@ SQL_POSITIONS_ALTER = """
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 """
 
+# Guards against the column-shift corruption found in the audit (#9): a CSV
+# import with an embedded delimiter shifted every field one position left, so a
+# timestamp landed in `symbol` and the symbol landed in `status`. Two such rows
+# exist, both from the one-off backfill_20260730 migration.
+#
+# NOT VALID on purpose. A plain CHECK would fail to apply while those two rows
+# are still present, leaving the table unguarded until someone remembers to
+# clean up. NOT VALID enforces the constraint on every new INSERT/UPDATE
+# immediately and simply declines to re-check existing rows. After the two rows
+# are deleted, promote it with:
+#     ALTER TABLE model_training_stats VALIDATE CONSTRAINT chk_mts_status;
+SQL_MODEL_TRAINING_STATS_ALTER = """
+ALTER TABLE model_training_stats DROP CONSTRAINT IF EXISTS chk_mts_status;
+ALTER TABLE model_training_stats ADD CONSTRAINT chk_mts_status CHECK (status IN ('ok','no_data','below_threshold')) NOT VALID;
+"""
+
 # Migration: authorized_trades gains a link to the AI signal it was authorised
 # against, and a CANCELLED status.
 #
@@ -1019,6 +1035,17 @@ def init_timescale(conn) -> None:
             except Exception as e:
                 conn.rollback()
                 logger.warning(f"ALTER TABLE positions: {e}")
+
+    # model_training_stats: status CHECK constraint, NOT VALID (audit #9)
+    for stmt in SQL_MODEL_TRAINING_STATS_ALTER.strip().split("\n"):
+        stmt = stmt.strip()
+        if stmt:
+            try:
+                cur.execute(stmt)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"ALTER TABLE model_training_stats: {e}")
 
     # authorized_trades: signal link + CANCELLED status (idempotent)
     for stmt in SQL_AUTHORIZED_TRADES_ALTER:

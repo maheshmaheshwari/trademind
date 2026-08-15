@@ -244,6 +244,15 @@ def insert_price(
     time_val: Optional[str] = None,
     exchange: str = "NSE",
 ) -> bool:
+    # Same two guards as _sanitize_row, which this path does not go through:
+    # daily bars carry no time (audit #5) and OHLC must be self-consistent
+    # (audit #12). Applied here so no insert route can bypass them.
+    if interval == "1d":
+        time_val = None
+    if None not in (open_price, high, low, close):
+        high = max(high, open_price, close)
+        low = min(low, open_price, close)
+
     conn = get_connection()
     try:
         if time_val is None:
@@ -274,7 +283,29 @@ def insert_price(
 
 
 def _sanitize_row(row: Tuple) -> Tuple:
-    """Convert numpy scalars / NaN floats to Python-native types for psycopg2."""
+    """Normalise a price row for insertion.
+
+    Row layout: (symbol, exchange, date, time, open, high, low, close, volume,
+    interval) — indices 3=time, 4=open, 5=high, 6=low, 7=close, 9=interval.
+
+    Three jobs:
+
+    1. numpy scalars / NaN floats → Python natives for psycopg2.
+
+    2. Daily bars never carry a time component (audit #5). insert_prices_batch
+       upserts daily rows via ON CONFLICT ... WHERE time IS NULL, backed by the
+       partial index idx_prices_daily_unique. A daily row arriving with
+       time='00:00' does not match that predicate, bypasses the upsert entirely,
+       and inserts a SECOND row — which is how 60 duplicate bars landed on
+       2026-06-24, each a mid-session partial snapshot at roughly half the real
+       volume. Forcing time=None for interval='1d' makes the predicate
+       unconditionally true so the upsert cannot be bypassed again.
+
+    3. OHLC invariants (audit #12). 37 rows violate high >= max(open, close) or
+       low <= min(open, close) — a source-side feed glitch, mostly 2023-03-03.
+       Clamping keeps the bar (its close is sound and it is used for returns)
+       while making the candle self-consistent.
+    """
     out = []
     for v in row:
         if v is None:
@@ -286,6 +317,15 @@ def _sanitize_row(row: Tuple) -> Tuple:
             out.append(None)
         else:
             out.append(v)
+
+    if len(out) >= 10:
+        if out[9] == "1d":
+            out[3] = None
+        o, h, l, c = out[4], out[5], out[6], out[7]
+        if None not in (o, h, l, c):
+            out[5] = max(h, o, c)
+            out[6] = min(l, o, c)
+
     return tuple(out)
 
 

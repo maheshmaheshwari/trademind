@@ -91,12 +91,27 @@ app = FastAPI(
 # here — the browser CORS spec forbids combining wildcard origin with
 # credentialed requests, so we fail fast rather than silently no-op if
 # someone sets CORS_ALLOWED_ORIGINS=*.
+_DEV_ORIGINS = ["http://localhost:5173", "http://localhost:5174", "http://127.0.0.1:5173"]
+
 _cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
 _CORS_ALLOWED_ORIGINS = (
     [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
     if _cors_origins_env
-    else ["http://localhost:5173", "http://localhost:5174", "http://127.0.0.1:5173"]
+    else list(_DEV_ORIGINS)
 )
+
+# Off the Space, always allow the Vite dev origins as well. Setting
+# CORS_ALLOWED_ORIGINS to the production domain used to *replace* these, so a
+# local backend rejected http://localhost:5173 with "Disallowed CORS origin" and
+# every browser call from `npm run dev` failed preflight — /auth/google first,
+# since login is the first request the app makes.
+#
+# Conditioned on SPACE_ID (platform-set, same test scheduler/jobs.py uses) so
+# production still allows exactly what its secret store lists: localhost must
+# not be a permitted credentialed origin on the deployed API.
+if not os.environ.get("SPACE_ID"):
+    _CORS_ALLOWED_ORIGINS += [o for o in _DEV_ORIGINS if o not in _CORS_ALLOWED_ORIGINS]
+
 if "*" in _CORS_ALLOWED_ORIGINS:
     raise RuntimeError(
         "CORS_ALLOWED_ORIGINS must not be '*' while allow_credentials=True "

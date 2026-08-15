@@ -37,6 +37,39 @@ import os as _os
 
 _PH = "%s"
 
+# Symbols per prefetch query. A retrain shard passes ~40 and is fine; the weekly
+# export passes all 500 and OOM'd the database (see prefetch_all_data). 50 keeps
+# the export's per-query working set at shard scale.
+_PREFETCH_BATCH = 50
+
+# Single definition of the prices+indicators+market+delivery join, used by both
+# the batched path and the single-query path so they cannot drift apart.
+# {ph} is the parameter placeholder for the symbol list.
+_PREFETCH_SQL = """
+    SELECT
+        p.symbol, p.date,
+        p.close, p.open, p.high, p.low, p.volume,
+        i.rsi_14, i.macd, i.macd_signal, i.macd_hist,
+        i.bb_upper, i.bb_lower, i.bb_middle,
+        i.sma_20, i.sma_50, i.sma_200, i.ema_9, i.ema_21,
+        i.atr_14, i.adx_14, i.stoch_k, i.stoch_d, i.obv,
+        m.india_vix,
+        m.nifty500_close, m.nifty500_change_pct,
+        COALESCE(f.fii_net,  m.fii_net,  0) AS fii_net,
+        COALESCE(f.dii_net,  m.dii_net,  0) AS dii_net,
+        COALESCE(f.fii_buy,  0)              AS fii_buy,
+        COALESCE(f.fii_sell, 0)              AS fii_sell,
+        COALESCE(f.dii_buy,  0)              AS dii_buy,
+        COALESCE(f.dii_sell, 0)              AS dii_sell,
+        COALESCE(d.delivery_pct, 50.0) AS delivery_pct
+    FROM prices p
+    LEFT JOIN technical_indicators i ON p.symbol = i.symbol AND p.date = i.date
+    LEFT JOIN market_overview m      ON p.date = m.date
+    LEFT JOIN fii_dii_daily f        ON p.date = f.date
+    LEFT JOIN delivery_data d        ON p.symbol = d.symbol AND p.date = d.date
+    WHERE p.interval = '1d' AND p.symbol = ANY({ph})
+"""
+
 # ── Sector map, from the DB ────────────────────────────────────────────────
 #
 # nifty_constituents.sector is the source, NOT data/angel_tokens.json. This
@@ -130,7 +163,33 @@ def prefetch_all_data(symbols: list = None) -> None:
         # concurrently on one shared instance is what fell over.
         log.info("   Loading prices + indicators + market + delivery...")
         conn.cursor().execute("SET statement_timeout = '600s'")
-        df_all = _query_to_df(conn, f"""
+
+        # Fetched in symbol batches, not one query.
+        #
+        # This join spans prices (203 chunks) and technical_indicators (203
+        # chunks) — 406 of the database's 479 — and TimescaleDB must open every
+        # chunk relation plus its indexes to plan it. A retrain SHARD passes ~40
+        # symbols and survives; the weekly EXPORT passes all 500 and does not:
+        # run 31827584300 died here with psycopg2.errors.OutOfMemory on a 256MB
+        # shared_buffers instance, which skipped the `retrain` job entirely and
+        # meant no models were rebuilt that week.
+        #
+        # Batching bounds the working set per query instead of scaling it with
+        # the universe. Widening the chunk intervals (schema_pg.py
+        # SQL_CHUNK_INTERVALS) only helps chunks created from now on; this is
+        # what makes the export survive the 406 that already exist.
+        _batch_syms = list(symbols) if symbols else None
+        if _batch_syms and len(_batch_syms) > _PREFETCH_BATCH:
+            frames = []
+            for _i in range(0, len(_batch_syms), _PREFETCH_BATCH):
+                _chunk = _batch_syms[_i:_i + _PREFETCH_BATCH]
+                log.info("     batch %d-%d of %d symbols",
+                         _i + 1, min(_i + _PREFETCH_BATCH, len(_batch_syms)), len(_batch_syms))
+                frames.append(_query_to_df(conn, _PREFETCH_SQL.format(ph=_PH),
+                                           (_chunk,), timeout="600s"))
+            df_all = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        else:
+            df_all = _query_to_df(conn, f"""
             SELECT
                 p.symbol, p.date,
                 p.close, p.open, p.high, p.low, p.volume,

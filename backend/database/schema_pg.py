@@ -739,6 +739,21 @@ CREATE INDEX IF NOT EXISTS idx_app_logs_level ON app_logs (level, time DESC);
 # created after the call.
 SQL_CHUNK_INTERVALS = [
     ("news_sentiment", "1 year"),
+    # prices and technical_indicators have the identical problem news_sentiment
+    # had, and are far bigger: 203 chunks EACH at a 30-day interval over
+    # 2010-2026, which is 406 of the database's 479 chunks. Any query that
+    # cannot exclude chunks opens all of them plus their indexes, and on a
+    # 256MB shared_buffers instance that is what killed the weekly retrain —
+    # prefetch_all_data() joins both tables for 500 symbols in one query and
+    # died with psycopg2.errors.OutOfMemory (run 31827584300, export job), so
+    # `retrain` was skipped and no models were rebuilt that week.
+    #
+    # As with news_sentiment this governs NEW chunks only; the existing 203
+    # each remain until the tables are rebuilt. It stops the count growing —
+    # the query-side fix in prefetch_all_data is what actually makes the
+    # retrain survive the chunks that are already there.
+    ("prices", "1 year"),
+    ("technical_indicators", "1 year"),
 ]
 
 SQL_HYPERTABLES = [

@@ -64,16 +64,39 @@ logger = logging.getLogger(__name__)
 # is TRAIN_GAP_MONTHS before the current month, test on the recent tail. This
 # keeps every weekly retrain's models fresh instead of re-fitting stale data.
 #
-# Gap = 6 months: this mirrors the validated A/B (train→2025-12-31, tested on
-# the 2026 tail) AND keeps the longest (6-month) horizon testable — a shorter
-# tail would leave the 6M horizon with no complete out-of-sample trades, since
-# it needs ~6 months of forward prices. Models end up ~6 months old at training
-# (vs the old 18+), well inside the fresh/+alpha zone the backtest identified.
+# Gap = 9 months. It was 6, and the comment here claimed that "keeps the longest
+# (6-month) horizon testable". It did exactly the opposite, and silently: the
+# 6-month horizon has produced ZERO signals since 2026-07-29 and every gha_*
+# retrain has picked it 0 times, while the local backfill run picked it for 133
+# symbols (audit #4).
+#
+# The arithmetic. A 120-trading-day forward return means engineer_features_and_
+# target() can only produce rows up to ~120 trading days before the last price
+# bar. Six calendar months of gap is almost exactly those 120 days, so X ends
+# BEFORE the test window opens and the horizon gets no test rows at all —
+# train_and_evaluate() then hits `len(Xte) < 10` and skips it. Measured on
+# RELIANCE.NS with prices through 2026-08-14:
+#
+#     gap   TRAIN_END     6M test rows   verdict
+#       6   2026-02-28               0   SKIPPED  (X ends 2026-02-17)
+#       7   2026-01-31              13   passes the guard, but on noise
+#       8   2025-12-31              33
+#       9   2025-11-30              55   <- chosen
+#      10   2025-10-31              74
+#      12   2025-08-31             117
+#
+# 9 buys the 6M horizon a real out-of-sample window at the cost of models three
+# months staler at the cutoff. That is still well inside the fresh zone the A/B
+# identified — it found a FROZEN 2024-12-31 model losing money through 2026
+# (−15%..−23% CAGR) versus a rolling one at +4%..+19%; the problem there was
+# staleness measured in years, not one extra quarter.
+#
+# Shorter horizons are unaffected except for having more test rows.
 #
 # Overridable via env for pinning/experiments:
 #   TRAIN_END_OVERRIDE=2024-12-31   (force a fixed cutoff)
-#   TRAIN_GAP_MONTHS=6              (months of recent test tail to hold out)
-TRAIN_GAP_MONTHS = int(os.environ.get("TRAIN_GAP_MONTHS", "6"))
+#   TRAIN_GAP_MONTHS=9              (months of recent test tail to hold out)
+TRAIN_GAP_MONTHS = int(os.environ.get("TRAIN_GAP_MONTHS", "9"))
 
 
 def _rolling_train_end(gap_months: int = TRAIN_GAP_MONTHS) -> str:

@@ -91,6 +91,10 @@ on:
         description: 'Re-fetch symbols whose stored history already reaches the start date'
         type: boolean
         default: false
+      score_only:
+        description: 'Skip fetching entirely — only score the unscored backlog'
+        type: boolean
+        default: false
 
 concurrency:
   group: backfill-announcements
@@ -161,7 +165,11 @@ jobs:
   # ── 2. BSE archive, 2010 onwards, sharded ───────────────────────────────────
   bse:
     needs: prepare
-    if: ${{ inputs.source != 'nse' && needs.prepare.outputs.bse_count != '0' }}
+    # score_only skips fetching altogether. Once backfill_coverage is populated,
+    # every fetch shard reports "0 rows over 0 symbols" in ~90s — a routine
+    # re-run pays 21 jobs to re-fetch nothing while the real work is the scoring
+    # backlog. This makes scoring-only the natural shape of a follow-up run.
+    if: ${{ !inputs.score_only && inputs.source != 'nse' && needs.prepare.outputs.bse_count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -206,7 +214,7 @@ jobs:
   # ── 3. NSE archive, 2018-2022, sharded ──────────────────────────────────────
   nse:
     needs: prepare
-    if: ${{ inputs.source != 'bse' && needs.prepare.outputs.nse_count != '0' }}
+    if: ${{ !inputs.score_only && inputs.source != 'bse' && needs.prepare.outputs.nse_count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:

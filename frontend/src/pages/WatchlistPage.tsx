@@ -1,4 +1,4 @@
-import { useState, useDeferredValue } from 'react';
+import { useMemo, useState, useDeferredValue } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, List, Plus, X, Bell } from 'lucide-react';
 import { useAuth } from '../AuthContext';
@@ -9,7 +9,7 @@ import {
   useAddToWatchlistMutation,
   useGetStocksQuery,
 } from '../services/tradeMindApiService';
-import { SignalBadge, SymbolCell, Conf, Skeleton, useSort, Th, Td } from '../components/ui';
+import { SignalBadge, SymbolCell, Conf, Skeleton, DataTable, type DataTableColumn } from '../components/ui';
 import { Sparkline } from '../components/Charts';
 
 import type { WatchlistItem } from '../types';
@@ -109,9 +109,8 @@ export default function WatchlistPage() {
   const navigate = useNavigate();
   const [addOpen, setAddOpen] = useState(false);
   const [addQ,    setAddQ]    = useState('');
-  const { sort, toggle } = useSort('confidence', 'desc');
 
-  const { data: wlRes,    isLoading, isError } = useGetWatchlistQuery(user?.id ?? 0, { skip: !user });
+  const { data: wlRes,    isLoading, isFetching, isError } = useGetWatchlistQuery(user?.id ?? 0, { skip: !user });
   const deferredAddQ = useDeferredValue(addQ);
   const { data: stockRes, isLoading: searchLoading } = useGetStocksQuery({ search: deferredAddQ, size: 6 }, { skip: !deferredAddQ || deferredAddQ.length < 2 });
   const [removeFromWatchlist] = useRemoveFromWatchlistMutation();
@@ -133,13 +132,58 @@ export default function WatchlistPage() {
     } catch { toast({ type: 'error', title: 'Remove failed' }); }
   }
 
-  const sorted = ([...(items ?? [])]).sort((a, b) => {
-    const va = a?.[sort.key as keyof WatchlistItem], vb = b?.[sort.key as keyof WatchlistItem];
-    let cmp = 0;
-    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
-    else if (typeof va === 'string' && typeof vb === 'string') cmp = va.localeCompare(vb);
-    return sort.dir === 'asc' ? cmp : -cmp;
-  });
+  // The table view sorts through DataTable. The grid view has no headers to
+  // sort by, so it keeps the old default order (confidence, strongest first)
+  // rather than whatever order the API happened to return.
+  const gridItems = useMemo(
+    () => [...(items ?? [])].sort((a, b) => (b?.confidence ?? 0) - (a?.confidence ?? 0)),
+    [items],
+  );
+
+  const watchCols = useMemo<DataTableColumn<WatchlistItem>[]>(() => [
+    { id: 'symbol', header: 'Stock',
+      cell: i => <SymbolCell symbol={i?.symbol ?? ''} name={i?.name ?? ''} sector={i?.sector ?? ''} showSector={false} /> },
+    { id: 'price', header: 'LTP', align: 'right', mono: true, cell: i => inr(i?.price ?? 0) },
+    { id: 'change', header: 'Change', align: 'right',
+      cell: i => (
+        <span className="font-mono font-semibold tabular-nums text-[12.5px]" style={{ color: (i?.change ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+          {(i?.change ?? 0) >= 0 ? '+' : ''}{(i?.change ?? 0).toFixed(2)}%
+        </span>
+      ) },
+    { id: 'signal', header: 'Signal', cell: i => <SignalBadge signal={i?.signal} /> },
+    { id: 'confidence', header: 'Confidence',
+      cell: i => <div className="min-w-[110px]"><Conf value={i?.confidence ?? 0} /></div> },
+    { id: 'horizon', header: 'Horizon',
+      cell: i => (
+        <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-[var(--surface-3)] text-[var(--text-2)] border border-[var(--border)]">
+          {i?.horizon}
+        </span>
+      ) },
+    { id: 'expReturn', header: 'Exp. Ret', align: 'right',
+      cell: i => (
+        <span className="font-mono font-semibold tabular-nums text-[12.5px]" style={{ color: (i?.expReturn ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+          {(i?.expReturn ?? 0) >= 0 ? '+' : ''}{(i?.expReturn ?? 0).toFixed(2)}%
+        </span>
+      ) },
+    { id: 'alertAbove', header: 'Alerts',
+      cell: i => (
+        <div className="flex gap-1">
+          {(i?.alertAbove ?? 0) > 0 && <span className="text-[10px] font-semibold text-[var(--green)] bg-[var(--green-soft)] px-1.5 py-0.5 rounded-full">↑{inr(i?.alertAbove ?? 0)}</span>}
+          {(i?.alertBelow ?? 0) > 0 && <span className="text-[10px] font-semibold text-[var(--red)] bg-[var(--red-soft)] px-1.5 py-0.5 rounded-full">↓{inr(i?.alertBelow ?? 0)}</span>}
+        </div>
+      ) },
+    { id: 'remove', header: '', sortable: false,
+      cell: i => (
+        <button
+          onClick={e => { e.stopPropagation(); handleRemove(i?.symbol ?? ''); }}
+          className="w-7 h-7 rounded-[7px] grid place-items-center text-[var(--text-3)] hover:bg-[var(--red-soft)] hover:text-[var(--red)] transition-colors border-none bg-transparent"
+        >
+          <X size={14} />
+        </button>
+      ) },
+    // handleRemove closes over `user`/mutations that are stable for a render pass.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [user]);
 
   return (
     <div className="flex flex-col dgap animate-page-in">
@@ -215,7 +259,7 @@ export default function WatchlistPage() {
       {/* ── Grid view ── */}
       {!isLoading && items.length > 0 && view === 'grid' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {(sorted ?? []).map(item => (
+          {(gridItems ?? []).map(item => (
             <WatchCard key={item.symbol} item={item} onRemove={() => handleRemove(item.symbol)} onClick={() => navigate(`/stocks/${encodeURIComponent(item?.symbol ?? '')}`)} />
           ))}
         </div>
@@ -224,62 +268,15 @@ export default function WatchlistPage() {
       {/* ── Table view ── */}
       {!isLoading && items.length > 0 && view === 'table' && (
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-[13px]">
-              <thead>
-                <tr>
-                  <Th label="Stock"      sortKey="symbol"     sort={sort} onToggle={toggle} />
-                  <Th label="LTP"        sortKey="price"      sort={sort} onToggle={toggle} align="right" />
-                  <Th label="Change"     sortKey="change"     sort={sort} onToggle={toggle} align="right" />
-                  <Th label="Signal"     sortKey="signal"     sort={sort} onToggle={toggle} />
-                  <Th label="Confidence" sortKey="confidence" sort={sort} onToggle={toggle} />
-                  <Th label="Horizon"    sortKey="horizon"    sort={sort} onToggle={toggle} />
-                  <Th label="Exp. Ret"   sortKey="expReturn"  sort={sort} onToggle={toggle} align="right" />
-                  <Th label="Alerts"     sortKey="alertAbove" sort={sort} onToggle={toggle} />
-                  <Th label=""           sortKey="symbol"     sort={sort} onToggle={toggle} />
-                </tr>
-              </thead>
-              <tbody>
-                {(sorted ?? []).map(item => (
-                  <tr key={item?.symbol} className="cursor-pointer transition-colors hover:bg-[var(--surface-2)]" onClick={() => navigate(`/stocks/${encodeURIComponent(item?.symbol ?? '')}`)}>
-                    <Td><SymbolCell symbol={item?.symbol ?? ''} name={item?.name ?? ''} sector={item?.sector ?? ''} showSector={false} /></Td>
-                    <Td align="right" mono>{inr(item?.price ?? 0)}</Td>
-                    <Td align="right">
-                      <span className="font-mono font-semibold tabular-nums text-[12.5px]" style={{ color: (item?.change ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                        {(item?.change ?? 0) >= 0 ? '+' : ''}{(item?.change ?? 0).toFixed(2)}%
-                      </span>
-                    </Td>
-                    <Td><SignalBadge signal={item?.signal} /></Td>
-                    <Td><div className="min-w-[110px]"><Conf value={item?.confidence ?? 0} /></div></Td>
-                    <Td>
-                      <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-[var(--surface-3)] text-[var(--text-2)] border border-[var(--border)]">
-                        {item?.horizon}
-                      </span>
-                    </Td>
-                    <Td align="right">
-                      <span className="font-mono font-semibold tabular-nums text-[12.5px]" style={{ color: (item?.expReturn ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                        {(item?.expReturn ?? 0) >= 0 ? '+' : ''}{(item?.expReturn ?? 0).toFixed(2)}%
-                      </span>
-                    </Td>
-                    <Td>
-                      <div className="flex gap-1">
-                        {(item?.alertAbove ?? 0) > 0 && <span className="text-[10px] font-semibold text-[var(--green)] bg-[var(--green-soft)] px-1.5 py-0.5 rounded-full">↑{inr(item?.alertAbove ?? 0)}</span>}
-                        {(item?.alertBelow ?? 0) > 0 && <span className="text-[10px] font-semibold text-[var(--red)] bg-[var(--red-soft)] px-1.5 py-0.5 rounded-full">↓{inr(item?.alertBelow ?? 0)}</span>}
-                      </div>
-                    </Td>
-                    <Td>
-                      <button
-                        onClick={e => { e.stopPropagation(); handleRemove(item?.symbol ?? ''); }}
-                        className="w-7 h-7 rounded-[7px] grid place-items-center text-[var(--text-3)] hover:bg-[var(--red-soft)] hover:text-[var(--red)] transition-colors border-none bg-transparent"
-                      >
-                        <X size={14} />
-                      </button>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={watchCols}
+            data={items}
+            isFetching={isFetching}
+            initialSort={{ id: 'confidence', desc: true }}
+            getRowId={i => i?.symbol ?? ''}
+            onRowClick={i => navigate(`/stocks/${encodeURIComponent(i?.symbol ?? '')}`)}
+            emptyMessage="Nothing on your watchlist yet."
+          />
         </div>
       )}
 

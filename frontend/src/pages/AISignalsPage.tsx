@@ -4,8 +4,8 @@ import { Search } from 'lucide-react';
 import { useGetAllSignalsQuery } from '../services/tradeMindApiService';
 import type { AllSignal } from '../services/tradeMindApiService';
 import {
-  Card, SignalBadge, SkeletonRows,
-  SymbolCell, Conf, Pager, useSort, Th, PlainTh, Td, RiskReward, ModelQuality,
+  Card, SignalBadge, SymbolCell, Conf, RiskReward, ModelQuality,
+  DataTable, type DataTableColumn,
 } from '../components/ui';
 
 const HORIZONS = ['All', '1W', '2W', '1M', '2M', '3M', '6M'] as const;
@@ -30,16 +30,15 @@ export default function AISignalsPage() {
   const [horizon,      setHorizon] = useState<typeof HORIZONS[number]>('All');
   const [sector,       setSector]  = useState('All');
   const [conf,         setConf]    = useState(50);
-  const [page,         setPage]    = useState(1);
   const navigate = useNavigate();
 
-  const { sort, toggle } = useSort('confidence');
   const dSearch = useDeferredValue(search);
 
-  const { data: res, isLoading: loading } = useGetAllSignalsQuery();
+  const { data: res, isLoading: loading, isFetching } = useGetAllSignalsQuery();
   const allSignals: AllSignal[] = res?.signals ?? [];
 
-  const filtered = useMemo(() => [...allSignals]
+  // Sorting and paging now live in DataTable; this only narrows the rows.
+  const filtered = useMemo(() => (allSignals ?? [])
     .filter(s =>
       (sigType  === 'All' || s?.signal  === sigType)  &&
       (horizon  === 'All' || s?.horizon === horizon)  &&
@@ -47,17 +46,43 @@ export default function AISignalsPage() {
       (s?.confidence ?? 0) >= conf &&
       (!dSearch || s?.symbol?.toLowerCase()?.includes(dSearch.toLowerCase()) ||
                    s?.name?.toLowerCase()?.includes(dSearch.toLowerCase()))
-    )
-    .sort((a, b) => {
-      const va = a?.[sort.key as keyof AllSignal], vb = b?.[sort.key as keyof AllSignal];
-      let cmp = 0;
-      if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
-      else if (typeof va === 'string' && typeof vb === 'string') cmp = va.localeCompare(vb);
-      return sort.dir === 'asc' ? cmp : -cmp;
-    }), [allSignals, sigType, horizon, sector, conf, dSearch, sort]);
+    ), [allSignals, sigType, horizon, sector, conf, dSearch]);
 
-  const pages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-  const rows  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  const columns = useMemo<DataTableColumn<AllSignal>[]>(() => [
+    { id: 'symbol', header: 'Stock',
+      cell: s => <SymbolCell symbol={s?.symbol} name={s?.name} sector={s?.sector} showSector={false} /> },
+    { id: 'sector', header: 'Sector',
+      cell: s => (
+        <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 border border-line"
+          style={{ color: SECTOR_COLORS[s?.sector ?? ''] ?? 'var(--text-2)' }}>{s?.sector}</span>
+      ) },
+    { id: 'current_price', header: 'CMP', align: 'right', mono: true, cell: s => inr(s?.current_price) },
+    { id: 'signal', header: 'Signal', sortable: false, cell: s => <SignalBadge signal={s?.signal} /> },
+    { id: 'confidence', header: 'Confidence',
+      cell: s => <div className="min-w-[130px]"><Conf value={s?.confidence} /></div> },
+    { id: 'accuracy', header: 'Model',
+      cell: s => <ModelQuality accuracy={s?.accuracy} precision={s?.precision} size={12} /> },
+    { id: 'horizon', header: 'Horizon', sortable: false,
+      cell: s => (
+        <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s?.horizon}</span>
+      ) },
+    { id: 'expReturn', header: 'Exp. Return', align: 'right',
+      cell: s => s?.expReturn != null ? (
+        <span className="font-mono font-semibold tabular-nums" style={{ color: s.expReturn >= 0 ? 'var(--green)' : 'var(--red)' }}>
+          {(s.expReturn >= 0 ? '+' : '') + Number(s.expReturn).toFixed(2) + '%'}
+        </span>
+      ) : <span className="text-ink-3">—</span> },
+    { id: 'risk_reward', header: 'Risk:Reward', align: 'right',
+      cell: s => <RiskReward value={s?.risk_reward} /> },
+    { id: 'sentiment', header: 'Sentiment', align: 'right',
+      cell: s => s?.sentiment != null ? (
+        <span className="font-mono tabular-nums" style={{ color: s.sentiment >= 0 ? 'var(--green)' : 'var(--red)' }}>
+          {(s.sentiment >= 0 ? '+' : '') + Number(s.sentiment).toFixed(2)}
+        </span>
+      ) : <span className="text-ink-3">—</span> },
+    { id: 'updatedMin', header: 'Updated', align: 'right',
+      cell: s => <span className="text-[12px] text-ink-3 font-mono">{fmtAgo(s?.updatedMin ?? 0)}</span> },
+  ], []);
 
   const counts = { BUY: 0, SELL: 0, HOLD: 0 };
   (allSignals ?? []).forEach(s => { if (s?.signal && s?.signal in counts) counts[s?.signal as keyof typeof counts]++; });
@@ -101,14 +126,14 @@ export default function AISignalsPage() {
             <div className="relative flex-[1_1_220px] max-w-[280px]">
               <Search size={17} className="absolute left-[13px] top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none" />
               <input
-                value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+                value={search} onChange={e => { setSearch(e.target.value); }}
                 placeholder="Search symbol or name…"
                 className="w-full h-[38px] pl-10 pr-3 rounded-[10px] border border-line bg-surface-2 text-ink font-sans text-[13px] outline-none box-border focus:border-accent transition-colors"
               />
             </div>
             <div className="flex flex-col gap-[5px]">
               <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">Sector</span>
-              <select value={sector} onChange={e => { setSector(e.target.value); setPage(1); }}
+              <select value={sector} onChange={e => { setSector(e.target.value); }}
                 className="h-[38px] px-3 rounded-[10px] border border-line bg-surface-2 text-ink font-sans text-[13px] outline-none min-w-[120px] focus:border-accent transition-colors">
                 {SECTORS.map(s => <option key={s}>{s}</option>)}
               </select>
@@ -117,7 +142,7 @@ export default function AISignalsPage() {
               <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">Signal</span>
               <div className="inline-flex bg-surface-2 border border-line rounded-[10px] p-[3px] gap-[2px]">
                 {SIGNALS.map(t => (
-                  <button key={t} className={segBtn(sigType === t)} onClick={() => { setSigType(t); setPage(1); }}>{t}</button>
+                  <button key={t} className={segBtn(sigType === t)} onClick={() => { setSigType(t); }}>{t}</button>
                 ))}
               </div>
             </div>
@@ -127,14 +152,14 @@ export default function AISignalsPage() {
               <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">Horizon</span>
               <div className="inline-flex bg-surface-2 border border-line rounded-[10px] p-[3px] gap-[2px]">
                 {HORIZONS.map(h => (
-                  <button key={h} className={segBtn(horizon === h)} onClick={() => { setHorizon(h); setPage(1); }}>{h}</button>
+                  <button key={h} className={segBtn(horizon === h)} onClick={() => { setHorizon(h); }}>{h}</button>
                 ))}
               </div>
             </div>
             <div className="flex flex-col gap-[5px] flex-[1_1_220px] max-w-[320px]">
               <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">Min Confidence · {conf}%</span>
               <div className="flex items-center gap-3">
-                <input type="range" className="rng flex-1" min="50" max="95" value={conf} onChange={e => { setConf(+e.target.value); setPage(1); }} />
+                <input type="range" className="rng flex-1" min="50" max="95" value={conf} onChange={e => { setConf(+e.target.value); }} />
                 <span className="font-mono font-bold min-w-[38px]">{conf}%</span>
               </div>
             </div>
@@ -148,64 +173,18 @@ export default function AISignalsPage() {
 
       {/* ── Table ── */}
       <Card pad={false}>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
-            <thead>
-              <tr>
-                <Th label="Stock"       sortKey="symbol"     sort={sort} onToggle={toggle} />
-                <Th label="Sector"      sortKey="sector"     sort={sort} onToggle={toggle} />
-                <Th label="CMP"         sortKey="current_price" sort={sort} onToggle={toggle} align="right" />
-                <PlainTh>Signal</PlainTh>
-                <Th label="Confidence"  sortKey="confidence" sort={sort} onToggle={toggle} />
-                <Th label="Model"       sortKey="accuracy"   sort={sort} onToggle={toggle} />
-                <PlainTh>Horizon</PlainTh>
-                <Th label="Exp. Return" sortKey="expReturn"  sort={sort} onToggle={toggle} align="right" />
-                <Th label="Risk:Reward" sortKey="risk_reward" sort={sort} onToggle={toggle} align="right" />
-                <Th label="Sentiment"   sortKey="sentiment"  sort={sort} onToggle={toggle} align="right" />
-                <Th label="Updated"     sortKey="updatedMin" sort={sort} onToggle={toggle} align="right" />
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? <SkeletonRows cols={11} rows={10} /> : rows.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-[50px] px-5 text-ink-3">
-                  No signals match your filters. Try lowering the confidence threshold.
-                </td></tr>
-              ) : (rows ?? []).map(s => (
-                <tr key={`${s?.symbol}-${s?.horizon}`} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)}>
-                  <Td><SymbolCell symbol={s?.symbol} name={s?.name} sector={s?.sector} showSector={false} /></Td>
-                  <Td>
-                    <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 border border-line"
-                      style={{ color: SECTOR_COLORS[s?.sector ?? ''] ?? 'var(--text-2)' }}>{s?.sector}</span>
-                  </Td>
-                  <Td align="right" mono>{inr(s?.current_price)}</Td>
-                  <Td><SignalBadge signal={s?.signal} /></Td>
-                  <Td><div className="min-w-[130px]"><Conf value={s?.confidence} /></div></Td>
-                  <Td><ModelQuality accuracy={s?.accuracy} precision={s?.precision} size={12} /></Td>
-                  <Td>
-                    <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{s?.horizon}</span>
-                  </Td>
-                  <Td align="right">
-                    {s?.expReturn != null ? (
-                      <span className="font-mono font-semibold tabular-nums" style={{ color: s.expReturn >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                        {(s.expReturn >= 0 ? '+' : '') + Number(s.expReturn).toFixed(2) + '%'}
-                      </span>
-                    ) : <span className="text-ink-3">—</span>}
-                  </Td>
-                  <Td align="right"><RiskReward value={s?.risk_reward} /></Td>
-                  <Td align="right">
-                    {s?.sentiment != null ? (
-                      <span className="font-mono tabular-nums" style={{ color: s.sentiment >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                        {(s.sentiment >= 0 ? '+' : '') + Number(s.sentiment).toFixed(2)}
-                      </span>
-                    ) : <span className="text-ink-3">—</span>}
-                  </Td>
-                  <Td align="right"><span className="text-[12px] text-ink-3 font-mono">{fmtAgo(s?.updatedMin ?? 0)}</span></Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <Pager page={page} pages={pages} total={filtered.length} perPage={PER_PAGE} onPage={setPage} label="signals" />
+        <DataTable
+          columns={columns}
+          data={filtered}
+          isLoading={loading}
+          isFetching={isFetching}
+          skeletonRows={10}
+          initialSort={{ id: 'confidence', desc: true }}
+          pagination={{ perPage: PER_PAGE }}
+          getRowId={s => `${s?.symbol}-${s?.horizon}`}
+          onRowClick={s => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)}
+          emptyMessage="No signals match your filters. Try lowering the confidence threshold."
+        />
       </Card>
 
     </div>

@@ -16,6 +16,9 @@ export { Card } from './Card';
 export { useSort, Th, PlainTh, Td } from './Table';
 export type { SortState } from './Table';
 
+export { DataTable } from './DataTable';
+export type { DataTableColumn, DataTableProps } from './DataTable';
+
 export { Pager } from './Pager';
 
 export { Skeleton, SkeletonRows } from './Skeleton';

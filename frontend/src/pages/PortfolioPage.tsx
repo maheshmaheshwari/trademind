@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useGetPortfolioSummaryQuery, useGetTodayPnlQuery } from '../services/tradeMindApiService';
-import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell, useSort, Th, Td } from '../components/ui';
+import {
+  Card, SignalBadge, Delta, Skeleton, SymbolCell,
+  DataTable, type DataTableColumn,
+} from '../components/ui';
 import { AreaChart, Donut } from '../components/Charts';
 import { AddPositionModal } from '../components/AddPositionModal';
 
@@ -21,22 +24,16 @@ function inr(n: number, dec = 2) {
 
 export default function PortfolioPage() {
   const { user } = useAuth();
-  const { sort, toggle } = useSort('current', 'desc');
   const [range,  setRange]  = useState<'30D' | '90D' | '1Y'>('90D');
   const [modal,  setModal]  = useState(false);
   const navigate = useNavigate();
 
-  const { data: portData, isLoading: loading, isError } = useGetPortfolioSummaryQuery(user?.id ?? 0, { skip: !user });
+  const { data: portData, isLoading: loading, isFetching, isError } = useGetPortfolioSummaryQuery(user?.id ?? 0, { skip: !user });
   const { data: todayPnlData } = useGetTodayPnlQuery(user?.id ?? 0, { skip: !user });
   const raw = portData as any;
 
-  const holdings: Holding[] = raw?.positions ? ([...raw.positions]).sort((a: Holding, b: Holding) => {
-    const va = a?.[sort.key as keyof Holding], vb = b?.[sort.key as keyof Holding];
-    let cmp = 0;
-    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
-    else if (typeof va === 'string' && typeof vb === 'string') cmp = va.localeCompare(vb);
-    return sort.dir === 'asc' ? cmp : -cmp;
-  }) : [];
+  // Sorting moved into DataTable.
+  const holdings: Holding[] = raw?.positions ?? [];
 
   const alloc:   AllocSlice[] = raw?.allocation ?? [];
   const series:  number[]     = raw?.pnl_history?.[range] ?? [];
@@ -48,6 +45,25 @@ export default function PortfolioPage() {
     '90D': ['90d ago', '60d', '30d', 'Today'],
     '1Y':  ['1Y ago',  '9mo', '6mo', '3mo', 'Now'],
   };
+
+  const holdingCols = useMemo<DataTableColumn<Holding>[]>(() => [
+    { id: 'symbol', header: 'Symbol',
+      cell: h => <SymbolCell symbol={h?.symbol ?? ''} name={h?.name ?? ''} sector={h?.sector ?? ''} /> },
+    { id: 'quantity', header: 'Qty', align: 'right', mono: true, cell: h => h?.quantity },
+    { id: 'avg_buy_price', header: 'Avg Buy', align: 'right', mono: true, cell: h => inr(h?.avg_buy_price ?? 0) },
+    { id: 'current_price', header: 'CMP', align: 'right', mono: true, cell: h => inr(h?.current_price ?? 0) },
+    { id: 'invested_amount', header: 'Invested', align: 'right', mono: true,
+      cell: h => <span className="text-ink-2">{inrCompact(h?.invested_amount ?? 0)}</span> },
+    { id: 'unrealized_pnl', header: 'P&L', align: 'right', mono: true,
+      cell: h => (
+        <span className="font-semibold" style={{ color: (h?.unrealized_pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+          {((h?.unrealized_pnl ?? 0) >= 0 ? '+' : '') + Number(h?.unrealized_pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+        </span>
+      ) },
+    { id: 'unrealized_pnl_pct', header: 'P&L %', align: 'right',
+      cell: h => <Delta value={h?.unrealized_pnl_pct ?? 0} size={12.5} showIcon={false} /> },
+    { id: 'signal', header: 'AI Signal', sortable: false, cell: h => <SignalBadge signal={h?.signal} /> },
+  ], []);
 
   const segBtn = (active: boolean) =>
     `border-none font-sans text-[12.5px] font-semibold px-[10px] py-1 rounded-[6px] cursor-pointer transition-colors ${
@@ -166,49 +182,20 @@ export default function PortfolioPage() {
       <Card title="Holdings" sub={`${holdings.length} positions`}
         icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>}
         pad={false}>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
-            <thead>
-              <tr>
-                <Th label="Symbol"   sortKey="symbol"   sort={sort} onToggle={toggle} />
-                <Th label="Qty"      sortKey="quantity"           sort={sort} onToggle={toggle} align="right" />
-                <Th label="Avg Buy"  sortKey="avg_buy_price"      sort={sort} onToggle={toggle} align="right" />
-                <Th label="CMP"      sortKey="current_price"      sort={sort} onToggle={toggle} align="right" />
-                <Th label="Invested" sortKey="invested_amount"    sort={sort} onToggle={toggle} align="right" />
-                <Th label="P&L"      sortKey="unrealized_pnl"     sort={sort} onToggle={toggle} align="right" />
-                <Th label="P&L %"    sortKey="unrealized_pnl_pct" sort={sort} onToggle={toggle} align="right" />
-                <th style={thS}>AI Signal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? <SkeletonRows cols={8} rows={8} /> : (holdings ?? []).map(h => (
-                <tr key={h?.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => navigate(`/stocks/${encodeURIComponent(h?.symbol ?? '')}`)}>
-                  <Td><SymbolCell symbol={h?.symbol ?? ''} name={h?.name ?? ''} sector={h?.sector ?? ''} /></Td>
-                  <Td align="right" mono>{h?.quantity}</Td>
-                  <Td align="right" mono>{inr(h?.avg_buy_price ?? 0)}</Td>
-                  <Td align="right" mono>{inr(h?.current_price ?? 0)}</Td>
-                  <Td align="right" mono><span className="text-ink-2">{inrCompact(h?.invested_amount ?? 0)}</span></Td>
-                  <Td align="right" mono>
-                    <span className="font-semibold" style={{ color: (h?.unrealized_pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {((h?.unrealized_pnl ?? 0) >= 0 ? '+' : '') + Number(h?.unrealized_pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                    </span>
-                  </Td>
-                  <Td align="right"><Delta value={h?.unrealized_pnl_pct ?? 0} size={12.5} showIcon={false} /></Td>
-                  <Td><SignalBadge signal={h?.signal} /></Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={holdingCols}
+          data={holdings}
+          isLoading={loading}
+          isFetching={isFetching}
+          skeletonRows={8}
+          initialSort={{ id: 'invested_amount', desc: true }}
+          getRowId={h => h?.symbol ?? ''}
+          onRowClick={h => navigate(`/stocks/${encodeURIComponent(h?.symbol ?? '')}`)}
+          emptyMessage="No holdings yet. Authorize a signal to open your first position."
+        />
       </Card>
 
       {modal && <AddPositionModal onClose={() => setModal(false)} />}
     </div>
   );
 }
-
-const thS: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase',
-  color: 'var(--text-3)', padding: 'calc(11px * var(--u)) 14px', borderBottom: '1px solid var(--border)',
-  whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1, textAlign: 'left',
-};

@@ -43,6 +43,7 @@ New cases added here (not elsewhere):
 from datetime import datetime, timedelta
 
 import pyotp
+import pytest
 
 from database.db import (
     get_connection, release_connection, _execute,
@@ -652,6 +653,39 @@ class TestOrders:
         resp = api_client.get(f"/api/trading/orders/{user_id}", headers=_h(token))
         assert resp.status_code == 200
         assert resp.json()["total"] >= 1
+
+    def test_orders_carry_entry_fill_and_current_price(self, api_client):
+        """Every order row must expose what it filled at AND where the stock
+        trades now — the order tables render both side by side, and without the
+        route's get_latest_close_map overlay the CMP column is always "—"."""
+        from database.db import get_connection, release_connection, _execute
+        from datetime import datetime
+
+        token, user_id = _register(api_client, "orderpricecols")
+
+        # A market below the signal entry, so fill_price and price differ and
+        # the test would catch the two being conflated.
+        conn = get_connection()
+        try:
+            _execute(conn,
+                "INSERT INTO prices (symbol, date, open, high, low, close, volume, interval) "
+                "VALUES (?,?,?,?,?,?,?,'1d') ON CONFLICT DO NOTHING",
+                ("CMPCOL.NS", datetime.now().strftime("%Y-%m-%d"), 380.0, 380.0, 380.0, 380.0, 10000))
+            conn.commit()
+        finally:
+            release_connection(conn)
+
+        _execute_trade(api_client, token, user_id, "CMPCOL.NS", 10000.0, 400.0)
+
+        resp = api_client.get(f"/api/trading/orders/{user_id}", headers=_h(token))
+        assert resp.status_code == 200, resp.text
+        entry = [o for o in resp.json()["data"] if o.get("order_purpose") == "ENTRY"]
+        assert entry, "entry order should be present"
+        o = entry[0]
+
+        assert o["price"] == pytest.approx(400.0), "price is the limit the order was placed at"
+        assert o["fill_price"] == pytest.approx(380.0), "fill_price is what it actually filled at"
+        assert o["current_price"] == pytest.approx(380.0), "current_price must be overlaid by the route"
 
     def test_orders_globalfilter(self, api_client):
         token, user_id = _register(api_client, "ordersfilttest")

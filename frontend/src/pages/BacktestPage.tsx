@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import ReactApexChart from 'react-apexcharts';
 import type { ApexOptions } from 'apexcharts';
 import { useTheme } from '../ThemeContext';
@@ -5,6 +6,7 @@ import { useGetBacktestSummaryQuery, useGetStrategyBacktestQuery } from '../serv
 import {
   Brain, TrendingUp, Target, Zap, CheckCircle, AlertCircle,
 } from 'lucide-react';
+import { DataTable, type DataTableColumn } from '../components/ui';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -207,7 +209,7 @@ function StrategyBacktest({ isDark }: { isDark: boolean }) {
 export default function BacktestPage() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const { data, isLoading, isError } = useGetBacktestSummaryQuery();
+  const { data, isLoading, isFetching, isError } = useGetBacktestSummaryQuery();
 
   if (isLoading) {
     return (
@@ -227,6 +229,59 @@ export default function BacktestPage() {
 
   const ms = data?.model_stats ?? {};
   const ss = data?.signal_stats ?? {};
+
+  const topSignalCols = useMemo<DataTableColumn<Record<string, any>>[]>(() => [
+    { id: 'symbol', header: 'Stock',
+      cell: t => (
+        <div>
+          <div className="font-semibold text-ink">{t?.symbol?.replace?.('.NS', '')}</div>
+          {t?.name && <div className="text-[11px] text-ink-3 truncate max-w-[120px]">{t?.name}</div>}
+        </div>
+      ) },
+    { id: 'current_price', header: 'CMP', align: 'right', mono: true,
+      cell: t => <span className="text-ink-2">{t?.current_price != null ? inr(t.current_price) : '\u2014'}</span> },
+    { id: 'signal', header: 'Signal',
+      cell: t => {
+        const sigColor = SIGNAL_COLORS[t?.signal ?? ''] ?? '#3B82F6';
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background: sigColor + '1A', color: sigColor }}>
+            {t?.signal === 'STRONG BUY' ? <CheckCircle size={11} /> : t?.signal === 'STRONG SELL' ? <AlertCircle size={11} /> : null}
+            {t?.signal}
+          </span>
+        );
+      } },
+    { id: 'confidence', header: 'Confidence',
+      cell: t => (
+        <div className="flex items-center gap-2">
+          <div className="w-16 h-1.5 rounded-full bg-surface-2 overflow-hidden">
+            <div className="h-full rounded-full bg-accent" style={{ width: `${t?.confidence ?? 0}%` }} />
+          </div>
+          <span className="font-mono text-[12px] text-ink-2">{fmt(t?.confidence ?? 0)}%</span>
+        </div>
+      ) },
+    // /api/backtest/summary returns flat trade_signals rows, so the nested
+    // `trade`/`model` shape only exists on the formatted signal payloads —
+    // fall back to the flat column either way.
+    { id: 'expected_return_pct', header: 'Expected Return',
+      accessor: t => t?.trade?.expected_return_pct ?? t?.expected_return_pct ?? 0,
+      cell: t => {
+        const expRet = t?.trade?.expected_return_pct ?? t?.expected_return_pct ?? 0;
+        return (
+          <span className={`font-mono font-semibold text-[13px] ${expRet >= 0 ? 'text-gain' : 'text-loss'}`}>
+            {expRet >= 0 ? '+' : ''}{fmt(expRet)}%
+          </span>
+        );
+      } },
+    { id: 'model_name', header: 'Model',
+      accessor: t => t?.model?.name ?? t?.model_name ?? '',
+      cell: t => <span className="text-ink-2">{t?.model?.name ?? t?.model_name ?? '\u2014'}</span> },
+    { id: 'model_accuracy', header: 'Accuracy', mono: true,
+      accessor: t => t?.model?.accuracy ?? t?.model_accuracy ?? 0,
+      cell: t => <span className="text-[12px] text-ink-2">{fmt(t?.model?.accuracy ?? t?.model_accuracy ?? 0)}%</span> },
+    { id: 'model_horizon', header: 'Horizon',
+      accessor: t => t?.model?.horizon ?? t?.model_horizon ?? '',
+      cell: t => <span className="text-ink-3">{t?.model?.horizon ?? t?.model_horizon ?? '\u2014'}</span> },
+  ], []);
   const history: any[] = data?.history ?? [];
 
   const buyCount  = (ss?.distribution?.STRONG_BUY ?? 0) + (ss?.distribution?.BUY ?? 0);
@@ -477,61 +532,13 @@ export default function BacktestPage() {
         title="Top 10 High-Confidence Signals"
         sub="Current STRONG BUY picks ranked by model confidence"
       >
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="border-b border-line">
-                {['Stock', 'CMP', 'Signal', 'Confidence', 'Expected Return', 'Model', 'Accuracy', 'Horizon'].map(h => (
-                  <th key={h} className={`text-[11px] font-semibold uppercase tracking-[.07em] text-ink-3 pb-2.5 pr-4 whitespace-nowrap ${h === 'CMP' ? 'text-right' : 'text-left'}`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {(ss?.top_signals ?? []).map((t: any, i: number) => {
-                const sigColor = SIGNAL_COLORS[t?.signal ?? ''] ?? '#3B82F6';
-                // /api/backtest/summary returns flat trade_signals rows, so the
-                // nested `trade`/`model` shape only exists on the formatted
-                // signal payloads — fall back to the flat column either way.
-                const expRet = t?.trade?.expected_return_pct ?? t?.expected_return_pct ?? 0;
-                return (
-                  <tr key={(t?.symbol ?? '') + i} className="border-b border-line/50 hover:bg-surface-hover/50 transition-colors">
-                    <td className="py-2.5 pr-4">
-                      <div className="font-semibold text-ink">{t?.symbol?.replace?.('.NS', '')}</div>
-                      {t?.name && <div className="text-[11px] text-ink-3 truncate max-w-[120px]">{t?.name}</div>}
-                    </td>
-                    <td className="py-2.5 pr-4 text-right font-mono tabular-nums text-ink-2 whitespace-nowrap">
-                      {t?.current_price != null ? inr(t.current_price) : '—'}
-                    </td>
-                    <td className="py-2.5 pr-4">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background: sigColor + '1A', color: sigColor }}>
-                        {t?.signal === 'STRONG BUY' ? <CheckCircle size={11} /> : t?.signal === 'STRONG SELL' ? <AlertCircle size={11} /> : null}
-                        {t?.signal}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 rounded-full bg-surface-2 overflow-hidden">
-                          <div className="h-full rounded-full bg-accent" style={{ width: `${t?.confidence ?? 0}%` }} />
-                        </div>
-                        <span className="font-mono text-[12px] text-ink-2">{fmt(t?.confidence ?? 0)}%</span>
-                      </div>
-                    </td>
-                    <td className="py-2.5 pr-4">
-                      <span className={`font-mono font-semibold text-[13px] ${expRet >= 0 ? 'text-gain' : 'text-loss'}`}>
-                        {expRet >= 0 ? '+' : ''}{fmt(expRet)}%
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-4 text-ink-2">{t?.model?.name ?? t?.model_name ?? '—'}</td>
-                    <td className="py-2.5 pr-4">
-                      <span className="font-mono text-[12px] text-ink-2">{fmt(t?.model?.accuracy ?? t?.model_accuracy ?? 0)}%</span>
-                    </td>
-                    <td className="py-2.5 text-ink-3">{t?.model?.horizon ?? t?.model_horizon ?? '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={topSignalCols}
+          data={(ss?.top_signals ?? []) as Record<string, any>[]}
+          isFetching={isFetching}
+          getRowId={t => String(t?.symbol ?? '')}
+          emptyMessage="No high-confidence signals right now."
+        />
       </SectionCard>
 
       {/* ── Investor callout ─────────────────────────────────────────────── */}

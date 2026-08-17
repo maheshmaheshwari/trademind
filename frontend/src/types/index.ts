@@ -56,7 +56,9 @@ export interface Trade {
   order_type: 'BUY' | 'SELL' | 'LIMIT' | 'MARKET';
   order_purpose?: string;
   quantity: number;
-  price: number;
+  price: number;                    // the limit the order was placed at
+  fill_price?: number | null;       // what it actually filled at — the cost basis
+  current_price?: number | null;    // latest close, overlaid by /api/trading/orders
   value: number | null;
   created_at: string;
   pnl: number | null;

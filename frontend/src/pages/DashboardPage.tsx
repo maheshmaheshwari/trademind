@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bookmark, RefreshCw, ChevronRight } from 'lucide-react';
 import { useAuth } from '../AuthContext';
@@ -8,7 +9,7 @@ import {
   useGetOrdersQuery, useGetPositionsQuery, useGetMarketOverviewQuery, useRefreshSignalsMutation,
   useAddToWatchlistMutation,
 } from '../services/tradeMindApiService';
-import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell, Conf, DateComponent, RiskReward } from '../components/ui';
+import { Card, SignalBadge, Delta, Skeleton, SymbolCell, Conf, DateComponent, RiskReward, DataTable, type DataTableColumn } from '../components/ui';
 import { AreaChart, Gauge, Sparkline } from '../components/Charts';
 import type { Stock, IndexData, Breadth, Trade } from '../types';
 
@@ -164,7 +165,7 @@ export default function DashboardPage() {
   const { data: portData,    isLoading: loadPort    } = useGetPortfolioSummaryQuery(user?.id ?? 0, { skip: !user });
   const { data: todayPnl,    isLoading: loadPnl     } = useGetTodayPnlQuery(user?.id ?? 0, { skip: !user });
   const { data: signalsData, isLoading: loadSignals } = useGetActionableSignalsQuery(undefined, { skip: !user });
-  const { data: ordersData,  isLoading: loadOrders  } = useGetOrdersQuery({ userId: user?.id ?? 0, size: 6 }, { skip: !user });
+  const { data: ordersData,  isLoading: loadOrders, isFetching: fetchOrders } = useGetOrdersQuery({ userId: user?.id ?? 0, size: 6 }, { skip: !user });
   const { data: posData,     isLoading: loadPos     } = useGetPositionsQuery({ userId: user?.id ?? 0, size: 1 }, { skip: !user });
   const { data: mktData,     isLoading: loadMkt     } = useGetMarketOverviewQuery();
   const [refreshSignals, { isLoading: refreshing }]   = useRefreshSignalsMutation();
@@ -187,6 +188,35 @@ export default function DashboardPage() {
     risk_reward:  t.trade?.risk_reward,
   }));
   const trades: Trade[]  = (ordersData as any)?.data?.slice(0, 6) ?? [];
+
+  const tradeCols = useMemo<DataTableColumn<Trade>[]>(() => [
+    { id: 'symbol', header: 'Symbol',
+      cell: t => <SymbolCell symbol={t?.symbol ?? ''} name={t?.name ?? ''} sector={t?.sector ?? ''} showSector={false} /> },
+    { id: 'order_type', header: 'Side',
+      cell: t => (
+        <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold border border-line"
+          style={{ background: t?.order_type === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)', color: t?.order_type === 'BUY' ? 'var(--green)' : 'var(--red)' }}>
+          {t?.order_type}
+        </span>
+      ) },
+    // Entry is the FILL, not the limit — see TradesPage for why they differ.
+    { id: 'price', header: 'Entry', align: 'right', mono: true,
+      accessor: t => t?.fill_price ?? t?.price ?? 0,
+      cell: t => inr(t?.fill_price ?? t?.price ?? 0) },
+    { id: 'current_price', header: 'CMP', align: 'right', mono: true,
+      cell: t => t?.current_price != null
+        ? <span className="text-ink-2">{inr(t.current_price)}</span>
+        : <span className="text-ink-3">\u2014</span> },
+    { id: 'value', header: 'Value', align: 'right', mono: true, cell: t => inr(t?.value ?? 0, 0) },
+    { id: 'pnl', header: 'Realized P&L', align: 'right',
+      cell: t => <Delta value={t?.pnl ?? 0} suffix="" showIcon size={12.5} /> },
+    { id: 'created_at', header: 'Date',
+      cell: t => (
+        <span className="text-[12px] text-ink-3 font-mono">
+          <DateComponent inputDate={t?.created_at ?? ''} format="DD MMM" showTooltip={false} />
+        </span>
+      ) },
+  ], []);
   const posCount: number = (posData as any)?.total ?? 0;
   const indices: IndexData[] = (mktData as any)?.indices ?? [];
   const breadth: Breadth | null = (mktData as any)?.breadth ?? null;
@@ -390,45 +420,15 @@ export default function DashboardPage() {
           </button>
         }
       >
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
-            <thead>
-              <tr>
-                {['Symbol', 'Side', 'Price', 'Value', 'Realized P&L', 'Date'].map(h => (
-                  <th key={h} className="text-[11px] font-semibold tracking-[.04em] uppercase text-ink-3 border-b border-line whitespace-nowrap sticky top-0 bg-surface z-[1]"
-                    style={{ textAlign: h === 'Value' || h === 'Price' || h === 'Realized P&L' ? 'right' : 'left', padding: 'calc(11px * var(--u)) 14px' }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? <SkeletonRows cols={6} rows={5} /> : trades.length === 0 ? (
-                <tr><td colSpan={6} className="text-center text-ink-3 py-10 px-5">No recent trades.</td></tr>
-              ) : (trades ?? []).map(t => (
-                <tr key={t?.id} className="cursor-default transition-colors hover:bg-surface-2">
-                  <td className="border-b border-line whitespace-nowrap" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                    <SymbolCell symbol={t?.symbol ?? ''} name={t?.name ?? ''} sector={t?.sector ?? ''} showSector={false} />
-                  </td>
-                  <td className="border-b border-line whitespace-nowrap" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                    <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold border border-line"
-                      style={{ background: t?.order_type === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)', color: t?.order_type === 'BUY' ? 'var(--green)' : 'var(--red)' }}>
-                      {t?.order_type}
-                    </span>
-                  </td>
-                  <td className="border-b border-line whitespace-nowrap text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>{inr(t?.price ?? 0)}</td>
-                  <td className="border-b border-line whitespace-nowrap text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>{inr(t?.value ?? 0, 0)}</td>
-                  <td className="border-b border-line whitespace-nowrap text-right" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                    <Delta value={t?.pnl ?? 0} suffix="" showIcon size={12.5} />
-                  </td>
-                  <td className="border-b border-line whitespace-nowrap text-[12px] text-ink-3 font-mono" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                    <DateComponent inputDate={t?.created_at ?? ''} format="DD MMM" showTooltip={false} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={tradeCols}
+          data={trades}
+          isLoading={loading}
+          isFetching={fetchOrders}
+          skeletonRows={5}
+          getRowId={t => String(t?.id ?? '')}
+          emptyMessage="No recent trades."
+        />
       </Card>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

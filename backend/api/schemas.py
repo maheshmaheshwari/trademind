@@ -192,7 +192,9 @@ class OrderOut(BaseModel):
     order_type: Optional[str] = None       # BUY / SELL
     order_purpose: Optional[str] = None    # ENTRY / STOP_LOSS / TARGET / SQUARE_OFF
     quantity: Optional[int] = None
-    price: Optional[float] = None
+    price: Optional[float] = None          # the limit the order was placed at
+    fill_price: Optional[float] = None     # what it actually filled at — the cost basis
+    current_price: Optional[float] = None  # latest close, overlaid by the route
     value: Optional[float] = None
     status: Optional[str] = None
     pnl: Optional[float] = None

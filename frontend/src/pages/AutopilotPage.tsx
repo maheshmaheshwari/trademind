@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BrainCircuit, Settings, CheckCircle, Clock, AlertCircle, Activity, TrendingUp, Target, Wallet, ChevronRight } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/ui';
-import { Card, SignalBadge, SkeletonRows, Skeleton, SymbolCell } from '../components/ui';
+import { Card, SignalBadge, Skeleton, SymbolCell, DataTable, type DataTableColumn } from '../components/ui';
 import { RiskReward } from '../components/ui';
 import {
   useGetAutopilotStatusQuery, useToggleAutopilotMutation,
@@ -101,7 +101,49 @@ function RecommendedTrades({ userId }: { userId: number }) {
     }
   }
 
-  if (isLoading) return <Card><SkeletonRows cols={8} rows={4} /></Card>;
+  const recCols = useMemo<DataTableColumn<Record<string, any>>[]>(() => [
+    { id: 'rank', header: '#', mono: true, cell: r => <span className="text-ink-3">{r?.rank}</span> },
+    { id: 'symbol', header: 'Stock', cell: r => <SymbolCell symbol={r?.symbol} name={r?.name} showSector={false} /> },
+    { id: 'current_price', header: 'CMP', align: 'right', mono: true, cell: r => inr(r?.current_price) },
+    { id: 'confidence', header: 'Conf', mono: true,
+      cell: r => <span className="font-semibold" style={{ color: 'var(--green)' }}>{r?.confidence}%</span> },
+    { id: 'model_accuracy', header: 'Model acc / prec', mono: true,
+      cell: r => (
+        <span className="text-[12px] text-ink-2">
+          {r?.model_accuracy != null ? `${r.model_accuracy}%` : '—'} / {r?.model_precision != null ? `${r.model_precision}%` : '—'}
+        </span>
+      ) },
+    { id: 'horizon', header: 'Horizon', sortable: false,
+      cell: r => <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{r?.horizon}</span> },
+    { id: 'qty', header: 'Qty', align: 'right', mono: true, cell: r => (r?.qty ?? 0).toLocaleString('en-IN') },
+    { id: 'investment', header: 'Investment', align: 'right', mono: true,
+      cell: r => '₹' + Math.round(r?.investment ?? 0).toLocaleString('en-IN') },
+    { id: 'risk_reward', header: 'R:R', align: 'right', cell: r => <RiskReward value={r?.risk_reward} size={12.5} /> },
+    { id: 'levels', header: 'Entry / Target / SL', sortable: false,
+      cell: r => (
+        <span className="font-mono text-[12px] text-ink-2 whitespace-nowrap">
+          {inr(r?.buy_price)} · <span style={{ color: 'var(--green)' }}>{inr(r?.target_price)}</span> · <span style={{ color: 'var(--red)' }}>{inr(r?.stop_loss)}</span>
+        </span>
+      ) },
+    { id: 'action', header: '', align: 'right', sortable: false,
+      cell: r => {
+        const authorized = done.has(r?.symbol);
+        return (
+          <button
+            disabled={authorized || busy === r?.symbol}
+            onClick={() => authorizeOne(r)}
+            className="inline-flex items-center gap-1 h-8 px-3 rounded-[8px] text-[12.5px] font-semibold border cursor-pointer transition-colors disabled:cursor-default"
+            style={authorized
+              ? { color: 'var(--green)', borderColor: 'var(--line)', background: 'var(--surface-2)' }
+              : { color: '#fff', borderColor: 'var(--accent)', background: 'var(--accent)' }}>
+            {authorized ? <><CheckCircle size={14} /> Authorized</> : busy === r?.symbol ? 'Authorizing…' : 'Authorize'}
+          </button>
+        );
+      } },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [done, busy]);
+
+  if (isLoading) return <Card><Skeleton h={180} /></Card>;
   if (!recs.length) return null;
 
   return (
@@ -122,51 +164,12 @@ function RecommendedTrades({ userId }: { userId: number }) {
           {data?.slots_available ?? 0} slot{(data?.slots_available ?? 0) !== 1 ? 's' : ''} open · ₹{Math.round(data?.cash ?? 0).toLocaleString('en-IN')} cash
         </span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[13px]">
-          <thead>
-            <tr className="text-ink-3 text-[11px] uppercase tracking-[.05em]">
-              {['#', 'Stock', 'CMP', 'Conf', 'Model acc / prec', 'Horizon', 'Qty', 'Investment', 'R:R', 'Entry / Target / SL', ''].map((h, i) => (
-                <th key={i} className="text-left font-semibold px-4 py-2" style={{ textAlign: i === 2 || (i >= 6 && i <= 8) ? 'right' : 'left' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {(recs ?? []).map(r => {
-              const authorized = done.has(r?.symbol);
-              return (
-                <tr key={r?.symbol} className="border-t border-line">
-                  <td className="px-4 py-2 font-mono text-ink-3">{r?.rank}</td>
-                  <td className="px-4 py-2"><SymbolCell symbol={r?.symbol} name={r?.name} showSector={false} /></td>
-                  <td className="px-4 py-2 text-right font-mono tabular-nums text-ink">{inr(r?.current_price)}</td>
-                  <td className="px-4 py-2 font-mono font-semibold" style={{ color: 'var(--green)' }}>{r?.confidence}%</td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-ink-2 tabular-nums">
-                    {r?.model_accuracy != null ? `${r.model_accuracy}%` : '—'} / {r?.model_precision != null ? `${r.model_precision}%` : '—'}
-                  </td>
-                  <td className="px-4 py-2"><span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">{r?.horizon}</span></td>
-                  <td className="px-4 py-2 text-right font-mono tabular-nums">{(r?.qty ?? 0).toLocaleString('en-IN')}</td>
-                  <td className="px-4 py-2 text-right font-mono tabular-nums">₹{Math.round(r?.investment ?? 0).toLocaleString('en-IN')}</td>
-                  <td className="px-4 py-2 text-right"><RiskReward value={r?.risk_reward} size={12.5} /></td>
-                  <td className="px-4 py-2 font-mono text-[12px] text-ink-2 whitespace-nowrap">
-                    {inr(r?.buy_price)} · <span style={{ color: 'var(--green)' }}>{inr(r?.target_price)}</span> · <span style={{ color: 'var(--red)' }}>{inr(r?.stop_loss)}</span>
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <button
-                      disabled={authorized || busy === r?.symbol}
-                      onClick={() => authorizeOne(r)}
-                      className="inline-flex items-center gap-1 h-8 px-3 rounded-[8px] text-[12.5px] font-semibold border cursor-pointer transition-colors disabled:cursor-default"
-                      style={authorized
-                        ? { color: 'var(--green)', borderColor: 'var(--line)', background: 'var(--surface-2)' }
-                        : { color: '#fff', borderColor: 'var(--accent)', background: 'var(--accent)' }}>
-                      {authorized ? <><CheckCircle size={14} /> Authorized</> : busy === r?.symbol ? 'Authorizing…' : 'Authorize'}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={recCols}
+        data={recs}
+        getRowId={r => r?.symbol ?? ''}
+        emptyMessage="No recommendations right now."
+      />
     </Card>
   );
 }
@@ -183,7 +186,7 @@ export default function AutopilotPage() {
     useGetAutopilotStatusQuery(userId, { skip: !userId });
 
   const statusFilter = filter === 'All' ? undefined : STATUS_MAP[filter];
-  const { data: tradesData, isLoading: loadTrades } =
+  const { data: tradesData, isLoading: loadTrades, isFetching: fetchTrades } =
     useGetAuthorizedTradesQuery({ userId, status: statusFilter }, { skip: !userId });
 
   const [toggleAutopilot, { isLoading: toggling }] = useToggleAutopilotMutation();
@@ -229,6 +232,92 @@ export default function AutopilotPage() {
   // page's for the same trade. Falls back to `entry` for mandates authorized
   // before fill_price was recorded.
   const costBasis = (t: AuthorizedTrade) => t?.fill_price ?? t?.entry ?? null;
+
+  const tradeCols = useMemo<DataTableColumn<AuthorizedTrade>[]>(() => [
+    { id: 'symbol', header: 'Stock',
+      cell: t => <SymbolCell symbol={t?.symbol ?? ''} name={t?.name ?? ''} sector={t?.sector ?? ''} showSector={false} /> },
+    { id: 'signal', header: 'Signal', sortable: false,
+      cell: t => (
+        <div className="flex items-center gap-1.5">
+          <SignalBadge signal={t?.signal} />
+          <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">
+            {t?.mode}
+          </span>
+        </div>
+      ) },
+    { id: 'amount', header: 'Authorized \u20B9', align: 'right', mono: true,
+      cell: t => <span className="font-semibold text-ink">{inr(t?.amount, 0)}</span> },
+    { id: 'qty', header: 'Qty', align: 'right', mono: true, cell: t => t?.qty },
+    // Leads with the FILL, because that is the cost basis the P&L column is
+    // measured from. The authorized price sits underneath whenever the two
+    // differ — a buy limit fills at the market when the market is cheaper, and
+    // hiding that makes the row look like it disagrees with the signal. Two
+    // decimals: on a sub-\u20B920 stock the gap rounds away entirely at zero.
+    { id: 'entry', header: 'Entry \u2192 Target', align: 'right', mono: true,
+      accessor: t => costBasis(t) ?? undefined,
+      cell: t => {
+        const basis = costBasis(t);
+        return (
+          <div className="flex flex-col items-end leading-tight text-[12px]">
+            <div>
+              <span className="text-ink-2">{inr(basis ?? t?.entry)}</span>
+              <span className="text-ink-3"> \u2192 </span>
+              <span className="text-gain">{inr(t?.target)}</span>
+            </div>
+            {t?.fill_price != null && t?.entry != null && t.fill_price !== t.entry && (
+              <span className="text-[10.5px] text-ink-3 mt-0.5">auth {inr(t.entry)}</span>
+            )}
+          </div>
+        );
+      } },
+    // CMP is only a live market price while the mandate is open — for a closed
+    // one it is whatever the price was when it closed.
+    { id: 'cmp', header: 'CMP', align: 'right', mono: true,
+      cell: t => {
+        const basis = costBasis(t);
+        const isOpen = t?.status === 'EXECUTED' || t?.status === 'PENDING';
+        const cmpColor = t?.cmp != null && basis != null ? (t.cmp >= basis ? 'text-gain' : 'text-loss') : 'text-ink';
+        return isOpen && t?.cmp != null
+          ? <span className={cmpColor}>{inr(t.cmp)}</span>
+          : <span className="text-ink-3">\u2014</span>;
+      } },
+    { id: 'exp_profit', header: 'Exp. Profit', align: 'right', mono: true,
+      cell: t => <span className="font-semibold text-gain">+{inr(t?.exp_profit, 0)}</span> },
+    { id: 'max_loss', header: 'Max Loss', align: 'right', mono: true,
+      cell: t => <span className="text-loss">\u2212{inr(t?.max_loss, 0)}</span> },
+    { id: 'pnl', header: 'Live / Realized P&L', align: 'right', mono: true,
+      accessor: t => livePnl(t) ?? undefined,
+      cell: t => {
+        const pnl = livePnl(t);
+        return pnl != null
+          ? <span className="font-semibold" style={{ color: pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>{signed(pnl)}</span>
+          : <span className="text-ink-3">\u2014</span>;
+      } },
+    { id: 'status', header: 'Status',
+      cell: t => {
+        const meta = statusMeta(t?.status);
+        return (
+          <span className="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-full text-[11px] font-semibold border-none"
+            style={{ color: meta?.color, background: meta?.bg }}>
+            {meta?.Icon && <meta.Icon size={11} />}
+            {meta?.label}
+          </span>
+        );
+      } },
+    { id: 'action', header: 'Action', align: 'right', sortable: false,
+      cell: t => {
+        const canRevoke = t?.status === 'EXECUTED' || t?.status === 'PENDING';
+        return canRevoke ? (
+          <button
+            onClick={(e) => handleRevoke(t, e)}
+            className="h-8 px-3 rounded-[9px] text-[12.5px] font-semibold border-none cursor-pointer transition-colors bg-loss-soft text-loss hover:bg-loss hover:text-white"
+          >
+            Revoke
+          </button>
+        ) : <span className="text-[12px] text-ink-3">Closed</span>;
+      } },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], []);
 
   const livePnl = (t: AuthorizedTrade) => {
     const basis = costBasis(t);
@@ -354,131 +443,29 @@ export default function AutopilotPage() {
 
       {/* ── Table ── */}
       <Card pad={false}>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
-            <thead>
-              <tr>
-                {['Stock', 'Signal', 'Authorized ₹', 'Qty', 'Entry → Target', 'CMP', 'Exp. Profit', 'Max Loss', 'Live / Realized P&L', 'Status', 'Action'].map(h => (
-                  <th key={h} className="text-left text-[11px] font-semibold tracking-[.04em] uppercase text-ink-3 border-b border-line whitespace-nowrap sticky top-0 bg-surface z-[1]"
-                    style={{ padding: 'calc(11px * var(--u)) 14px', textAlign: ['Authorized ₹', 'Qty', 'Entry → Target', 'CMP', 'Exp. Profit', 'Max Loss', 'Live / Realized P&L', 'Action'].includes(h) ? 'right' : 'left' }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loadTrades ? (
-                <SkeletonRows cols={11} rows={6} />
-              ) : trades.length === 0 ? (
-                <tr>
-                  <td colSpan={11}>
-                    <div className="text-center py-14 text-ink-3">
-                      <BrainCircuit size={34} className="mx-auto mb-3 opacity-40" />
-                      <p className="font-semibold text-ink m-0 mb-1">No authorized trades{filter !== 'All' ? ` in "${filter}"` : ''}</p>
-                      <p className="text-[12.5px] m-0 mb-4">Authorize trades from the AI Signals page to let the AI manage them.</p>
-                      <button
-                        onClick={() => navigate('/signals')}
-                        className="inline-flex items-center gap-2 h-9 px-4 rounded-[11px] text-[13px] font-semibold border-none bg-accent text-white cursor-pointer"
-                        style={{ boxShadow: '0 4px 14px rgba(59,130,246,.32)' }}
-                      >
-                        Browse Signals <ChevronRight size={15} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ) : (trades ?? []).map(t => {
-                const meta = statusMeta(t?.status);
-                const pnl  = livePnl(t);
-                const isOpen = t?.status === 'EXECUTED' || t?.status === 'PENDING';
-                const canRevoke = isOpen;
-                const basis = costBasis(t);
-                const cmpColor = t?.cmp != null && basis != null
-                  ? (t.cmp >= basis ? 'text-gain' : 'text-loss')
-                  : 'text-ink';
-                return (
-                  <tr key={t?.id} className="border-b border-line transition-colors hover:bg-surface-2">
-                    <td style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      <SymbolCell symbol={t?.symbol ?? ''} name={t?.name ?? ''} sector={t?.sector ?? ''} showSector={false} />
-                    </td>
-                    <td style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      <div className="flex items-center gap-1.5">
-                        <SignalBadge signal={t?.signal} />
-                        <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 text-ink-2 border border-line">
-                          {t?.mode}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="text-right font-mono tabular-nums font-semibold text-ink" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      {inr(t?.amount, 0)}
-                    </td>
-                    <td className="text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      {t?.qty}
-                    </td>
-                    {/* Shows the fill, not the authorized entry, so this column and
-                        the P&L beside it are measured off the same number. When the
-                        fill came in cheaper, the authorized price is kept in the
-                        tooltip rather than shown — the row is already dense. */}
-                    <td className="text-right font-mono tabular-nums text-[12px]" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      <span
-                        className="text-ink-2"
-                        title={t?.fill_price != null && t?.entry != null && t.fill_price !== t.entry
-                          ? `Filled at ${inr(t.fill_price)} · authorized at ${inr(t.entry)}`
-                          : undefined}
-                      >
-                        {inr(basis ?? t?.entry, 0)}
-                      </span>
-                      <span className="text-ink-3"> → </span>
-                      <span className="text-gain">{inr(t?.target, 0)}</span>
-                    </td>
-                    {/* CMP is only a live market price while the mandate is open —
-                        for a closed one it is whatever the price was when it closed. */}
-                    <td className="text-right font-mono tabular-nums" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      {isOpen && t?.cmp != null
-                        ? <span className={cmpColor}>{inr(t.cmp)}</span>
-                        : <span className="text-ink-3">—</span>}
-                    </td>
-                    <td className="text-right font-mono tabular-nums font-semibold text-gain" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      +{inr(t?.exp_profit, 0)}
-                    </td>
-                    <td className="text-right font-mono tabular-nums text-loss" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      −{inr(t?.max_loss, 0)}
-                    </td>
-                    <td className="text-right" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      {pnl != null ? (
-                        <span className="font-mono tabular-nums font-semibold" style={{ color: pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                          {signed(pnl)}
-                        </span>
-                      ) : (
-                        <span className="text-ink-3">—</span>
-                      )}
-                    </td>
-                    <td style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      <span className="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-full text-[11px] font-semibold border-none"
-                        style={{ color: meta?.color, background: meta?.bg }}>
-                        {meta?.Icon && <meta.Icon size={11} />}
-                        {meta?.label}
-                      </span>
-                    </td>
-                    <td className="text-right" style={{ padding: 'calc(12px * var(--u)) 14px' }}>
-                      {canRevoke ? (
-                        <button
-                          onClick={(e) => handleRevoke(t, e)}
-                          className="h-8 px-3 rounded-[9px] text-[12.5px] font-semibold border-none cursor-pointer transition-colors bg-loss-soft text-loss hover:bg-loss hover:text-white"
-                        >
-                          Revoke
-                        </button>
-                      ) : (
-                        <span className="text-[12px] text-ink-3">
-                          Closed
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={tradeCols}
+          data={trades}
+          isLoading={loadTrades}
+          isFetching={fetchTrades}
+          skeletonRows={6}
+          pagination={{ perPage: 15 }}
+          getRowId={t => String(t?.id ?? '')}
+          emptyMessage={
+            <div>
+              <BrainCircuit size={34} className="mx-auto mb-3 opacity-40" />
+              <p className="font-semibold text-ink m-0 mb-1">No authorized trades{filter !== 'All' ? ` in "${filter}"` : ''}</p>
+              <p className="text-[12.5px] m-0 mb-4">Authorize trades from the AI Signals page to let the AI manage them.</p>
+              <button
+                onClick={() => navigate('/signals')}
+                className="inline-flex items-center gap-2 h-9 px-4 rounded-[11px] text-[13px] font-semibold border-none bg-accent text-white cursor-pointer"
+                style={{ boxShadow: '0 4px 14px rgba(59,130,246,.32)' }}
+              >
+                Browse Signals <ChevronRight size={15} />
+              </button>
+            </div>
+          }
+        />
 
         {/* Footer count */}
         {trades.length > 0 && (

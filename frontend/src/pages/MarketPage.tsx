@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGetMarketOverviewQuery, useGetMarketSectorsQuery } from '../services/tradeMindApiService';
-import { Card, SignalBadge, Delta, Skeleton, SkeletonRows, SymbolCell } from '../components/ui';
+import { Card, SignalBadge, Delta, Skeleton, SymbolCell, DataTable, type DataTableColumn } from '../components/ui';
 import { FlowBars, Sparkline } from '../components/Charts';
 
 import type { IndexData, FIIDIIBar, HeatmapSector, Breadth, Stock } from '../types';
@@ -55,7 +55,7 @@ function useIsMarketOpen(): boolean {
 }
 
 export default function MarketPage() {
-  const { data: mktData, isLoading: loading } = useGetMarketOverviewQuery();
+  const { data: mktData, isLoading: loading, isFetching } = useGetMarketOverviewQuery();
   const { data: sectorsData } = useGetMarketSectorsQuery();
   const navigate = useNavigate();
   const [clockTime, setClockTime] = useState('');
@@ -81,14 +81,14 @@ export default function MarketPage() {
   const vix = (indices ?? []).find(ix => ix?.name === 'INDIA VIX');
   const adRatio = breadth ? ((breadth.advances ?? 0) / (breadth.declines || 1)).toFixed(2) : '—';
 
-  const stockRow = (s: Stock) => (
-    <tr key={s?.symbol} className="cursor-pointer transition-colors hover:bg-surface-2" onClick={() => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)}>
-      <td style={tdS}><SymbolCell symbol={s?.symbol ?? ''} name={s?.name ?? ''} sector={s?.sector ?? ''} /></td>
-      <td style={{ ...tdS, textAlign: 'right' }} className="font-mono tabular-nums">{inr(s?.price ?? 0)}</td>
-      <td style={{ ...tdS, textAlign: 'right' }}><Delta value={s?.change ?? 0} size={13} showIcon={false} /></td>
-      <td style={tdS}><SignalBadge signal={s?.signal} /></td>
-    </tr>
-  );
+  const stockCols = useMemo<DataTableColumn<Stock>[]>(() => [
+    { id: 'symbol', header: 'Stock',
+      cell: s => <SymbolCell symbol={s?.symbol ?? ''} name={s?.name ?? ''} sector={s?.sector ?? ''} /> },
+    { id: 'price', header: 'LTP', align: 'right', mono: true, cell: s => inr(s?.price ?? 0) },
+    { id: 'change', header: 'Change', align: 'right',
+      cell: s => <Delta value={s?.change ?? 0} size={13} showIcon={false} /> },
+    { id: 'signal', header: 'Signal', sortable: false, cell: s => <SignalBadge signal={s?.signal} /> },
+  ], []);
 
   return (
     <div className="flex flex-col dgap animate-page-in">
@@ -197,20 +197,16 @@ export default function MarketPage() {
               ? <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M21 11V7h-4"/></svg>
               : <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 7l6 6 4-4 8 8"/><path d="M21 13v4h-4"/></svg>
             }>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-[13px]">
-                <thead>
-                  <tr>
-                    {['Stock', 'LTP', 'Change', 'Signal'].map((h, i) => (
-                      <th key={h} style={{ ...thS, textAlign: i >= 1 && i <= 2 ? 'right' : 'left' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading ? <SkeletonRows cols={4} rows={5} /> : ((list as Stock[]) ?? []).map(s => stockRow(s))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={stockCols}
+              data={(list as Stock[]) ?? []}
+              isLoading={loading}
+              isFetching={isFetching}
+              skeletonRows={5}
+              getRowId={s => s?.symbol ?? ''}
+              onRowClick={s => navigate(`/stocks/${encodeURIComponent(s?.symbol ?? '')}`)}
+              emptyMessage={`No ${isGain ? 'gainers' : 'losers'} to show.`}
+            />
           </Card>
         ))}
       </div>
@@ -218,12 +214,3 @@ export default function MarketPage() {
     </div>
   );
 }
-
-const thS: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase',
-  color: 'var(--text-3)', padding: 'calc(11px * var(--u)) 14px', borderBottom: '1px solid var(--border)',
-  whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1,
-};
-const tdS: React.CSSProperties = {
-  padding: 'calc(12px * var(--u)) 14px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
-};

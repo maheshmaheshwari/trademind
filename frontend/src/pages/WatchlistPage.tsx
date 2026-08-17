@@ -9,7 +9,7 @@ import {
   useAddToWatchlistMutation,
   useGetStocksQuery,
 } from '../services/tradeMindApiService';
-import { SignalBadge, SymbolCell, Conf, Skeleton, DataTable, type DataTableColumn } from '../components/ui';
+import { SignalBadge, SymbolCell, Conf, Skeleton, DataTable, priceColumns, type DataTableColumn } from '../components/ui';
 import { Sparkline } from '../components/Charts';
 
 import type { WatchlistItem } from '../types';
@@ -143,13 +143,20 @@ export default function WatchlistPage() {
   const watchCols = useMemo<DataTableColumn<WatchlistItem>[]>(() => [
     { id: 'symbol', header: 'Stock',
       cell: i => <SymbolCell symbol={i?.symbol ?? ''} name={i?.name ?? ''} sector={i?.sector ?? ''} showSector={false} /> },
-    { id: 'price', header: 'LTP', align: 'right', mono: true, cell: i => inr(i?.price ?? 0) },
     { id: 'change', header: 'Change', align: 'right',
       cell: i => (
         <span className="font-mono font-semibold tabular-nums text-[12.5px]" style={{ color: (i?.change ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
           {(i?.change ?? 0) >= 0 ? '+' : ''}{(i?.change ?? 0).toFixed(2)}%
         </span>
       ) },
+    // A watched stock is not held, so these are the model's levels for it and
+    // Sell is always the projected target.
+    ...priceColumns<WatchlistItem>({
+      entry:    i => i?.buy_price,
+      current:  i => i?.price,
+      target:   i => i?.target_price,
+      stopLoss: i => i?.stop_loss,
+    }),
     { id: 'signal', header: 'Signal', cell: i => <SignalBadge signal={i?.signal} /> },
     { id: 'confidence', header: 'Confidence',
       cell: i => <div className="min-w-[110px]"><Conf value={i?.confidence ?? 0} /></div> },

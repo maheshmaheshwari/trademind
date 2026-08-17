@@ -355,18 +355,10 @@ async def api_get_orders(
     start = page * size
     paginated = orders[start:start + size]
 
-    # Overlay the current market price so an order row can be read against where
-    # the stock trades now, not only the price it filled at. get_latest_close_map
-    # is the app's single definition of "current price" — the same number
-    # /api/stocks serves — so an order and its position agree on screen.
-    #
-    # Done AFTER pagination deliberately: only the symbols on this page are
-    # looked up, not the user's whole order history.
-    if paginated:
-        from database.db import get_latest_close_map
-        close_map = get_latest_close_map(sorted({o["symbol"] for o in paginated if o.get("symbol")}))
-        for o in paginated:
-            o["current_price"] = close_map.get(o.get("symbol"))
+    # Attach current price + the row's bracket levels (entry / stop / target /
+    # sale). After pagination deliberately, so only this page is looked up.
+    from trading.trading_engine import enrich_orders
+    enrich_orders(paginated)
 
     return {"user_id": user_id, "data": paginated, "orders": paginated,
             "total": total, "page": page, "size": size, "count": total}

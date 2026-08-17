@@ -192,9 +192,16 @@ class OrderOut(BaseModel):
     order_type: Optional[str] = None       # BUY / SELL
     order_purpose: Optional[str] = None    # ENTRY / STOP_LOSS / TARGET / SQUARE_OFF
     quantity: Optional[int] = None
-    price: Optional[float] = None          # the limit the order was placed at
-    fill_price: Optional[float] = None     # what it actually filled at — the cost basis
+    price: Optional[float] = None          # the limit this leg was placed at
+    fill_price: Optional[float] = None     # what this leg actually filled at
     current_price: Optional[float] = None  # latest close, overlaid by the route
+    # The bracket's levels, repeated on every leg so one row describes the whole
+    # trade (see trading_engine.get_bracket_levels).
+    entry_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    target_price: Optional[float] = None
+    sell_price: Optional[float] = None     # actual sale; None while still open
+    sold: Optional[bool] = None            # True when sell_price is a fill, not a projection
     value: Optional[float] = None
     status: Optional[str] = None
     pnl: Optional[float] = None
@@ -418,6 +425,15 @@ class WatchlistItemOut(BaseModel):
     alert_above: Optional[float] = None
     alert_below: Optional[float] = None
     added_at: AnyDate = None
+    # Joined on by get_watchlist — the watchlist table itself holds none of this.
+    price: Optional[float] = None
+    signal: Optional[str] = None
+    confidence: Optional[float] = None
+    horizon: Optional[str] = None
+    expReturn: Optional[float] = None
+    buy_price: Optional[float] = None
+    target_price: Optional[float] = None
+    stop_loss: Optional[float] = None
 
 
 class WatchlistOut(BaseModel):

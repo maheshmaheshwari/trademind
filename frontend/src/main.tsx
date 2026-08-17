@@ -1,8 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
-import { LocalizationProvider } from '@mui/x-date-pickers';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { store } from './app/store';
 import './index.css';
@@ -23,12 +21,15 @@ async function prepare() {
 prepare().then(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
+      {/* No LocalizationProvider: nothing renders a MUI date picker. It only
+          existed for DatePickerInput/DateRangeInput, which nothing imported,
+          and it put all of @mui/x-date-pickers on the first-paint critical
+          path. Re-add it if you ever enable MRT's date column filters
+          (DataTable sets enableColumnFilters: false) or add a picker. */}
       <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-        <LocalizationProvider dateAdapter={AdapterDayjs}>
-          <Provider store={store}>
-            <App />
-          </Provider>
-        </LocalizationProvider>
+        <Provider store={store}>
+          <App />
+        </Provider>
       </GoogleOAuthProvider>
     </StrictMode>,
   );

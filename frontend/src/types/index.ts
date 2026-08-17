@@ -21,6 +21,7 @@ export interface Stock {
   high52: number;
   low52: number;
   pe: number;
+  buy_price?: number;        // the signal's recommended entry
   target_price?: number;     // from trade signal
   stop_loss?: number;        // from trade signal
   risk_reward?: number;      // reward:risk ratio from trade signal
@@ -30,6 +31,8 @@ export interface Holding extends Stock {
   quantity: number;
   avg_buy_price: number;   // avg entry price
   current_price: number;   // current market price
+  target_price?: number;   // the projected sell price while the position is open
+  stop_loss?: number;
   invested_amount: number;
   current_value: number;
   unrealized_pnl: number;
@@ -56,9 +59,16 @@ export interface Trade {
   order_type: 'BUY' | 'SELL' | 'LIMIT' | 'MARKET';
   order_purpose?: string;
   quantity: number;
-  price: number;                    // the limit the order was placed at
-  fill_price?: number | null;       // what it actually filled at — the cost basis
+  price: number;                    // the limit this leg was placed at
+  fill_price?: number | null;       // what this leg actually filled at
   current_price?: number | null;    // latest close, overlaid by /api/trading/orders
+  // The bracket's levels, repeated on every leg so one row describes the whole
+  // trade. See trading_engine.get_bracket_levels.
+  entry_price?: number | null;
+  stop_loss?: number | null;
+  target_price?: number | null;
+  sell_price?: number | null;       // actual sale; null while still open
+  sold?: boolean | null;            // true when sell_price is a fill, not a projection
   value: number | null;
   created_at: string;
   pnl: number | null;
@@ -74,6 +84,14 @@ export interface GTTOrder {
   trigger: number;
   ltp: number;
   qty: number;
+  // Bracket levels overlaid by /api/orders/gtt — a rule on its own is only a
+  // trigger, with nothing to read it against.
+  entry_price?: number | null;
+  current_price?: number | null;
+  target_price?: number | null;
+  stop_loss?: number | null;
+  sell_price?: number | null;
+  sold?: boolean | null;
   status: 'ACTIVE' | 'TRIGGERED' | 'EXPIRED';
   created: string;
 }

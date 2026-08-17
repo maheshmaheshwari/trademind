@@ -687,6 +687,57 @@ class TestOrders:
         assert o["fill_price"] == pytest.approx(380.0), "fill_price is what it actually filled at"
         assert o["current_price"] == pytest.approx(380.0), "current_price must be overlaid by the route"
 
+    def test_orders_carry_bracket_levels_and_sell_price(self, api_client):
+        """Each order row carries its whole BRACKET's four prices, not just its
+        own leg's. A SELL leg's `price` is a trigger, so without this a stop-loss
+        row would show a number with no entry to read it against.
+
+        Also pins the sold-vs-projected distinction: sell_price stays None while
+        the trade is open (the UI then shows the target as a projection) and
+        becomes a real number only once a SQUARE_OFF actually executes."""
+        from database.db import get_connection, release_connection, _execute
+        from datetime import datetime
+
+        token, user_id = _register(api_client, "bracketlevels")
+
+        conn = get_connection()
+        try:
+            _execute(conn,
+                "INSERT INTO prices (symbol, date, open, high, low, close, volume, interval) "
+                "VALUES (?,?,?,?,?,?,?,'1d') ON CONFLICT DO NOTHING",
+                ("BRKT.NS", datetime.now().strftime("%Y-%m-%d"), 500.0, 500.0, 500.0, 500.0, 10000))
+            conn.commit()
+        finally:
+            release_connection(conn)
+
+        _execute_trade(api_client, token, user_id, "BRKT.NS", 50000.0, 500.0)
+
+        rows = api_client.get(f"/api/trading/orders/{user_id}", headers=_h(token)).json()["data"]
+        brkt = [o for o in rows if o["symbol"] == "BRKT.NS"]
+        assert len(brkt) == 3, "bracket should be ENTRY + STOP_LOSS + TARGET"
+
+        # EVERY leg carries the same four levels, including the SELL legs.
+        for o in brkt:
+            assert o["entry_price"] == pytest.approx(500.0)
+            assert o["target_price"] == pytest.approx(550.0)
+            assert o["stop_loss"] == pytest.approx(475.0)
+            assert o["current_price"] == pytest.approx(500.0)
+            assert o["sell_price"] is None, "nothing is sold yet — must not fall back to the target"
+            assert o["sold"] is False
+
+        # Close it, and the sale price becomes real on every leg of the bracket.
+        resp = api_client.post(f"/api/trading/square-off/{user_id}/BRKT.NS", json={}, headers=_h(token))
+        assert resp.status_code == 200, resp.text
+
+        rows = api_client.get(f"/api/trading/orders/{user_id}", headers=_h(token)).json()["data"]
+        brkt = [o for o in rows if o["symbol"] == "BRKT.NS"]
+        squared = [o for o in brkt if o.get("order_purpose") == "SQUARE_OFF"]
+        assert squared, "square-off leg should exist"
+        for o in brkt:
+            assert o["sold"] is True
+            assert o["sell_price"] is not None
+            assert o["sell_price"] != o["target_price"] or o["sell_price"] == pytest.approx(500.0)
+
     def test_orders_globalfilter(self, api_client):
         token, user_id = _register(api_client, "ordersfilttest")
         _execute_trade(api_client, token, user_id, "FILTORD.NS", 10000.0, 250.0)
@@ -865,7 +916,86 @@ class TestAnalytics:
 # WATCHLIST  (/api/users/{id}/watchlist)
 # ===========================================================================
 
+class TestMarketOverview:
+    """/api/market/overview had no test at all — only /api/market/status did."""
+
+    def test_gainers_carry_signal_levels(self, api_client):
+        """Gainer/loser rows carry the model's entry/target/stop, which the four
+        price columns render. _sig_to_stock used to drop them even though the
+        signal rows it maps already had them."""
+        from datetime import datetime
+        from database.db import get_connection, release_connection, _execute
+        import api.server as server
+
+        token, _ = _register(api_client, "mktlevels")
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        conn = get_connection()
+        try:
+            _execute(conn,
+                "INSERT INTO trade_signals (symbol, name, signal, confidence, buy_price, "
+                "target_price, stop_loss, current_price, expected_return_pct, model_horizon, "
+                "generated_date, generated_at, is_active) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,TRUE) ON CONFLICT DO NOTHING",
+                ("MKTLV.NS", "Mkt Levels Ltd.", "STRONG BUY", 95.0, 400.0, 440.0, 380.0,
+                 410.0, 10.0, "1 Month", today, datetime.now()))
+            conn.commit()
+        finally:
+            release_connection(conn)
+
+        # The route memoises for 120s in a module-level dict, so a prior test's
+        # payload would otherwise be served instead of this one.
+        server._cache.pop("market_overview_v2", None)
+
+        body = api_client.get("/api/market/overview", headers=_h(token)).json()
+        row = next((g for g in body.get("gainers", []) if g["symbol"] == "MKTLV.NS"), None)
+        assert row is not None, f"seeded signal missing from gainers: {body.get('gainers')}"
+        assert row["buy_price"] == pytest.approx(400.0)
+        assert row["target_price"] == pytest.approx(440.0)
+        assert row["stop_loss"] == pytest.approx(380.0)
+
+
 class TestWatchlist:
+    def test_watchlist_rows_carry_price_and_signal_levels(self, api_client):
+        """The watchlist table stores only (symbol, alerts, added_at). Everything
+        the screen shows about a stock — price, signal, and the entry/target/stop
+        the price columns render — is joined on in get_watchlist. Without it the
+        page renders blanks and ₹0.00 for every name."""
+        from datetime import datetime
+        from database.db import get_connection, release_connection, _execute
+
+        token, user_id = _register(api_client, "wlenrich")
+        headers = _h(token)
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        conn = get_connection()
+        try:
+            _execute(conn,
+                "INSERT INTO prices (symbol, date, open, high, low, close, volume, interval) "
+                "VALUES (?,?,?,?,?,?,?,'1d') ON CONFLICT DO NOTHING",
+                ("WLTEST.NS", today, 610.0, 610.0, 610.0, 610.0, 10000))
+            _execute(conn,
+                "INSERT INTO trade_signals (symbol, name, signal, confidence, buy_price, "
+                "target_price, stop_loss, expected_return_pct, model_horizon, "
+                "generated_date, generated_at, is_active) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,TRUE) ON CONFLICT DO NOTHING",
+                ("WLTEST.NS", "WL Test Ltd.", "BUY", 88.0, 600.0, 660.0, 570.0, 10.0,
+                 "1 Month", today, datetime.now()))
+            conn.commit()
+        finally:
+            release_connection(conn)
+
+        assert api_client.post(f"/api/users/{user_id}/watchlist/WLTEST.NS", headers=headers).status_code == 201
+
+        row = api_client.get(f"/api/users/{user_id}/watchlist", headers=headers).json()["data"][0]
+        assert row["symbol"] == "WLTEST.NS"
+        assert row["price"] == pytest.approx(610.0), "current price must be joined from prices"
+        assert row["buy_price"] == pytest.approx(600.0)
+        assert row["target_price"] == pytest.approx(660.0)
+        assert row["stop_loss"] == pytest.approx(570.0)
+        assert row["signal"] == "BUY"
+        assert row["confidence"] == pytest.approx(88.0)
+
     def test_add_get_remove(self, api_client):
         token, user_id = _register(api_client, "wlapitest")
         headers = _h(token)
@@ -1050,6 +1180,52 @@ class TestOrdersGtt:
         _, other_id = _register(api_client, "gttbyuidvictim")
         resp = api_client.get(f"/api/orders/gtt/{other_id}", headers=_h(token))
         assert resp.status_code == 403
+
+    def test_gtt_rows_carry_bracket_levels(self, api_client):
+        """The GTT list gets the same four prices as the order history.
+
+        Every other test in this class runs against an EMPTY list — PAPER mode
+        never sets gtt_rule_id (only LIVE does, and LIVE is blocked), so nothing
+        exercised the enrichment on this route. Seeds a bracket with a GTT rule
+        directly, the way a LIVE trade would leave one behind.
+        """
+        from datetime import datetime
+        from database.db import get_connection, release_connection, _execute
+
+        token, user_id = _register(api_client, "gttlevels")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        bracket = "BRK_GTTTEST"
+
+        conn = get_connection()
+        try:
+            for purpose, otype, price, trigger, fill, gtt in [
+                ("ENTRY",     "BUY",  700.0, None,  695.0, None),
+                ("STOP_LOSS", "SELL", 665.0, 665.0, None,  "9001"),
+                ("TARGET",    "SELL", 770.0, 770.0, None,  "9002"),
+            ]:
+                _execute(conn,
+                    "INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, "
+                    "order_purpose, quantity, price, trigger_price, fill_price, status, mode, "
+                    "gtt_rule_id, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'LIVE',?,?,?)",
+                    (user_id, bracket, "GTTLV.NS", "GTT Levels Ltd.", otype, purpose,
+                     10, price, trigger, fill, "PENDING", gtt, now, now))
+            _execute(conn,
+                "INSERT INTO prices (symbol, date, open, high, low, close, volume, interval) "
+                "VALUES (?,?,?,?,?,?,?,'1d') ON CONFLICT DO NOTHING",
+                ("GTTLV.NS", datetime.now().strftime("%Y-%m-%d"), 710.0, 710.0, 710.0, 710.0, 1000))
+            conn.commit()
+        finally:
+            release_connection(conn)
+
+        rows = api_client.get(f"/api/orders/gtt?user_id={user_id}", headers=_h(token)).json()["data"]
+        assert len(rows) == 2, "only the two legs with a gtt_rule_id are GTT rules"
+        for r in rows:
+            assert r["entry_price"] == pytest.approx(695.0), "the ENTRY leg's fill, not this leg's trigger"
+            assert r["stop_loss"] == pytest.approx(665.0)
+            assert r["target_price"] == pytest.approx(770.0)
+            assert r["current_price"] == pytest.approx(710.0)
+            assert r["sold"] is False and r["sell_price"] is None
 
     def test_gtt_sync(self, api_client):
         token, _ = _register(api_client, "gttsynctest")

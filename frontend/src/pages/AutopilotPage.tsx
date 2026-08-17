@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BrainCircuit, Settings, CheckCircle, Clock, AlertCircle, Activity, TrendingUp, Target, Wallet, ChevronRight } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/ui';
-import { Card, SignalBadge, Skeleton, SymbolCell, DataTable, type DataTableColumn } from '../components/ui';
+import { Card, SignalBadge, Skeleton, SymbolCell, DataTable, priceColumns, type DataTableColumn } from '../components/ui';
 import { RiskReward } from '../components/ui';
 import {
   useGetAutopilotStatusQuery, useToggleAutopilotMutation,
@@ -248,39 +248,16 @@ export default function AutopilotPage() {
     { id: 'amount', header: 'Authorized \u20B9', align: 'right', mono: true,
       cell: t => <span className="font-semibold text-ink">{inr(t?.amount, 0)}</span> },
     { id: 'qty', header: 'Qty', align: 'right', mono: true, cell: t => t?.qty },
-    // Leads with the FILL, because that is the cost basis the P&L column is
-    // measured from. The authorized price sits underneath whenever the two
-    // differ — a buy limit fills at the market when the market is cheaper, and
-    // hiding that makes the row look like it disagrees with the signal. Two
-    // decimals: on a sub-\u20B920 stock the gap rounds away entirely at zero.
-    { id: 'entry', header: 'Entry \u2192 Target', align: 'right', mono: true,
-      accessor: t => costBasis(t) ?? undefined,
-      cell: t => {
-        const basis = costBasis(t);
-        return (
-          <div className="flex flex-col items-end leading-tight text-[12px]">
-            <div>
-              <span className="text-ink-2">{inr(basis ?? t?.entry)}</span>
-              <span className="text-ink-3"> \u2192 </span>
-              <span className="text-gain">{inr(t?.target)}</span>
-            </div>
-            {t?.fill_price != null && t?.entry != null && t.fill_price !== t.entry && (
-              <span className="text-[10.5px] text-ink-3 mt-0.5">auth {inr(t.entry)}</span>
-            )}
-          </div>
-        );
-      } },
-    // CMP is only a live market price while the mandate is open — for a closed
-    // one it is whatever the price was when it closed.
-    { id: 'cmp', header: 'CMP', align: 'right', mono: true,
-      cell: t => {
-        const basis = costBasis(t);
-        const isOpen = t?.status === 'EXECUTED' || t?.status === 'PENDING';
-        const cmpColor = t?.cmp != null && basis != null ? (t.cmp >= basis ? 'text-gain' : 'text-loss') : 'text-ink';
-        return isOpen && t?.cmp != null
-          ? <span className={cmpColor}>{inr(t.cmp)}</span>
-          : <span className="text-ink-3">\u2014</span>;
-      } },
+    // costBasis() is the fill where we have one, else the authorized entry —
+    // a buy limit fills at the market when the market is cheaper. A mandate
+    // that has been squared off reports its realised price via actual_pnl
+    // rather than a stored sell price, so Sell stays the projected target here.
+    ...priceColumns<AuthorizedTrade>({
+      entry:    t => costBasis(t),
+      current:  t => (t?.status === 'EXECUTED' || t?.status === 'PENDING') ? t?.cmp : null,
+      target:   t => t?.target,
+      stopLoss: t => t?.sl,
+    }),
     { id: 'exp_profit', header: 'Exp. Profit', align: 'right', mono: true,
       cell: t => <span className="font-semibold text-gain">+{inr(t?.exp_profit, 0)}</span> },
     { id: 'max_loss', header: 'Max Loss', align: 'right', mono: true,

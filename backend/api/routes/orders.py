@@ -34,6 +34,11 @@ async def get_gtt_orders(user_id: Optional[int] = Query(default=None), user=Depe
             "SELECT * FROM orders WHERE gtt_rule_id IS NOT NULL AND user_id = ? ORDER BY created_at DESC",
             (effective_user_id,))
         rows = _rows_to_dicts(cur)
+        # Same four prices the order-history table shows — a GTT rule is a leg
+        # of a bracket, so on its own it has a trigger and nothing to read it
+        # against.
+        from trading.trading_engine import enrich_orders
+        enrich_orders(rows)
         return {"data": rows, "total": len(rows)}
     finally:
         release_connection(conn)
@@ -50,6 +55,8 @@ async def get_user_gtt_orders(user_id: int, user=Depends(get_current_user)):
             "SELECT * FROM orders WHERE gtt_rule_id IS NOT NULL AND user_id = ? ORDER BY created_at DESC",
             (user_id,))
         rows = _rows_to_dicts(cur)
+        from trading.trading_engine import enrich_orders
+        enrich_orders(rows)
         return {"data": rows, "total": len(rows), "user_id": user_id}
     finally:
         release_connection(conn)

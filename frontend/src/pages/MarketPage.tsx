@@ -1,15 +1,12 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGetMarketOverviewQuery, useGetMarketSectorsQuery } from '../services/tradeMindApiService';
-import { Card, SignalBadge, Delta, Skeleton, SymbolCell, DataTable, type DataTableColumn } from '../components/ui';
+import { Card, SignalBadge, Delta, Skeleton, SymbolCell, DataTable, priceColumns, type DataTableColumn } from '../components/ui';
 import { FlowBars, Sparkline } from '../components/Charts';
 
 import type { IndexData, FIIDIIBar, HeatmapSector, Breadth, Stock } from '../types';
 
 function pct(n: number) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
-function inr(n: number, dec = 2) {
-  return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
-}
 function heatColor(c: number) {
   const a = Math.min(Math.abs(c) / 3.5, 1);
   return c >= 0 ? `rgba(16,185,129,${(.12 + a * .5).toFixed(2)})` : `rgba(239,68,68,${(.12 + a * .5).toFixed(2)})`;
@@ -84,9 +81,16 @@ export default function MarketPage() {
   const stockCols = useMemo<DataTableColumn<Stock>[]>(() => [
     { id: 'symbol', header: 'Stock',
       cell: s => <SymbolCell symbol={s?.symbol ?? ''} name={s?.name ?? ''} sector={s?.sector ?? ''} /> },
-    { id: 'price', header: 'LTP', align: 'right', mono: true, cell: s => inr(s?.price ?? 0) },
     { id: 'change', header: 'Change', align: 'right',
       cell: s => <Delta value={s?.change ?? 0} size={13} showIcon={false} /> },
+    // Nobody holds these rows, so the levels are the model's recommendation for
+    // the stock and Sell is always a projection.
+    ...priceColumns<Stock>({
+      entry:    s => s?.buy_price,
+      current:  s => s?.price,
+      target:   s => s?.target_price,
+      stopLoss: s => s?.stop_loss,
+    }),
     { id: 'signal', header: 'Signal', sortable: false, cell: s => <SignalBadge signal={s?.signal} /> },
   ], []);
 

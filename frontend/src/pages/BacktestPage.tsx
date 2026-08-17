@@ -6,7 +6,7 @@ import { useGetBacktestSummaryQuery, useGetStrategyBacktestQuery } from '../serv
 import {
   Brain, TrendingUp, Target, Zap, CheckCircle, AlertCircle,
 } from 'lucide-react';
-import { DataTable, type DataTableColumn } from '../components/ui';
+import { DataTable, priceColumns, type DataTableColumn } from '../components/ui';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -78,10 +78,6 @@ function inrCompact(n: number) {
   return '₹' + Math.round(n).toLocaleString('en-IN');
 }
 
-function inr(n: number | null | undefined, dec = 2) {
-  if (n == null) return '—';
-  return '₹' + n?.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
-}
 
 function StrategyBacktest({ isDark }: { isDark: boolean }) {
   const { data, isLoading } = useGetStrategyBacktestQuery();
@@ -238,8 +234,14 @@ export default function BacktestPage() {
           {t?.name && <div className="text-[11px] text-ink-3 truncate max-w-[120px]">{t?.name}</div>}
         </div>
       ) },
-    { id: 'current_price', header: 'CMP', align: 'right', mono: true,
-      cell: t => <span className="text-ink-2">{t?.current_price != null ? inr(t.current_price) : '\u2014'}</span> },
+    // Same four prices as everywhere else; these are live signal rows, so Sell
+    // is the projected target.
+    ...priceColumns<Record<string, any>>({
+      entry:    t => t?.buy_price,
+      current:  t => t?.current_price,
+      target:   t => t?.target_price,
+      stopLoss: t => t?.stop_loss,
+    }),
     { id: 'signal', header: 'Signal',
       cell: t => {
         const sigColor = SIGNAL_COLORS[t?.signal ?? ''] ?? '#3B82F6';

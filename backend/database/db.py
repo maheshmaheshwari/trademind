@@ -1177,10 +1177,61 @@ def get_signal_history(limit: int = 30) -> List[Dict]:
 # ---------------------------------------------------------------------------
 
 def get_watchlist(user_id: int) -> List[Dict]:
+    """
+    Watchlist rows enriched with the stock's current price and the model's
+    active recommendation for it.
+
+    The `watchlist` table holds only (symbol, alerts, added_at) — everything the
+    watchlist screen shows about a stock (price, signal, confidence, horizon,
+    and the entry/target/stop levels the price columns render) has to be joined
+    on. Without this the page renders a row of blanks and ₹0.00 for every name.
+
+    A symbol carries one active signal PER horizon, so "the" signal is
+    ambiguous; the most confident one wins, then the most recent. Picked in
+    Python rather than with DISTINCT ON so the query stays portable to the
+    SQLite fallback.
+    """
     conn = get_connection()
     try:
         cur = _execute(conn, "SELECT * FROM watchlist WHERE user_id = ? ORDER BY added_at DESC", (user_id,))
-        return _rows_to_dicts(cur)
+        rows = _rows_to_dicts(cur)
+        if not rows:
+            return rows
+
+        symbols = sorted({r["symbol"] for r in rows if r.get("symbol")})
+        if not symbols:
+            return rows
+
+        close_map = get_latest_close_map(symbols, conn=conn)
+
+        placeholders = ",".join("?" for _ in symbols)
+        cur = _execute(conn, f"""
+            SELECT symbol, signal, confidence, model_horizon,
+                   buy_price, target_price, stop_loss, expected_return_pct,
+                   generated_date
+            FROM trade_signals
+            WHERE symbol IN ({placeholders}) AND is_active = TRUE
+        """, tuple(symbols))
+        best: Dict[str, Dict] = {}
+        for sig in _rows_to_dicts(cur):
+            cur_best = best.get(sig["symbol"])
+            if cur_best is None or (
+                (sig.get("confidence") or 0, str(sig.get("generated_date") or "")) >
+                (cur_best.get("confidence") or 0, str(cur_best.get("generated_date") or ""))
+            ):
+                best[sig["symbol"]] = sig
+
+        for r in rows:
+            sig = best.get(r.get("symbol")) or {}
+            r["price"]        = close_map.get(r.get("symbol"))
+            r["signal"]       = sig.get("signal")
+            r["confidence"]   = sig.get("confidence")
+            r["horizon"]      = sig.get("model_horizon")
+            r["expReturn"]    = sig.get("expected_return_pct")
+            r["buy_price"]    = sig.get("buy_price")
+            r["target_price"] = sig.get("target_price")
+            r["stop_loss"]    = sig.get("stop_loss")
+        return rows
     finally:
         release_connection(conn)
 

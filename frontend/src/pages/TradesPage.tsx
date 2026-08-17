@@ -8,7 +8,7 @@ import {
   useGetGTTOrdersQuery, useSyncGTTMutation, useGetUserSignalHistoryQuery,
   useAuthorizeTradeAutoMutation, useGetAuthorizedTradesQuery,
 } from '../services/tradeMindApiService';
-import { Card, SymbolCell, SignalBadge, DataTable, type DataTableColumn } from '../components/ui';
+import { Card, SymbolCell, SignalBadge, DataTable, priceColumns, type DataTableColumn } from '../components/ui';
 
 import type { OpenPosition, Trade, GTTOrder } from '../types';
 
@@ -143,12 +143,14 @@ export default function TradesPage() {
       ) },
     { id: 'quantity', header: 'Qty', align: 'right', mono: true,
       cell: p => <span className="text-ink-2">{p?.quantity ?? '\u2014'}</span> },
-    { id: 'avg_buy_price', header: 'Entry', align: 'right', mono: true, cell: p => inr(p?.avg_buy_price ?? 0) },
-    { id: 'stop_loss', header: 'SL', align: 'right', mono: true,
-      cell: p => <span className="text-loss">{inr(p?.stop_loss ?? 0)}</span> },
-    { id: 'target_price', header: 'Target', align: 'right', mono: true,
-      cell: p => <span className="text-gain">{inr(p?.target_price ?? 0)}</span> },
-    { id: 'current_price', header: 'CMP', align: 'right', mono: true, cell: p => inr(p?.current_price ?? 0) },
+    // An open position is by definition unsold, so the Sell column always shows
+    // the target as a projection here.
+    ...priceColumns<OpenPosition>({
+      entry:    p => p?.avg_buy_price,
+      current:  p => p?.current_price,
+      target:   p => p?.target_price,
+      stopLoss: p => p?.stop_loss,
+    }),
     { id: 'unrealized_pnl', header: 'P&L', align: 'right',
       cell: p => (
         <div className="flex flex-col items-end">
@@ -211,16 +213,16 @@ export default function TradesPage() {
     { id: 'order_type', header: 'Type', sortable: false,
       cell: t => <Pill color={t?.order_type === 'BUY' ? 'var(--green)' : 'var(--red)'} bg={t?.order_type === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)'}>{t?.order_type}</Pill> },
     { id: 'quantity', header: 'Qty', align: 'right', mono: true, cell: t => t?.quantity },
-    // Entry is the FILL, not the limit — the two differ whenever a buy limit
-    // filled into a cheaper market. Falls back to `price` for orders written
-    // before fill_price was recorded.
-    { id: 'price', header: 'Entry', align: 'right', mono: true,
-      accessor: t => t?.fill_price ?? t?.price ?? 0,
-      cell: t => inr(t?.fill_price ?? t?.price ?? 0) },
-    { id: 'current_price', header: 'CMP', align: 'right', mono: true,
-      cell: t => t?.current_price != null
-        ? <span className="text-ink-2">{inr(t.current_price)}</span>
-        : <span className="text-ink-3">\u2014</span> },
+    // These are per-LEG rows, so the levels come from the row's bracket (the
+    // route overlays them) rather than from the leg itself — a SELL leg's own
+    // price is a trigger, not an entry.
+    ...priceColumns<Trade>({
+      entry:    t => t?.entry_price,
+      current:  t => t?.current_price,
+      sold:     t => (t?.sold ? t?.sell_price : null),
+      target:   t => t?.target_price,
+      stopLoss: t => t?.stop_loss,
+    }),
     { id: 'value', header: 'Value', align: 'right', mono: true,
       cell: t => <span className="text-ink-2">{inrCompact(t?.value ?? 0)}</span> },
     { id: 'pnl', header: 'P&L', align: 'right', mono: true,
@@ -241,8 +243,16 @@ export default function TradesPage() {
       cell: g => <Pill color={g?.side === 'BUY' ? 'var(--green)' : 'var(--red)'} bg={g?.side === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)'}>{g?.side}</Pill> },
     { id: 'trigger', header: 'Trigger', align: 'right', mono: true,
       cell: g => <span className="font-semibold">{inr(g?.trigger ?? 0)}</span> },
-    { id: 'ltp', header: 'LTP', align: 'right', mono: true,
-      cell: g => <span className="text-ink-2">{inr(g?.ltp ?? 0)}</span> },
+    // A GTT rule is one leg of a bracket, so it carries the same four prices
+    // as every other order row. `current` prefers the broker's live LTP over
+    // the stored close when Angel One has given us one.
+    ...priceColumns<GTTOrder>({
+      entry:    g => g?.entry_price,
+      current:  g => (g?.ltp || g?.current_price),
+      sold:     g => (g?.sold ? g?.sell_price : null),
+      target:   g => g?.target_price,
+      stopLoss: g => g?.stop_loss,
+    }),
     { id: 'qty', header: 'Qty', align: 'right', mono: true, cell: g => g?.qty },
     { id: 'created', header: 'Created', cell: g => <span className="text-[12.5px] text-ink-3">{g?.created}</span> },
     { id: 'status', header: 'Status', align: 'right',
@@ -267,13 +277,14 @@ export default function TradesPage() {
           {s?.model_horizon ?? '\u2014'}
         </span>
       ) },
-    { id: 'buy_price', header: 'Buy Price', align: 'right', mono: true, cell: s => s?.buy_price ? inr(s.buy_price) : '\u2014' },
-    { id: 'target_price', header: 'Target', align: 'right', mono: true,
-      cell: s => <span className="text-gain">{s?.target_price ? inr(s.target_price) : '\u2014'}</span> },
-    { id: 'stop_loss', header: 'SL', align: 'right', mono: true,
-      cell: s => <span className="text-loss">{s?.stop_loss ? inr(s.stop_loss) : '\u2014'}</span> },
-    { id: 'current_price', header: 'CMP', align: 'right', mono: true,
-      cell: s => s?.current_price != null ? inr(s.current_price) : '\u2014' },
+    // A signal is a recommendation, never a holding, so there is no realised
+    // sale to show — the Sell column is always the projected target here.
+    ...priceColumns<Record<string, any>>({
+      entry:    s => s?.buy_price,
+      current:  s => s?.current_price,
+      target:   s => s?.target_price,
+      stopLoss: s => s?.stop_loss,
+    }),
     { id: 'traded_at', header: 'Traded At',
       accessor: s => s?.traded_at ? new Date(s.traded_at).getTime() : 0,
       cell: s => (

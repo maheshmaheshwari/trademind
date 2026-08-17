@@ -5,7 +5,7 @@ import { useGetAllSignalsQuery } from '../services/tradeMindApiService';
 import type { AllSignal } from '../services/tradeMindApiService';
 import {
   Card, SignalBadge, SymbolCell, Conf, RiskReward, ModelQuality,
-  DataTable, type DataTableColumn,
+  DataTable, priceColumns, type DataTableColumn,
 } from '../components/ui';
 
 const HORIZONS = ['All', '1W', '2W', '1M', '2M', '3M', '6M'] as const;
@@ -19,10 +19,6 @@ const SECTOR_COLORS: Record<string, string> = {
 const PER_PAGE = 12;
 
 function fmtAgo(m: number) { return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`; }
-function inr(n: number | null | undefined, dec = 2) {
-  if (n == null) return '—';
-  return '₹' + n?.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
-}
 
 export default function AISignalsPage() {
   const [search,       setSearch]  = useState('');
@@ -56,7 +52,14 @@ export default function AISignalsPage() {
         <span className="inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold bg-surface-3 border border-line"
           style={{ color: SECTOR_COLORS[s?.sector ?? ''] ?? 'var(--text-2)' }}>{s?.sector}</span>
       ) },
-    { id: 'current_price', header: 'CMP', align: 'right', mono: true, cell: s => inr(s?.current_price) },
+    // A signal is a recommendation, not a holding — there is no realised sale,
+    // so Sell always shows the projected target.
+    ...priceColumns<AllSignal>({
+      entry:    s => s?.buy_price,
+      current:  s => s?.current_price,
+      target:   s => s?.target_price,
+      stopLoss: s => s?.stop_loss,
+    }),
     { id: 'signal', header: 'Signal', sortable: false, cell: s => <SignalBadge signal={s?.signal} /> },
     { id: 'confidence', header: 'Confidence',
       cell: s => <div className="min-w-[130px]"><Conf value={s?.confidence} /></div> },

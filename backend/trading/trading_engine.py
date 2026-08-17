@@ -771,6 +771,98 @@ def get_orders(user_id: int, limit: int = 50) -> List[Dict]:
         release_connection(conn)
 
 
+def get_bracket_levels(bracket_ids: List[str]) -> Dict[str, Dict]:
+    """
+    The four prices that describe a trade, per bracket_id.
+
+    An `orders` row on its own cannot answer "what was this trade?" — a bracket
+    is three or four rows (ENTRY, STOP_LOSS, TARGET, and a SQUARE_OFF once it
+    closes), so a SELL leg carries a trigger price and no entry, and the ENTRY
+    leg carries no target. Callers rendering one row per order need the whole
+    bracket's levels on every row.
+
+    Returns per bracket:
+      entry_price  — what the ENTRY leg filled at (its limit if it predates fill_price)
+      stop_loss    — the STOP_LOSS leg's trigger
+      target_price — the TARGET leg's trigger
+      sell_price   — what it ACTUALLY sold for, or None while still open
+      sold         — True once sell_price is a real execution rather than a projection
+
+    `sell_price` is deliberately None rather than falling back to the target
+    here: "sold at ₹291" and "expected to sell at ₹291" are different claims,
+    and only the caller knows how to show that difference. Collapsing them in
+    the payload would make a projection indistinguishable from a fill.
+    """
+    if not bracket_ids:
+        return {}
+
+    conn = get_connection()
+    try:
+        placeholders = ",".join("?" for _ in bracket_ids)
+        rows = _fetchall(conn, f"""
+            SELECT bracket_id, order_purpose, order_type, status, price, trigger_price, fill_price
+            FROM orders
+            WHERE bracket_id IN ({placeholders})
+        """, tuple(bracket_ids))
+    finally:
+        release_connection(conn)
+
+    levels: Dict[str, Dict] = {
+        b: {"entry_price": None, "stop_loss": None, "target_price": None,
+            "sell_price": None, "sold": False}
+        for b in bracket_ids
+    }
+
+    for bracket_id, purpose, _otype, status, price, trigger_price, fill_price in rows:
+        lv = levels.get(bracket_id)
+        if lv is None:
+            continue
+        if purpose == "ENTRY":
+            lv["entry_price"] = fill_price if fill_price is not None else price
+        elif purpose == "STOP_LOSS":
+            lv["stop_loss"] = trigger_price if trigger_price is not None else price
+        elif purpose == "TARGET":
+            lv["target_price"] = trigger_price if trigger_price is not None else price
+        elif purpose == "SQUARE_OFF" and status == "EXECUTED":
+            # The only leg that represents a real sale. A PENDING SL/TARGET row
+            # is an instruction, not a fill, which is why neither sets this.
+            lv["sell_price"] = fill_price if fill_price is not None else price
+            lv["sold"] = True
+
+    return levels
+
+
+def enrich_orders(rows: List[Dict]) -> List[Dict]:
+    """
+    Attach the four prices every order table renders to each row, in place.
+
+    Adds `current_price` (latest close) plus the row's bracket levels —
+    entry_price / stop_loss / target_price / sell_price / sold. Shared by every
+    route that serves order rows so the columns cannot drift apart between the
+    order history and the GTT list.
+
+    Call this AFTER pagination: it looks up only the symbols and brackets on the
+    rows handed to it, not the user's whole history.
+    """
+    if not rows:
+        return rows
+
+    from database.db import get_latest_close_map
+
+    close_map = get_latest_close_map(sorted({r["symbol"] for r in rows if r.get("symbol")}))
+    levels = get_bracket_levels(sorted({r["bracket_id"] for r in rows if r.get("bracket_id")}))
+
+    for r in rows:
+        r["current_price"] = close_map.get(r.get("symbol"))
+        lv = levels.get(r.get("bracket_id")) or {}
+        r["entry_price"]  = lv.get("entry_price")
+        r["stop_loss"]    = lv.get("stop_loss")
+        r["target_price"] = lv.get("target_price")
+        r["sell_price"]   = lv.get("sell_price")   # None while still open
+        r["sold"]         = lv.get("sold", False)
+    return rows
+
+
 def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str = "MANUAL") -> Dict:
     """trigger: 'STOP_LOSS' | 'TARGET' | 'MANUAL'"""
     """

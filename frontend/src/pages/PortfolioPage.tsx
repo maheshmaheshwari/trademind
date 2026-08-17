@@ -5,7 +5,7 @@ import { useAuth } from '../AuthContext';
 import { useGetPortfolioSummaryQuery, useGetTodayPnlQuery } from '../services/tradeMindApiService';
 import {
   Card, SignalBadge, Delta, Skeleton, SymbolCell,
-  DataTable, type DataTableColumn,
+  DataTable, priceColumns, type DataTableColumn,
 } from '../components/ui';
 import { AreaChart, Donut } from '../components/Charts';
 import { AddPositionModal } from '../components/AddPositionModal';
@@ -17,9 +17,6 @@ function inrCompact(n: number) {
   if (a >= 1e7) return '₹' + (n / 1e7).toFixed(2) + ' Cr';
   if (a >= 1e5) return '₹' + (n / 1e5).toFixed(2) + ' L';
   return '₹' + n.toLocaleString('en-IN');
-}
-function inr(n: number, dec = 2) {
-  return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 }
 
 export default function PortfolioPage() {
@@ -50,8 +47,13 @@ export default function PortfolioPage() {
     { id: 'symbol', header: 'Symbol',
       cell: h => <SymbolCell symbol={h?.symbol ?? ''} name={h?.name ?? ''} sector={h?.sector ?? ''} /> },
     { id: 'quantity', header: 'Qty', align: 'right', mono: true, cell: h => h?.quantity },
-    { id: 'avg_buy_price', header: 'Avg Buy', align: 'right', mono: true, cell: h => inr(h?.avg_buy_price ?? 0) },
-    { id: 'current_price', header: 'CMP', align: 'right', mono: true, cell: h => inr(h?.current_price ?? 0) },
+    // A holding is open by definition, so Sell shows the target as a projection.
+    ...priceColumns<Holding>({
+      entry:    h => h?.avg_buy_price,
+      current:  h => h?.current_price,
+      target:   h => h?.target_price,
+      stopLoss: h => h?.stop_loss,
+    }),
     { id: 'invested_amount', header: 'Invested', align: 'right', mono: true,
       cell: h => <span className="text-ink-2">{inrCompact(h?.invested_amount ?? 0)}</span> },
     { id: 'unrealized_pnl', header: 'P&L', align: 'right', mono: true,

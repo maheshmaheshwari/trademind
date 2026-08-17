@@ -873,6 +873,12 @@ async def market_overview():
             "change":    round(s.get("expected_return_pct") or 0, 2),
             "signal":    s.get("signal", ""),
             "confidence": round(s.get("confidence") or 0, 4),
+            # The model's recommended levels. Nobody holds these rows, so there
+            # is no fill to show — the four price columns render the signal's
+            # entry/target/stop, with the target always a projection.
+            "buy_price":    s.get("buy_price"),
+            "target_price": s.get("target_price"),
+            "stop_loss":    s.get("stop_loss"),
         }
 
     gainers = [_sig_to_stock(s) for s in get_top_signals("BUY",  limit=5)]

@@ -9,7 +9,7 @@ import {
   useGetOrdersQuery, useGetPositionsQuery, useGetMarketOverviewQuery, useRefreshSignalsMutation,
   useAddToWatchlistMutation,
 } from '../services/tradeMindApiService';
-import { Card, SignalBadge, Delta, Skeleton, SymbolCell, Conf, DateComponent, RiskReward, DataTable, type DataTableColumn } from '../components/ui';
+import { Card, SignalBadge, Delta, Skeleton, SymbolCell, Conf, DateComponent, RiskReward, DataTable, priceColumns, type DataTableColumn } from '../components/ui';
 import { AreaChart, Gauge, Sparkline } from '../components/Charts';
 import type { Stock, IndexData, Breadth, Trade } from '../types';
 
@@ -199,14 +199,14 @@ export default function DashboardPage() {
           {t?.order_type}
         </span>
       ) },
-    // Entry is the FILL, not the limit — see TradesPage for why they differ.
-    { id: 'price', header: 'Entry', align: 'right', mono: true,
-      accessor: t => t?.fill_price ?? t?.price ?? 0,
-      cell: t => inr(t?.fill_price ?? t?.price ?? 0) },
-    { id: 'current_price', header: 'CMP', align: 'right', mono: true,
-      cell: t => t?.current_price != null
-        ? <span className="text-ink-2">{inr(t.current_price)}</span>
-        : <span className="text-ink-3">\u2014</span> },
+    // Per-leg rows, so the levels come from the bracket the route overlays.
+    ...priceColumns<Trade>({
+      entry:    t => t?.entry_price,
+      current:  t => t?.current_price,
+      sold:     t => (t?.sold ? t?.sell_price : null),
+      target:   t => t?.target_price,
+      stopLoss: t => t?.stop_loss,
+    }),
     { id: 'value', header: 'Value', align: 'right', mono: true, cell: t => inr(t?.value ?? 0, 0) },
     { id: 'pnl', header: 'Realized P&L', align: 'right',
       cell: t => <Delta value={t?.pnl ?? 0} suffix="" showIcon size={12.5} /> },

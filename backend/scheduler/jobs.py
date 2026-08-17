@@ -687,6 +687,40 @@ def verify_data_integrity_job():
     except Exception as e:
         logger.error(f"Data integrity check failed: {e}")
 
+    # Balance reconciliation (audit #2). The invariant every entry/square-off
+    # pair preserves is:
+    #     users.virtual_invested == COALESCE(SUM(positions.invested_amount), 0)
+    #
+    # It went unnoticed for months that user 1 sat at -465,151.39 against zero
+    # positions, because scripts/seed_demo.py wrote positions directly and
+    # skipped the increment at trading_engine.py:612 while square-offs kept
+    # decrementing. Nothing surfaced it — total_pnl and win/loss reconciled
+    # perfectly, since only the entry side was bypassed. Checking it weekly is
+    # what makes the next such drift visible.
+    try:
+        from database.db import get_connection, release_connection, _execute
+        conn = get_connection()
+        try:
+            cur = _execute(conn, """
+                SELECT u.id, u.username, u.virtual_invested,
+                       COALESCE((SELECT SUM(p.invested_amount) FROM positions p
+                                 WHERE p.user_id = u.id), 0) AS expected
+                FROM users u
+            """)
+            drift = [r for r in cur.fetchall() if abs((r[2] or 0) - (r[3] or 0)) > 1.0]
+            if drift:
+                for uid, uname, stored, expected in drift:
+                    logger.warning(
+                        "⚠️ virtual_invested drift — user %s (%s): stored %.2f, "
+                        "expected %.2f (diff %.2f)",
+                        uid, uname, stored or 0, expected or 0, (stored or 0) - (expected or 0))
+            else:
+                logger.info("Balance reconciliation: all users consistent")
+        finally:
+            release_connection(conn)
+    except Exception as e:
+        logger.error(f"Balance reconciliation failed: {e}")
+
     # Calendar-based date verification — the only way to tell a missed EOD
     # collection apart from an exchange holiday.
     try:

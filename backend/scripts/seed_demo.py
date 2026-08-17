@@ -157,6 +157,26 @@ def seed():
             pos_count += 1
         print(f"Seeded {pos_count} open positions")
 
+        # Keep the balance invariant the trading engine maintains:
+        #     users.virtual_invested == COALESCE(SUM(positions.invested_amount), 0)
+        #
+        # Without this, seeding positions directly bypasses the increment at
+        # trading_engine.py:612 that every real entry goes through. The
+        # decrement on square-off (:682) still runs, so squaring off seeded
+        # positions drives virtual_invested negative by exactly the total buy
+        # cost — which is how user 1 reached -465,151.39 against 0 positions
+        # (audit #2). total_pnl and win/loss were never affected; they
+        # reconciled exactly, because only the entry side was skipped.
+        #
+        # Recomputed from positions rather than accumulated, so it is correct
+        # even on a re-run over existing rows (the INSERT above upserts).
+        _execute(conn, """
+            UPDATE users SET virtual_invested = COALESCE(
+                (SELECT SUM(invested_amount) FROM positions WHERE user_id = ?), 0)
+            WHERE id = ?
+        """, (USER_ID, USER_ID))
+        print("Reconciled virtual_invested against seeded positions")
+
         # ── 8. Risk settings ──────────────────────────────────────────────────
         _execute(conn, """
             INSERT INTO risk_settings

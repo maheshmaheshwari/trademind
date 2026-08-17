@@ -734,9 +734,24 @@ CREATE INDEX IF NOT EXISTS idx_app_logs_level ON app_logs (level, time DESC);
 # Hypertable conversion + compression
 # ---------------------------------------------------------------------------
 
-# Applied on every init_database() so an existing hypertable picks up a widened
-# interval; create_hypertable(if_not_exists) cannot do this. Only affects chunks
-# created after the call.
+# Applied on every init_database() so an EXISTING hypertable picks up a widened
+# interval; create_hypertable(if_not_exists) is a no-op on one that already
+# exists and cannot do this. Only affects chunks created after the call.
+#
+# This list is a migration path for databases created before the intervals in
+# SQL_HYPERTABLES were corrected — it is NOT where the interval is defined. A
+# fresh database gets the right interval at creation from SQL_HYPERTABLES, and
+# these calls are then no-ops. Keep the two in sync: if you change an interval,
+# change it in SQL_HYPERTABLES first so new environments are correct by
+# construction, and here so existing ones converge.
+#
+# Why it matters: monthly chunks over 2010-2026 gave prices and
+# technical_indicators 203 chunks EACH, 406 of the database's 479. Any query
+# without a time predicate plans across all of them, and on a 256MB
+# shared_buffers instance that is enough to fail outright — `SELECT COUNT(*)
+# FROM prices` OOM'd, and it killed the weekly retrain's export for two
+# consecutive weeks. Rebuilt into yearly chunks 2026-08-17: 203 -> 18 each, and
+# the retrain's join went from 811 scan nodes to 71.
 SQL_CHUNK_INTERVALS = [
     ("news_sentiment", "1 year"),
     # prices and technical_indicators have the identical problem news_sentiment
@@ -760,14 +775,14 @@ SQL_HYPERTABLES = [
     # prices: partition monthly by date
     """
     SELECT create_hypertable('prices', 'date',
-        chunk_time_interval => INTERVAL '1 month',
+        chunk_time_interval => INTERVAL '1 year',
         if_not_exists => TRUE
     );
     """,
     # technical_indicators: partition monthly by date
     """
     SELECT create_hypertable('technical_indicators', 'date',
-        chunk_time_interval => INTERVAL '1 month',
+        chunk_time_interval => INTERVAL '1 year',
         if_not_exists => TRUE
     );
     """,

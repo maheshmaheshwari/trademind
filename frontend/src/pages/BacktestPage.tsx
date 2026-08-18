@@ -207,25 +207,11 @@ export default function BacktestPage() {
   const isDark = theme === 'dark';
   const { data, isLoading, isFetching, isError } = useGetBacktestSummaryQuery();
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64 text-ink-3 text-[14px]">
-        Loading model performance data…
-      </div>
-    );
-  }
-
-  if (isError || !data) {
-    return (
-      <div className="flex items-center justify-center h-64 text-loss text-[14px]">
-        Failed to load performance data. Make sure the backend is running.
-      </div>
-    );
-  }
-
-  const ms = data?.model_stats ?? {};
-  const ss = data?.signal_stats ?? {};
-
+  // Declared BEFORE the early returns below. React requires the same hooks in
+  // the same order on every render: sitting after `if (isLoading) return`, this
+  // useMemo was skipped on the loading render and then called once data
+  // arrived, which crashes the page with "Rendered more hooks than during the
+  // previous render". The column defs depend on no data, so hoisting is free.
   const topSignalCols = useMemo<DataTableColumn<Record<string, any>>[]>(() => [
     { id: 'symbol', header: 'Stock',
       cell: t => (
@@ -284,6 +270,27 @@ export default function BacktestPage() {
       accessor: t => t?.model?.horizon ?? t?.model_horizon ?? '',
       cell: t => <span className="text-ink-3">{t?.model?.horizon ?? t?.model_horizon ?? '\u2014'}</span> },
   ], []);
+
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64 text-ink-3 text-[14px]">
+        Loading model performance data…
+      </div>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <div className="flex items-center justify-center h-64 text-loss text-[14px]">
+        Failed to load performance data. Make sure the backend is running.
+      </div>
+    );
+  }
+
+  const ms = data?.model_stats ?? {};
+  const ss = data?.signal_stats ?? {};
+
   const history: any[] = data?.history ?? [];
 
   const buyCount  = (ss?.distribution?.STRONG_BUY ?? 0) + (ss?.distribution?.BUY ?? 0);

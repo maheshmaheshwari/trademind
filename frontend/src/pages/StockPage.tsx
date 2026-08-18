@@ -390,8 +390,9 @@ function TradePanel({ data, position }: { data: StockDetail; position: OpenPosit
         sl,
         cmp:                price,
         execute_immediately: true,
-        exp_profit:         Math.round((target - price) * finalQty),
-        max_loss:           Math.round((price - sl)     * finalQty),
+        // exp_profit / max_loss are deliberately NOT sent: the server derives
+        // them from entry/target/sl/qty (autopilot._pnl_bounds) and owns their
+        // sign. Posting a client figure here would just be ignored.
       } as any).unwrap();
       toast({ type: 'success', title: `Bought ${finalQty} × ${data.symbol}`, msg: `Invested: ${inr(investment)} · AI managing SL/Target` });
       setPartialModal(null);

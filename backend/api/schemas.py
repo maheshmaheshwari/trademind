@@ -319,6 +319,7 @@ class PortfolioSummaryOut(BaseModel):
     realized_pnl: float
     unrealized_pnl: float
     total_pnl: float
+    total_pnl_pct: float = 0.0   # served, so the client never divides to get it
     open_positions: int
     wins: int
     losses: int

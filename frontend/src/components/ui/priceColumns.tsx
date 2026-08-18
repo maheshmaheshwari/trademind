@@ -16,16 +16,11 @@
  * it only for an EXECUTED SQUARE_OFF leg — a PENDING stop or target row is an
  * instruction, not a fill.
  */
-import type { ReactNode } from 'react';
 import type { DataTableColumn, DataTableRow } from './DataTable';
 
 function inr(n: number | null | undefined, dec = 2): string {
   if (n == null) return '—';
   return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
-}
-
-function Muted({ children }: { children: ReactNode }) {
-  return <span className="text-ink-3">{children}</span>;
 }
 
 /** How to pull the four prices out of whatever shape the row happens to be. */
@@ -54,7 +49,7 @@ export function priceColumns<T extends DataTableRow>(
       accessor: r => get.entry(r) ?? undefined,
       cell: r => {
         const v = get.entry(r);
-        return v == null ? <Muted>—</Muted> : <span>{inr(v)}</span>;
+        return v == null ? <span className="text-ink-3">—</span> : <span>{inr(v)}</span>;
       },
     },
     {
@@ -65,7 +60,7 @@ export function priceColumns<T extends DataTableRow>(
       accessor: r => get.current(r) ?? undefined,
       cell: r => {
         const v = get.current(r);
-        if (v == null) return <Muted>—</Muted>;
+        if (v == null) return <span className="text-ink-3">—</span>;
         const entry = get.entry(r);
         // Coloured against the entry, so the column reads as "is this trade up
         // or down" at a glance rather than as a bare number.
@@ -91,7 +86,7 @@ export function priceColumns<T extends DataTableRow>(
           );
         }
         const projected = get.target(r);
-        if (projected == null) return <Muted>—</Muted>;
+        if (projected == null) return <span className="text-ink-3">—</span>;
         return (
           <span className="inline-flex flex-col items-end leading-tight">
             <span className="text-ink-2">{inr(projected)}</span>
@@ -108,7 +103,7 @@ export function priceColumns<T extends DataTableRow>(
       accessor: r => get.stopLoss(r) ?? undefined,
       cell: r => {
         const v = get.stopLoss(r);
-        return v == null ? <Muted>—</Muted> : <span className="text-loss">{inr(v)}</span>;
+        return v == null ? <span className="text-ink-3">—</span> : <span className="text-loss">{inr(v)}</span>;
       },
     },
   ];

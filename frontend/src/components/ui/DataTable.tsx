@@ -121,6 +121,11 @@ const headCellSx = (align: Align, sortable: boolean) => ({
   // MRT renders its own MUI sort arrow inside the label — hide it and keep the
   // label's click handling, so our chevron above is the only indicator drawn.
   '& .MuiTableSortLabel-icon': { display: 'none' },
+  // MRT also renders a multi-sort rank Badge in every sortable header. Setting
+  // enableMultiSort:false does NOT stop it being rendered — the badge content is
+  // styled invisible (scale(0)) but its 18px wrapper still eats header width in
+  // a 13-column table, so it has to go via CSS.
+  '& .MuiBadge-root': { display: 'none' },
   '& .MuiTableSortLabel-root': { color: 'inherit' },
   '& .MuiTableSortLabel-root:hover': { color: 'inherit' },
   '& .MuiTableSortLabel-root.Mui-active': { color: 'inherit' },
@@ -199,6 +204,10 @@ export function DataTable<T extends DataTableRow>({
     enableColumnDragging: false,
     enableColumnOrdering: false,
     enableRowSelection: false,
+    // Multi-sort renders a rank Badge in every sortable header. It is styled
+    // invisible while unsorted but still occupies ~18px, which is dead width in
+    // a 13-column table — and nothing here needs sorting by two columns at once.
+    enableMultiSort: false,
     enableStickyHeader: true,
     enablePagination: !!pagination,
     paginationDisplayMode: 'pages',

@@ -89,8 +89,9 @@ function RecommendedTrades({ userId }: { userId: number }) {
         signal: 'BUY', mode: 'PAPER', qty: r.qty, amount: r.investment,
         entry: r.buy_price, target: r.target_price, sl: r.stop_loss,
         cmp: r.current_price ?? r.buy_price,
-        exp_profit: Math.round(((r.target_price - r.buy_price) * r.qty) || 0),
-        max_loss: Math.round(((r.buy_price - r.stop_loss) * r.qty) || 0),
+        // exp_profit / max_loss are deliberately NOT sent: the server derives
+        // them from entry/target/sl/qty (autopilot._pnl_bounds) and owns their
+        // sign. Posting a client figure here would just be ignored.
       } as any).unwrap();
       setDone(prev => new Set(prev).add(r.symbol));
       toast({ type: 'success', title: `Authorized ${r.symbol}`, msg: `${r.qty} @ ₹${r.buy_price} · pending mandate` });
@@ -258,17 +259,21 @@ export default function AutopilotPage() {
       target:   t => t?.target,
       stopLoss: t => t?.sl,
     }),
+    // Both values arrive SIGNED from the API (autopilot._pnl_bounds derives them
+    // from the levels), so these render the number and colour it from its own
+    // sign. Nothing here prepends a glyph — a "−" added by a template is not
+    // negative data, and it vanishes the moment the value is sorted or exported.
     { id: 'exp_profit', header: 'Exp. Profit', align: 'right', mono: true,
-      cell: t => <span className="font-semibold text-gain">+{inr(t?.exp_profit, 0)}</span> },
+      cell: t => <span className="font-semibold text-gain">{signed(t?.exp_profit ?? 0, 0)}</span> },
     { id: 'max_loss', header: 'Max Loss', align: 'right', mono: true,
-      cell: t => <span className="text-loss">\u2212{inr(t?.max_loss, 0)}</span> },
+      cell: t => <span className="text-loss">{signed(t?.max_loss ?? 0, 0)}</span> },
     { id: 'pnl', header: 'Live / Realized P&L', align: 'right', mono: true,
       accessor: t => livePnl(t) ?? undefined,
       cell: t => {
         const pnl = livePnl(t);
         return pnl != null
           ? <span className="font-semibold" style={{ color: pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>{signed(pnl)}</span>
-          : <span className="text-ink-3">\u2014</span>;
+          : <span className="text-ink-3">—</span>;
       } },
     { id: 'status', header: 'Status',
       cell: t => {

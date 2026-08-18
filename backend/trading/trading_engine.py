@@ -1110,6 +1110,13 @@ def get_portfolio_summary(user_id: int) -> Dict:
         "realized_pnl": user["total_pnl"],
         "unrealized_pnl": round(total_unrealized, 2),
         "total_pnl": round(user["total_pnl"] + total_unrealized, 2),
+        # Served, not left to the client to divide. PortfolioPage derived this
+        # as (total_pnl / invested) * 100 and then picked its +/− glyph from the
+        # percentage while taking the magnitude from total_pnl — two numbers, one
+        # sign, and nothing guaranteeing they agree.
+        "total_pnl_pct": round(
+            (user["total_pnl"] + total_unrealized) / user["virtual_invested"] * 100, 2
+        ) if user["virtual_invested"] else 0.0,
         "open_positions": len(positions),
         "wins": wins,
         "losses": losses,

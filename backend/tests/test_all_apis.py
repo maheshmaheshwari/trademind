@@ -807,6 +807,19 @@ class TestSquareOff:
 
 
 class TestPortfolioSummary:
+    def test_summary_serves_total_pnl_pct(self, api_client):
+        """The percentage is served, not divided in the browser. PortfolioPage
+        derived it as (total_pnl / invested) * 100 and then took its +/− glyph
+        from that percentage while taking the magnitude from total_pnl — two
+        numbers deciding one sign, with nothing making them agree."""
+        token, user_id = _register(api_client, "pnlpctuser")
+        body = api_client.get(f"/api/trading/portfolio/{user_id}", headers=_h(token)).json()
+        assert "total_pnl_pct" in body, "API must serve the percentage"
+        # Fresh account: nothing invested, so the percentage must be 0 and not a
+        # divide-by-zero or an inf.
+        assert body["total_pnl_pct"] == 0
+
+
     def test_portfolio_summary_empty_user(self, api_client):
         token, user_id = _register(api_client, "portsummarytest")
         resp = api_client.get(f"/api/trading/portfolio/{user_id}", headers=_h(token))
@@ -1580,6 +1593,48 @@ class TestAutopilot:
 # ===========================================================================
 # BROKER ROUTES  (/api/brokers/*)
 # ===========================================================================
+
+class TestAutopilotPnlBounds:
+    """exp_profit / max_loss are derived and SIGNED server-side.
+
+    They used to be whatever the browser posted — and max_loss arrived as a
+    positive magnitude, leaving the frontend to prepend a "−" at render time. A
+    sign that exists only in a template is lost the moment the value is sorted,
+    summed or exported, so the API owns it now.
+    """
+
+    def test_pnl_bounds_derives_signed_values(self):
+        from api.routes.autopilot import _pnl_bounds
+
+        exp, loss = _pnl_bounds(285.25, 305.22, 265.28, 355)
+        assert exp == pytest.approx(7089.35)
+        assert loss == pytest.approx(-7089.35), "loss must be negative from the arithmetic"
+
+        # No levels: fall back to the client figure, normalising its sign so a
+        # legacy positive magnitude still reads as a loss.
+        assert _pnl_bounds(None, None, None, None, 7089, 7089) == (7089.0, -7089.0)
+        # Missing/garbage input must not raise.
+        assert _pnl_bounds(None, None, None, None) == (0, 0)
+        assert _pnl_bounds('285.25', '305.22', '265.28', '355')[1] == pytest.approx(-7089.35)
+
+    def test_authorized_trades_route_returns_negative_max_loss(self, api_client):
+        """The wire format, not just the helper: a mandate row must arrive with
+        max_loss already negative."""
+        token, user_id = _register(api_client, "pnlbounds")
+        resp = api_client.post("/api/autopilot/trades", json={
+            "user_id": user_id, "symbol": "PNLB.NS", "name": "PnL Bounds Ltd.",
+            "signal": "BUY", "mode": "PAPER", "qty": 100, "amount": 50000.0,
+            "entry": 500.0, "target": 550.0, "sl": 470.0,
+            # Deliberately wrong and unsigned, the way the browser sent them.
+            "exp_profit": 99999, "max_loss": 3000,
+        }, headers=_h(token))
+        assert resp.status_code == 200, resp.text
+
+        rows = api_client.get(f"/api/autopilot/trades?user_id={user_id}", headers=_h(token)).json()["data"]
+        row = next(r for r in rows if r["symbol"] == "PNLB.NS")
+        assert row["exp_profit"] == pytest.approx(5000.0), "derived, not the client's 99999"
+        assert row["max_loss"] == pytest.approx(-3000.0), "derived AND negative"
+
 
 class TestBrokerRoutes:
     def test_list_brokers_returns_all(self, api_client):

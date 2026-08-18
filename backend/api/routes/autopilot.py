@@ -77,6 +77,45 @@ class AuthorizeTradeBody(BaseModel):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _pnl_bounds(entry, target, sl, qty, client_exp_profit=None, client_max_loss=None):
+    """(exp_profit, max_loss) for a mandate — derived here, and SIGNED.
+
+    Two things were wrong with taking these from the client. The values were
+    whatever the browser posted, so nothing server-side could vouch for them;
+    and `max_loss` arrived as a positive magnitude — StockPage sent
+    (entry - sl) * qty — leaving the frontend to bolt a "−" onto the number at
+    render time. A loss that is only negative because a template prepends a
+    glyph is not negative data: sort it, sum it, or export it and the sign is
+    simply gone.
+
+    Derived from the levels instead, so the sign falls out of the arithmetic:
+    profit is measured up to the target, loss down to the stop. For a long,
+    max_loss is therefore negative on its own.
+
+    Falls back to the client's figure only when a level is missing, normalising
+    its sign so a legacy positive magnitude still reads as a loss.
+    """
+    def _num(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    e, t, s_, q = _num(entry), _num(target), _num(sl), _num(qty)
+
+    if None not in (e, t, q):
+        exp_profit = round((t - e) * q, 2)
+    else:
+        exp_profit = abs(_num(client_exp_profit) or 0)
+
+    if None not in (e, s_, q):
+        max_loss = round((s_ - e) * q, 2)
+    else:
+        max_loss = -abs(_num(client_max_loss) or 0)
+
+    return exp_profit, max_loss
+
+
 def _ensure_settings(conn, user_id: int) -> dict:
     """Return autopilot_settings row, creating it if absent."""
     cur = _execute(conn, "SELECT * FROM autopilot_settings WHERE user_id = ?", (user_id,))
@@ -320,6 +359,14 @@ async def list_trades(user_id: int, status: Optional[str] = None, user=Depends(_
                 (user_id,))
         rows = _rows_to_dicts(cur)
 
+        # Existing rows were stored with a positive max_loss (the browser sent a
+        # magnitude), so recompute from the levels on the way out. The API is the
+        # authority on the sign — a client should never have to add one.
+        for r in rows:
+            r["exp_profit"], r["max_loss"] = _pnl_bounds(
+                r.get("entry"), r.get("target"), r.get("sl"), r.get("qty"),
+                r.get("exp_profit"), r.get("max_loss"))
+
         # `cmp` is written at authorisation and then only refreshed by
         # price_monitor, which walks open *positions* — so a PENDING mandate
         # (no position yet) keeps the entry price forever and would render as a
@@ -404,7 +451,9 @@ async def authorize_trade(body: AuthorizeTradeBody, background_tasks: Background
             (body.user_id, body.symbol, body.name, body.sector,
              body.signal, body.mode, body.qty, body.amount,
              body.entry, body.target, body.sl,
-             body.exp_profit, body.max_loss, body.cmp,
+             *_pnl_bounds(body.entry, body.target, body.sl, body.qty,
+                          body.exp_profit, body.max_loss),
+             body.cmp,
              body.bracket_id, initial_status,
              get_active_signal_id(body.symbol)))
         conn.commit()

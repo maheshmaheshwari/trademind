@@ -34,7 +34,7 @@ export default function PortfolioPage() {
 
   const alloc:   AllocSlice[] = raw?.allocation ?? [];
   const series:  number[]     = raw?.pnl_history?.[range] ?? [];
-  const pnlPct:  number       = raw ? ((raw.total_pnl ?? 0) / (raw.invested || 1)) * 100 : 0;
+  const pnlPct:  number       = raw?.total_pnl_pct ?? 0;   // served by the API, not divided here
   const sectors: number       = new Set((holdings ?? []).map(h => h?.sector)).size;
 
   const rangeLabels: Record<string, string[]> = {
@@ -146,7 +146,7 @@ export default function PortfolioPage() {
               </span>
             </div>
             <div className="font-bold tracking-tight" style={{ fontSize: 'calc(27px * var(--u))', margin: '10px 0 5px', color: pnlPct >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {pnlPct >= 0 ? '+₹' : '-₹'}{Math.abs(raw?.total_pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              {(raw?.total_pnl ?? 0) >= 0 ? '+₹' : '−₹'}{Math.abs(raw?.total_pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </div>
             <span className="font-bold tabular-nums" style={{ color: pnlPct >= 0 ? 'var(--green)' : 'var(--red)' }}>
               {(pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2)}% overall

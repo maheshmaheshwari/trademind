@@ -368,12 +368,16 @@ async def list_trades(user_id: int, status: Optional[str] = None, user=Depends(_
                 r.get("exp_profit"), r.get("max_loss"))
 
         # `cmp` is written at authorisation and then only refreshed by
-        # price_monitor, which walks open *positions* — so a PENDING mandate
-        # (no position yet) keeps the entry price forever and would render as a
-        # current price that never moves. Overlay the latest close for those.
-        # EXECUTED rows keep theirs: price_monitor's LTP is fresher than a close.
+        # price_monitor, which walks open *positions*. That leaves it stale for
+        # every row that is not an open position:
+        #   PENDING  — no position yet, so it still holds the entry price
+        #   COMPLETED / STOPPED / CANCELLED — the position is gone, so it holds
+        #     whatever the price was at the moment the trade closed, frozen
+        # Both render as a "current price" that is not current. Overlay the
+        # latest close on all of them; only EXECUTED rows keep their own value,
+        # because price_monitor's LTP is fresher than a close.
         stale = [r for r in rows
-                 if r.get("status") == "PENDING" or r.get("cmp") is None]
+                 if r.get("status") != "EXECUTED" or r.get("cmp") is None]
         if stale:
             close_map = get_latest_close_map(
                 sorted({r["symbol"] for r in stale}), conn=conn)

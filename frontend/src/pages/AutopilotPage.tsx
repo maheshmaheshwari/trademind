@@ -253,9 +253,15 @@ export default function AutopilotPage() {
     // a buy limit fills at the market when the market is cheaper. A mandate
     // that has been squared off reports its realised price via actual_pnl
     // rather than a stored sell price, so Sell stays the projected target here.
+    //
+    // `cmp` is shown for closed mandates too — it is the stock's price now, and
+    // it is what tells you whether exiting was the right call. This used to be
+    // blanked for anything but EXECUTED/PENDING because the stored value froze
+    // at close time; the API now re-reads the latest close for those rows, so
+    // there is a real current price to show.
     ...priceColumns<AuthorizedTrade>({
       entry:    t => costBasis(t),
-      current:  t => (t?.status === 'EXECUTED' || t?.status === 'PENDING') ? t?.cmp : null,
+      current:  t => t?.cmp,
       target:   t => t?.target,
       stopLoss: t => t?.sl,
     }),

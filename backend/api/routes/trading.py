@@ -14,13 +14,15 @@ from api.schemas import (
     AuthOut, UserCreateOut, UserOut, ExecuteSignalOut,
     PaginatedPositionsOut, PaginatedOrdersOut,
     SquareOffOut, SquareOffAllOut,
-    PortfolioSummaryOut, RiskSettingsOut, RiskSettingsUpdateOut, TodayPnlOut,
+    PortfolioSummaryOut, PortfolioValueHistoryOut,
+    RiskSettingsOut, RiskSettingsUpdateOut, TodayPnlOut,
     StatusOut,
 )
 from trading.trading_engine import (
     create_user, get_user, get_user_by_username, _safe_user,
     execute_signal, get_positions, get_orders,
     square_off, square_off_all, get_portfolio_summary,
+    get_portfolio_value_history,
     PartialCapacityError, RiskCheckFailed,
 )
 from trading.risk_manager import (
@@ -400,6 +402,26 @@ async def api_portfolio_summary(user_id: int, user=Depends(get_current_user)):
         update_position_prices(user_id)
         summary = get_portfolio_summary(user_id)
         return summary
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/portfolio/{user_id}/history", response_model=PortfolioValueHistoryOut)
+async def api_portfolio_value_history(
+    user_id: int, range: str = "90D", user=Depends(get_current_user)
+):
+    """Portfolio value per trading day over 30D / 90D / 1Y.
+
+    Its own route rather than a field on the summary: the summary is fetched by
+    every dashboard on every load, and this walks a year of order history and
+    price bars for one chart on one page.
+    """
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if range not in ("30D", "90D", "1Y"):
+        raise HTTPException(status_code=400, detail="range must be one of 30D, 90D, 1Y")
+    try:
+        return get_portfolio_value_history(user_id, range)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

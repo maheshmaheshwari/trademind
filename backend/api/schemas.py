@@ -311,6 +311,21 @@ class PortfolioUserOut(BaseModel):
     display_name: Optional[str] = None
 
 
+class AllocationSliceOut(BaseModel):
+    """One sector's share of the open book."""
+    sector: str
+    val: float
+    pct: float = 0.0
+    holdings: int = 0
+
+
+class PortfolioValueHistoryOut(BaseModel):
+    """Portfolio value per sampled trading day. `dates[i]` labels `series[i]`."""
+    range: str
+    dates: List[str] = []
+    series: List[float] = []
+
+
 class PortfolioSummaryOut(BaseModel):
     user: PortfolioUserOut
     balance: float
@@ -325,6 +340,7 @@ class PortfolioSummaryOut(BaseModel):
     losses: int
     win_rate: float
     positions: List[PositionOut]
+    allocation: List[AllocationSliceOut] = []
 
 
 # ---------------------------------------------------------------------------

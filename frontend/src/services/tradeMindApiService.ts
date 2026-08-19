@@ -40,6 +40,22 @@ export interface PortfolioSummary {
   losses: number;
   win_rate: number;
   positions: import('../types').OpenPosition[];
+  allocation: AllocationSlice[];
+}
+
+/** One sector's share of the open book, largest first. */
+export interface AllocationSlice {
+  sector: string;
+  val: number;
+  pct: number;
+  holdings: number;
+}
+
+/** Portfolio value per sampled trading day — `dates[i]` labels `series[i]`. */
+export interface PortfolioValueHistory {
+  range: string;
+  dates: string[];
+  series: number[];
 }
 
 export interface RiskSettings {
@@ -353,6 +369,10 @@ export const tradeMindApiService = createApi({
       query: (userId) => ({ url: `/api/trading/portfolio/${userId}` }),
       providesTags: ['Portfolio'],
     }),
+    getPortfolioHistory: builder.query<PortfolioValueHistory, { userId: number; range: string }>({
+      query: ({ userId, range }) => ({ url: `/api/trading/portfolio/${userId}/history`, params: { range } }),
+      providesTags: ['Portfolio'],
+    }),
     getTodayPnl: builder.query<{ today_pnl: number; today_pnl_pct: number }, number>({
       query: (userId) => ({ url: `/api/trading/pnl/today/${userId}` }),
       keepUnusedDataFor: 60,
@@ -607,7 +627,7 @@ export const {
   useGetSessionsQuery, useRevokeSessionMutation, useRevokeAllSessionsMutation,
   useGetMarketStatusQuery,
   // Portfolio
-  useGetPortfolioSummaryQuery, useGetTodayPnlQuery,
+  useGetPortfolioSummaryQuery, useGetPortfolioHistoryQuery, useGetTodayPnlQuery,
   // Positions & Orders
   useAddPositionMutation,
   useGetPositionsQuery, useGetOrdersQuery,

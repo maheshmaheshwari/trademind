@@ -750,12 +750,27 @@ def execute_signal(
 # ==========================================
 
 def get_positions(user_id: int) -> List[Dict]:
-    """Get all open positions for a user with current P&L."""
+    """Get all open positions for a user with current P&L.
+
+    `sector` is joined on rather than stored: it is reference data about the
+    symbol, not about the holding. Every consumer needs it — the holdings table
+    labels each row with it and the allocation donut groups by it — so it is
+    attached here instead of at each call site.
+    """
     conn = get_connection()
     try:
         rows = _fetchall(conn, "SELECT * FROM positions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,))
         cols = _col_names(conn, "positions")
-        return [dict(zip(cols, r)) for r in rows]
+        positions = [dict(zip(cols, r)) for r in rows]
+        if positions:
+            symbols = sorted({p["symbol"] for p in positions})
+            ph = ",".join("?" for _ in symbols)
+            sectors = dict(_fetchall(conn,
+                f"SELECT symbol, sector FROM nifty_constituents WHERE symbol IN ({ph})",
+                tuple(symbols)))
+            for p in positions:
+                p["sector"] = sectors.get(p["symbol"]) or "Unclassified"
+        return positions
     finally:
         release_connection(conn)
 
@@ -1122,4 +1137,219 @@ def get_portfolio_summary(user_id: int) -> Dict:
         "losses": losses,
         "win_rate": win_rate,
         "positions": positions,
+        # Sector mix of the open book. Served here rather than derived in the
+        # browser because `positions` carries no sector — it lives in
+        # nifty_constituents, which the client has no reason to fetch.
+        "allocation": get_portfolio_allocation(user_id),
     }
+
+
+# ---------------------------------------------------------------------------
+# Portfolio composition & value history
+# ---------------------------------------------------------------------------
+
+def get_portfolio_allocation(user_id: int, conn=None) -> List[Dict]:
+    """Open positions grouped by sector, largest first.
+
+    `positions` carries no sector of its own — sector is reference data, so it
+    is joined from `nifty_constituents` rather than copied onto every row. A
+    symbol missing from that table (or holding a NULL sector) is reported as
+    "Unclassified" instead of being dropped: a slice silently missing from the
+    donut makes the percentages lie.
+
+    Grouped on current_value, i.e. what the holding is worth NOW, so the donut
+    matches the "Current Value" card above it rather than cost basis.
+    """
+    own_conn = conn is None
+    if own_conn:
+        conn = get_connection()
+    try:
+        rows = _fetchall(conn, """
+            SELECT COALESCE(NULLIF(n.sector, ''), 'Unclassified') AS sector,
+                   SUM(COALESCE(p.current_value, p.invested_amount, 0))     AS val,
+                   COUNT(*)                                                 AS holdings
+            FROM positions p
+            LEFT JOIN nifty_constituents n ON n.symbol = p.symbol
+            WHERE p.user_id = ?
+            GROUP BY 1
+            ORDER BY 2 DESC
+        """, (user_id,))
+    finally:
+        if own_conn:
+            release_connection(conn)
+
+    total = sum(float(r[1] or 0) for r in rows)
+    return [
+        {
+            "sector": r[0],
+            "val": round(float(r[1] or 0), 2),
+            "pct": round(float(r[1] or 0) / total * 100, 2) if total else 0.0,
+            "holdings": int(r[2]),
+        }
+        for r in rows
+    ]
+
+
+# How many points each range is drawn with, and how far back it reaches.
+# 1Y samples weekly — 250 daily points on a 230px chart is noise, and it is the
+# shape the range is being asked about.
+_HISTORY_RANGES: Dict[str, Tuple[int, int]] = {
+    #        days back, sample every N trading days
+    "30D": (30,  1),
+    "90D": (90,  1),
+    "1Y":  (365, 5),
+}
+
+# Order rows that actually moved cash. Statuses are not uniform across the
+# table's history — the paper engine writes 'EXECUTED', older/seeded rows use
+# 'COMPLETE' — so both count as filled. PENDING/CANCELLED never moved anything.
+_FILLED_STATUSES = ("EXECUTED", "COMPLETE", "COMPLETED", "FILLED")
+
+
+def get_portfolio_value_history(user_id: int, range_key: str = "90D") -> Dict:
+    """Total portfolio value (cash + holdings at market) per trading day.
+
+    Reconstructed backwards from the state we know is correct — today's cash
+    balance and today's open positions — by un-applying each filled order in
+    reverse chronological order:
+
+        an ENTRY  took  qty*fill + fees  out of cash and put qty shares in
+        a SQUARE_OFF put qty*fill - fees back into cash and took qty shares out
+
+    Replaying forwards from a guessed opening balance would drift, because the
+    starting balance is not recorded anywhere; walking backwards from the
+    current row is anchored to a number the ledger already agrees on.
+
+    Each sampled day is then valued with that day's close for every symbol held
+    on it (last close on or before the day, so a holiday or a missing bar
+    carries the previous price forward rather than valuing the stock at zero).
+    """
+    days_back, step = _HISTORY_RANGES.get(range_key, _HISTORY_RANGES["90D"])
+    start = (datetime.now() - timedelta(days=days_back)).date()
+
+    conn = get_connection()
+    try:
+        user = _fetchone(conn, "SELECT virtual_balance FROM users WHERE id = ?", (user_id,))
+        if not user:
+            raise ValueError("User not found")
+        cash = float(user[0] or 0)
+
+        holdings: Dict[str, float] = {}
+        live_value = 0.0
+        for sym, qty, cur_val in _fetchall(conn,
+                "SELECT symbol, quantity, COALESCE(current_value, invested_amount, 0) "
+                "FROM positions WHERE user_id = ?", (user_id,)):
+            holdings[sym] = holdings.get(sym, 0) + float(qty or 0)
+            live_value += float(cur_val or 0)
+
+        placeholders = ",".join("?" for _ in _FILLED_STATUSES)
+        events = _fetchall(conn, f"""
+            SELECT created_at, symbol, order_purpose, quantity,
+                   COALESCE(fill_price, price), COALESCE(fees, 0)
+            FROM orders
+            WHERE user_id = ?
+              AND order_purpose IN ('ENTRY', 'SQUARE_OFF')
+              AND status IN ({placeholders})
+            ORDER BY created_at DESC
+        """, (user_id, *_FILLED_STATUSES))
+
+        # Every symbol that appears anywhere in the window — currently held or
+        # since sold. A position closed 20 days ago still has to be valued on
+        # the days before it closed.
+        symbols = sorted(set(holdings) | {e[1] for e in events})
+        closes: Dict[str, List[Tuple] ] = {}
+        trading_days: List = []
+        if symbols:
+            sym_ph = ",".join("?" for _ in symbols)
+            price_rows = _fetchall(conn, f"""
+                SELECT date, symbol, close
+                FROM prices
+                WHERE interval = '1d' AND date >= ? AND symbol IN ({sym_ph})
+                ORDER BY date
+            """, (start, *symbols))
+            seen_days = set()
+            for d, sym, close in price_rows:
+                d = d.date() if isinstance(d, datetime) else d
+                closes.setdefault(sym, []).append((d, float(close or 0)))
+                seen_days.add(d)
+            trading_days = sorted(seen_days)
+    finally:
+        release_connection(conn)
+
+    if not trading_days:
+        # An account that has never traded still has a portfolio — it is all
+        # cash. Fall back to the exchange calendar (the single source of truth
+        # for "was the market open"), so a new user sees a flat line at their
+        # balance rather than an empty panel that reads as a failed request.
+        from analysis.trading_calendar import trading_days_between, today_ist
+        trading_days = trading_days_between(start, today_ist())
+        if not trading_days:
+            return {"range": range_key, "dates": [], "series": []}
+
+    # Sliced from the newest end so the most recent close is always the last
+    # point — a chart whose right edge is four days stale reads as a flat week.
+    sampled = trading_days[::-1][::step][::-1]
+
+    # Last close on or before each sampled day, per symbol — forward-filled.
+    price_at: Dict[str, Dict] = {}
+    for sym, series in closes.items():
+        by_day, idx, last = {}, 0, None
+        for day in sampled:
+            while idx < len(series) and series[idx][0] <= day:
+                last = series[idx][1]
+                idx += 1
+            by_day[day] = last
+        price_at[sym] = by_day
+
+    # Today's true state, before the walk backwards starts mutating it. `prices`
+    # only has a bar once the EOD collection runs, so outside that window the
+    # newest trading day is a day or two old — and a trade placed since then
+    # would be invisible on a chart that stops there.
+    today = datetime.now().date()
+    current_point = (today, round(cash + live_value, 2))
+
+    dates, values = [], []
+    ev = 0
+    for day in reversed(sampled):
+        # Undo everything that happened after this day, so `cash`/`holdings`
+        # describe the close of `day`.
+        while ev < len(events):
+            ts = events[ev][0]
+            ts_date = ts.date() if isinstance(ts, datetime) else ts
+            if ts_date <= day:
+                break
+            _, sym, purpose, qty, fill, fees = events[ev]
+            qty, fill, fees = float(qty or 0), float(fill or 0), float(fees or 0)
+            if purpose == "ENTRY":
+                cash += qty * fill + fees
+                holdings[sym] = holdings.get(sym, 0) - qty
+            else:  # SQUARE_OFF
+                cash -= qty * fill - fees
+                holdings[sym] = holdings.get(sym, 0) + qty
+            ev += 1
+
+        if ev == 0 and holdings:
+            # Newest point, and nothing has traded since it: the open positions
+            # still carry a live price that is fresher than any stored close
+            # (prices lags by a day or two outside market hours). Using it makes
+            # the right edge of the chart equal the "Current Value" card, which
+            # is computed the same way; a close-derived last point would sit a
+            # few thousand rupees below it for no visible reason.
+            market = live_value
+        else:
+            market = 0.0
+            for sym, qty in holdings.items():
+                if qty <= 0:
+                    continue
+                px = price_at.get(sym, {}).get(day)
+                if px is not None:
+                    market += qty * px
+        dates.append(day.isoformat())
+        values.append(round(cash + market, 2))
+
+    dates.reverse()
+    values.reverse()
+    if current_point[0] > sampled[-1]:
+        dates.append(current_point[0].isoformat())
+        values.append(current_point[1])
+    return {"range": range_key, "dates": dates, "series": values}

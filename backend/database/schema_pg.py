@@ -1059,6 +1059,82 @@ def missing_tables(conn) -> List[str]:
     return [t for t in expected_tables() if t not in present]
 
 
+# Tables whose `id` is declared BIGSERIAL above and which MUST keep a working
+# nextval() default. Listed explicitly rather than discovered, so the repair
+# can never "fix" a table that is meant to take an externally supplied id.
+SERIAL_REPAIR_TABLES = ("prices", "technical_indicators")
+
+
+def repair_serial_defaults(conn) -> List[str]:
+    """Restore the BIGSERIAL default on `id` where it has gone missing.
+
+    `CREATE TABLE IF NOT EXISTS` is a no-op against an existing table, so a
+    column that has *lost* its default is invisible to normal schema init —
+    the table looks present and correct and every insert fails.
+
+    That is not hypothetical. Between 2026-08-17 and 2026-08-18 the
+    `prices_id_seq` and `technical_indicators_id_seq` sequences were dropped
+    from prod (a DROP SEQUENCE ... CASCADE also strips the column default it
+    owns). Both tables were left with `id BIGINT NOT NULL` and no default, so
+    every insert failed with
+
+        null value in column "id" of relation "_hyper_10_1125_chunk"
+        violates not-null constraint
+
+    `insert_prices_batch` and `insert_indicators` both catch, log and return
+    0/False rather than raising, so the EOD chain reported success while
+    writing nothing. Two trading days of prices and indicators were lost before
+    the coverage gate's "prices 0/500" made it visible.
+
+    Idempotent: tables that already have a default are left untouched.
+    Returns the list of tables it actually repaired.
+    """
+    repaired: List[str] = []
+    cur = conn.cursor()
+    for table in SERIAL_REPAIR_TABLES:
+        try:
+            cur.execute(
+                """
+                SELECT pg_get_expr(d.adbin, d.adrelid)
+                  FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'id'
+                  LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
+                 WHERE n.nspname = 'public' AND c.relname = %s AND NOT a.attisdropped
+                """,
+                (table,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                continue                      # table not created yet — nothing to repair
+            if row[0]:
+                continue                      # default intact
+
+            seq = f"{table}_id_seq"
+            cur.execute(f'CREATE SEQUENCE IF NOT EXISTS "{seq}" AS BIGINT')
+            # OWNED BY ties the sequence's lifetime to the column again, which
+            # is what makes it a real BIGSERIAL rather than a loose sequence.
+            cur.execute(f'ALTER SEQUENCE "{seq}" OWNED BY {table}.id')
+            # Start above the highest id already stored, or the first insert
+            # collides with existing rows.
+            cur.execute(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {table}")
+            next_id = cur.fetchone()[0]
+            cur.execute(f'SELECT setval(\'"{seq}"\', %s, false)', (next_id,))
+            cur.execute(
+                f"ALTER TABLE {table} ALTER COLUMN id SET DEFAULT nextval('\"{seq}\"'::regclass)"
+            )
+            conn.commit()
+            repaired.append(table)
+            logger.warning(
+                "Repaired missing BIGSERIAL default on %s.id — recreated %s starting at %s",
+                table, seq, next_id,
+            )
+        except Exception as e:
+            conn.rollback()
+            logger.error("Could not repair serial default on %s.id: %s", table, e)
+    return repaired
+
+
 def init_timescale(conn) -> None:
     """
     Create all tables, hypertables, compression policies,
@@ -1158,6 +1234,10 @@ def init_timescale(conn) -> None:
         cur.execute(sql)
 
     conn.commit()
+
+    # A lost BIGSERIAL default makes a table silently unwritable — see
+    # repair_serial_defaults() for the incident this exists to prevent.
+    repair_serial_defaults(conn)
 
     # Convert to hypertables (must be after commit)
     for sql in SQL_HYPERTABLES:

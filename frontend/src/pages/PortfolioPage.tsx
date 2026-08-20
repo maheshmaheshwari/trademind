@@ -208,7 +208,7 @@ export default function PortfolioPage() {
               ? <Skeleton h={180} />
               : allocSlices.length
                 ? <Donut data={allocSlices} centerTop="Holdings"
-                         centerBottom={inrCompact(allocSlices.reduce((a, s) => a + (s?.val ?? 0), 0))} size={240} />
+                         centerBottom={inrCompact(allocSlices.reduce((a: any, s: { val: any; }) => a + (s?.val ?? 0), 0))} size={240} />
                 : <div className="grid place-items-center text-[13px] text-ink-3" style={{ height: 180 }}>
                     No open positions to allocate.
                   </div>}

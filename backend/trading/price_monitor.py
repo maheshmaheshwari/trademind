@@ -167,7 +167,7 @@ def update_position_prices(user_id: int = None) -> List[Dict]:
             # (or the DB fallback), so it is the one place that knows the price.
             _execute(conn, """
                 UPDATE authorized_trades SET cmp = ?, updated_at = NOW()
-                 WHERE user_id = ? AND symbol = ? AND status = 'EXECUTED'
+                 WHERE user_id = ? AND symbol = ? AND status = 'OPEN'
             """, (current_price, pos_dict["user_id"], symbol))
 
             # Commit now so this UPDATE's row lock is released before

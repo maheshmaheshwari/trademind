@@ -1558,7 +1558,9 @@ class TestAutopilot:
             "bracket_id": "BRACK-001",
         }, headers=_h(token))
         assert resp.status_code == 200
-        assert resp.json()["data"]["status"] == "EXECUTED"
+        # OPEN, not EXECUTED: on a mandate this state means "the trade is live",
+        # which is not what EXECUTED means on an order leg. See schema_pg.py.
+        assert resp.json()["data"]["status"] == "OPEN"
         assert resp.json()["data"]["bracket_id"] == "BRACK-001"
 
     def test_revoke_already_stopped_400(self, api_client):
@@ -1593,6 +1595,129 @@ class TestAutopilot:
 # ===========================================================================
 # BROKER ROUTES  (/api/brokers/*)
 # ===========================================================================
+
+class TestTradeHistory:
+    """One row per TRADE, not per order leg.
+
+    A bracket is 3-4 order rows, so the leg view rendered a single trade as three
+    — and two of those were a PENDING stop and a PENDING target that had never
+    executed. Measured on real data: 25 rows shown as "trades", 11 actually
+    executed.
+    """
+
+    def test_one_bracket_is_one_trade_row(self, api_client):
+        from datetime import datetime
+        from database.db import get_connection, release_connection, _execute
+
+        token, user_id = _register(api_client, "tradegrain")
+        conn = get_connection()
+        try:
+            _execute(conn,
+                "INSERT INTO prices (symbol, date, open, high, low, close, volume, interval) "
+                "VALUES (?,?,?,?,?,?,?,'1d') ON CONFLICT DO NOTHING",
+                ("GRAIN.NS", datetime.now().strftime("%Y-%m-%d"), 500.0, 500.0, 500.0, 500.0, 10000))
+            conn.commit()
+        finally:
+            release_connection(conn)
+
+        _execute_trade(api_client, token, user_id, "GRAIN.NS", 50000.0, 500.0)
+
+        legs = api_client.get(f"/api/trading/orders/{user_id}", headers=_h(token)).json()["data"]
+        assert len([o for o in legs if o["symbol"] == "GRAIN.NS"]) == 3, "3 legs: ENTRY + STOP_LOSS + TARGET"
+
+        trades = api_client.get(f"/api/trading/trades/{user_id}", headers=_h(token)).json()["data"]
+        rows = [t for t in trades if t["symbol"] == "GRAIN.NS"]
+        assert len(rows) == 1, "but ONE trade"
+
+        t = rows[0]
+        assert t["status"] == "OPEN", "nothing sold yet"
+        assert t["entry_price"] == pytest.approx(500.0)
+        assert t["target_price"] == pytest.approx(550.0)
+        assert t["stop_loss"] == pytest.approx(475.0)
+        assert t["exit_price"] is None and t["realized_pnl"] is None
+
+    def test_merged_position_gives_every_bracket_an_exit(self, api_client):
+        """Two buys of one symbol merge into ONE position (positions is
+        UNIQUE(user_id, symbol)) but remain two brackets. Squaring off used to
+        write a single SQUARE_OFF row against the position's own bracket, so the
+        other bracket kept an entry with no exit and reported as still-open
+        forever. Real case: BAJAJFINSV.NS bracket d1fdf7, 11 shares, sold in
+        2026-06 and still showing OPEN.
+        """
+        from datetime import datetime
+        from database.db import get_connection, release_connection, _execute
+
+        token, user_id = _register(api_client, "mergedexit")
+        conn = get_connection()
+        try:
+            _execute(conn,
+                "INSERT INTO prices (symbol, date, open, high, low, close, volume, interval) "
+                "VALUES (?,?,?,?,?,?,?,'1d') ON CONFLICT DO NOTHING",
+                ("MERGED.NS", datetime.now().strftime("%Y-%m-%d"), 200.0, 200.0, 200.0, 200.0, 10000))
+            conn.commit()
+        finally:
+            release_connection(conn)
+
+        # Two separate buys -> two brackets, one merged position.
+        _execute_trade(api_client, token, user_id, "MERGED.NS", 20000.0, 200.0)   # 100 sh
+        _execute_trade(api_client, token, user_id, "MERGED.NS", 10000.0, 200.0)   #  50 sh
+
+        trades = api_client.get(f"/api/trading/trades/{user_id}", headers=_h(token)).json()["data"]
+        assert len([t for t in trades if t["symbol"] == "MERGED.NS"]) == 2, "two brackets, two trades"
+
+        assert api_client.post(f"/api/trading/square-off/{user_id}/MERGED.NS",
+                               json={}, headers=_h(token)).status_code == 200
+
+        trades = api_client.get(f"/api/trading/trades/{user_id}", headers=_h(token)).json()["data"]
+        rows = [t for t in trades if t["symbol"] == "MERGED.NS"]
+        assert len(rows) == 2
+        assert all(t["status"] != "OPEN" for t in rows), \
+            f"every bracket must get an exit leg, got {[t['status'] for t in rows]}"
+        assert all(t["exit_price"] is not None for t in rows)
+
+        # The legs must account for the whole position, not more and not less.
+        assert sum(t["quantity"] for t in rows) == 150
+
+        # And no PENDING leg may survive on either bracket.
+        conn = get_connection()
+        try:
+            left = _execute(conn,
+                "SELECT COUNT(*) FROM orders WHERE user_id = ? AND symbol = ? AND status = 'PENDING'",
+                (user_id, "MERGED.NS")).fetchone()[0]
+        finally:
+            release_connection(conn)
+        assert left == 0, "SL/TARGET legs of every exited bracket must be cancelled"
+
+    def test_closed_trade_reports_exit_price_and_reason(self, api_client):
+        """A manual square-off records what it sold for AND why — square_off()
+        always took a `trigger` argument and used to discard it."""
+        from datetime import datetime
+        from database.db import get_connection, release_connection, _execute
+
+        token, user_id = _register(api_client, "tradeclose")
+        conn = get_connection()
+        try:
+            _execute(conn,
+                "INSERT INTO prices (symbol, date, open, high, low, close, volume, interval) "
+                "VALUES (?,?,?,?,?,?,?,'1d') ON CONFLICT DO NOTHING",
+                ("CLOSED.NS", datetime.now().strftime("%Y-%m-%d"), 800.0, 800.0, 800.0, 800.0, 10000))
+            conn.commit()
+        finally:
+            release_connection(conn)
+
+        _execute_trade(api_client, token, user_id, "CLOSED.NS", 80000.0, 800.0)
+        assert api_client.post(f"/api/trading/square-off/{user_id}/CLOSED.NS",
+                               json={}, headers=_h(token)).status_code == 200
+
+        trades = api_client.get(f"/api/trading/trades/{user_id}", headers=_h(token)).json()["data"]
+        t = next(x for x in trades if x["symbol"] == "CLOSED.NS")
+        assert t["exit_price"] is not None, "a closed trade must report its sale price"
+        assert t["exit_reason"] == "MANUAL"
+        assert t["status"] == "CLOSED"
+        assert t["realized_pnl"] is not None
+        # And still exactly one row, not one per leg.
+        assert len([x for x in trades if x["symbol"] == "CLOSED.NS"]) == 1
+
 
 class TestAutopilotPnlBounds:
     """exp_profit / max_loss are derived and SIGNED server-side.

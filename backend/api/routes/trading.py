@@ -20,7 +20,7 @@ from api.schemas import (
 )
 from trading.trading_engine import (
     create_user, get_user, get_user_by_username, _safe_user,
-    execute_signal, get_positions, get_orders,
+    execute_signal, get_positions, get_orders, get_trades,
     square_off, square_off_all, get_portfolio_summary,
     get_portfolio_value_history,
     PartialCapacityError, RiskCheckFailed,
@@ -364,6 +364,31 @@ async def api_get_orders(
 
     return {"user_id": user_id, "data": paginated, "orders": paginated,
             "total": total, "page": page, "size": size, "count": total}
+
+
+@router.get("/trades/{user_id}")
+async def api_get_trades(user_id: int, limit: int = 200, user=Depends(get_current_user)):
+    """
+    Trade history — one row per bracket, not per order leg.
+
+    `/orders/{user_id}` remains the leg-level audit view. This is the one the
+    history screen should read: a bracket is 3-4 order rows, so the leg view
+    showed a single trade as three, two of which were resting instructions that
+    had never executed.
+    """
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    trades = get_trades(user_id, limit)
+
+    # Same current-price overlay the order rows get, so the history screen can
+    # show an open trade against where the stock trades now.
+    if trades:
+        from database.db import get_latest_close_map
+        close_map = get_latest_close_map(sorted({t["symbol"] for t in trades if t.get("symbol")}))
+        for t in trades:
+            t["current_price"] = close_map.get(t.get("symbol"))
+
+    return {"user_id": user_id, "data": trades, "total": len(trades)}
 
 
 @router.post("/square-off/{user_id}/{symbol}", response_model=SquareOffOut)

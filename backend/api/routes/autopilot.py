@@ -191,7 +191,7 @@ def _execute_mandate(trade: dict) -> dict:
         try:
             _execute(conn,
                 """UPDATE authorized_trades
-                   SET status = 'EXECUTED', bracket_id = ?, sl_gtt_id = ?, target_gtt_id = ?,
+                   SET status = 'OPEN', bracket_id = ?, sl_gtt_id = ?, target_gtt_id = ?,
                        fill_price = ?, updated_at = NOW()
                    WHERE id = ?""",
                 (bracket_id, sl_gtt_id, target_gtt_id, fill_price, trade["id"]))
@@ -284,15 +284,15 @@ async def get_status(user_id: int, user=Depends(_get_current_user)):
             "SELECT * FROM authorized_trades WHERE user_id = ?", (user_id,))
         trades = _rows_to_dicts(cur)
 
-        capital   = sum(t["amount"] for t in trades if t["status"] == "EXECUTED")
-        active    = sum(1 for t in trades if t["status"] in ("EXECUTED", "PENDING"))
+        capital   = sum(t["amount"] for t in trades if t["status"] == "OPEN")
+        active    = sum(1 for t in trades if t["status"] in ("OPEN", "PENDING"))
         realized  = sum(
             t["actual_pnl"] for t in trades
             if t["actual_pnl"] is not None and t["status"] in ("COMPLETED", "STOPPED")
         )
         projected = sum(
             t["exp_profit"] for t in trades
-            if t["status"] in ("EXECUTED", "PENDING")
+            if t["status"] in ("OPEN", "PENDING")
         )
         return {
             "enabled": settings["enabled"],
@@ -377,7 +377,7 @@ async def list_trades(user_id: int, status: Optional[str] = None, user=Depends(_
         # latest close on all of them; only EXECUTED rows keep their own value,
         # because price_monitor's LTP is fresher than a close.
         stale = [r for r in rows
-                 if r.get("status") != "EXECUTED" or r.get("cmp") is None]
+                 if r.get("status") != "OPEN" or r.get("cmp") is None]
         if stale:
             close_map = get_latest_close_map(
                 sorted({r["symbol"] for r in stale}), conn=conn)
@@ -437,7 +437,7 @@ async def authorize_trade(body: AuthorizeTradeBody, background_tasks: Background
 
         # If a bracket_id is supplied the position is already open — mark EXECUTED immediately
         # so the autopilot page reflects the real state and square_off() can settle it.
-        initial_status = "EXECUTED" if body.bracket_id else "PENDING"
+        initial_status = "OPEN" if body.bracket_id else "PENDING"
 
         cur = _execute(conn,
             # trade_signal_id is captured HERE, at authorisation — the signal the
@@ -514,7 +514,7 @@ async def revoke_trade(trade_id: int, user=Depends(_get_current_user)):
     if user["id"] != trade["user_id"]:
         raise HTTPException(status_code=404, detail="Trade not found")
 
-    if trade["status"] not in ("PENDING", "EXECUTED"):
+    if trade["status"] not in ("PENDING", "OPEN"):
         raise HTTPException(status_code=400,
             detail=f"Cannot revoke a trade with status '{trade['status']}'")
 
@@ -533,7 +533,7 @@ async def revoke_trade(trade_id: int, user=Depends(_get_current_user)):
                     logger.warning(f"Could not cancel GTT {gtt_id}: {e}")
 
     # ── Step 2: square off the open position (if executed) ───────────────────
-    if trade["status"] == "EXECUTED" and trade.get("bracket_id"):
+    if trade["status"] == "OPEN" and trade.get("bracket_id"):
         try:
             from trading.trading_engine import square_off
             sq = square_off(trade["user_id"], trade["symbol"])

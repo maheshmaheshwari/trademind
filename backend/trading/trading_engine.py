@@ -847,6 +847,87 @@ def get_bracket_levels(bracket_ids: List[str]) -> Dict[str, Dict]:
     return levels
 
 
+def get_trades(user_id: int, limit: int = 200) -> List[Dict]:
+    """
+    One row per TRADE, not per order leg.
+
+    `orders` stores legs — a bracket is ENTRY + STOP_LOSS + TARGET, plus a
+    SQUARE_OFF once it closes. Nothing in the schema represents the trade those
+    legs belong to; `bracket_id` is only a correlation string. So "Trade History"
+    was rendering raw legs, which meant one ITI.NS trade appeared as three rows,
+    two of which (a PENDING stop and a PENDING target) had never happened at all.
+
+    This collapses each bracket into the thing a trader means by "a trade":
+    bought this many at this price, protected here, targeting there, and either
+    still open or closed at a known price for a known reason.
+
+    Status is the TRADE's state, deliberately using the same vocabulary the
+    autopilot screen shows, so the two pages can no longer disagree:
+      OPEN | TARGET_HIT | STOPPED | CLOSED
+    """
+    conn = get_connection()
+    try:
+        rows = _fetchall(conn, """
+            SELECT bracket_id, symbol, name, mode, signal, order_purpose, status,
+                   quantity, price, trigger_price, fill_price, pnl, exit_reason,
+                   created_at
+            FROM orders
+            WHERE user_id = ? AND bracket_id IS NOT NULL
+            ORDER BY created_at ASC
+        """, (user_id,))
+    finally:
+        release_connection(conn)
+
+    trades: Dict[str, Dict] = {}
+    for (bracket_id, symbol, name, mode, signal, purpose, status, qty, price,
+         trigger_price, fill_price, pnl, exit_reason, created_at) in rows:
+        t = trades.setdefault(bracket_id, {
+            "bracket_id": bracket_id, "symbol": symbol, "name": name,
+            "mode": mode, "signal": signal, "quantity": qty,
+            "entry_price": None, "entry_at": None,
+            "target_price": None, "stop_loss": None,
+            "exit_price": None, "exit_at": None, "exit_reason": None,
+            "realized_pnl": None, "status": "OPEN",
+        })
+        if purpose == "ENTRY" and status == "EXECUTED":
+            t["entry_price"] = fill_price if fill_price is not None else price
+            t["entry_at"]    = created_at
+            t["quantity"]    = qty
+        elif purpose == "STOP_LOSS":
+            t["stop_loss"] = trigger_price if trigger_price is not None else price
+        elif purpose == "TARGET":
+            t["target_price"] = trigger_price if trigger_price is not None else price
+        elif purpose == "SQUARE_OFF" and status == "EXECUTED":
+            t["exit_price"]   = fill_price if fill_price is not None else price
+            t["exit_at"]      = created_at
+            t["realized_pnl"] = pnl
+            t["exit_reason"]  = exit_reason
+
+    out = []
+    for t in trades.values():
+        if t["entry_price"] is None:
+            # A bracket whose entry never filled is not a trade that happened.
+            continue
+        if t["exit_price"] is not None:
+            reason = t["exit_reason"]
+            if not reason:
+                # Legacy rows predate exit_reason (square_off used to discard the
+                # trigger). Infer from where it closed relative to the levels.
+                if t["target_price"] and t["exit_price"] >= t["target_price"]:
+                    reason = "TARGET"
+                elif t["stop_loss"] and t["exit_price"] <= t["stop_loss"]:
+                    reason = "STOP_LOSS"
+                else:
+                    reason = "MANUAL"
+                t["exit_reason"] = reason
+            t["status"] = {"TARGET": "TARGET_HIT",
+                           "STOP_LOSS": "STOPPED"}.get(reason, "CLOSED")
+        out.append(t)
+
+    out.sort(key=lambda r: (r["exit_at"] or r["entry_at"]), reverse=True)
+    return out[:limit]
+
+
 def enrich_orders(rows: List[Dict]) -> List[Dict]:
     """
     Attach the four prices every order table renders to each row, in place.
@@ -927,34 +1008,109 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
         bracket_id = pos_dict.get("bracket_id")
         position_mode = pos_dict.get("mode", "PAPER")
 
-        # Create SELL order
-        _execute(conn, """
-            INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
-                quantity, price, status, mode, fill_price, fees, pnl, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'SELL', 'SQUARE_OFF', ?, ?, 'EXECUTED', ?, ?, ?, ?, ?, ?)
-        """, (user_id, bracket_id, symbol, pos_dict.get("name"), qty, sell_price,
-              position_mode, sell_price, fees, net_pnl, now, now))
+        # ---- Exit legs, one per bracket ----------------------------------
+        #
+        # `positions` is UNIQUE(user_id, symbol), so a position merges every buy
+        # of that symbol and can span several brackets. This used to write ONE
+        # SQUARE_OFF row against the position's own bracket_id, which left every
+        # other contributing bracket with an entry and no exit — permanently
+        # reporting as still-open in the trade view even though the shares were
+        # sold. Real case (user 2, BAJAJFINSV.NS): bracket 4b3f33 got a 68-share
+        # exit against its 56-share entry, and bracket d1fdf7's 11 shares got no
+        # exit row at all.
+        #
+        # The position-level totals below (sell_value, invested, net_pnl) stay
+        # authoritative and still drive the balance — only the record of *which
+        # bracket sold what* becomes per-bracket.
+        open_brackets = _fetchall(conn, """
+            SELECT o.bracket_id,
+                   SUM(CASE WHEN o.order_purpose = 'ENTRY' AND o.status = 'EXECUTED'
+                            THEN o.quantity ELSE 0 END)                        AS entry_qty,
+                   MAX(CASE WHEN o.order_purpose = 'ENTRY' AND o.status = 'EXECUTED'
+                            THEN COALESCE(o.fill_price, o.price) END)          AS entry_price
+            FROM orders o
+            WHERE o.user_id = ? AND o.symbol = ? AND o.bracket_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM orders s
+                  WHERE s.bracket_id = o.bracket_id
+                    AND s.order_purpose = 'SQUARE_OFF' AND s.status = 'EXECUTED')
+            GROUP BY o.bracket_id
+            HAVING SUM(CASE WHEN o.order_purpose = 'ENTRY' AND o.status = 'EXECUTED'
+                            THEN o.quantity ELSE 0 END) > 0
+            ORDER BY MIN(o.created_at)
+        """, (user_id, symbol))
 
-        # Cancel pending SL and TARGET orders for this bracket
-        if bracket_id:
-            # If LIVE mode, cancel GTT rules on Angel One first
+        # Defensive: a position with no identifiable open bracket still has to be
+        # recorded, so fall back to the old single-row behaviour.
+        if not open_brackets:
+            open_brackets = [(bracket_id, qty, buy_price)]
+
+        entry_total = sum(int(b[1] or 0) for b in open_brackets) or qty
+
+        # Each bracket exits exactly what it entered; any drift between the
+        # position and the sum of its entries goes to the FIRST (earliest)
+        # bracket. Proportional apportionment would be worse here: with a
+        # position of 68 against entries of 56+11, splitting by ratio hands the
+        # 11-share bracket a 12-share exit — selling more than it ever bought.
+        exit_legs = []
+        drift = qty - entry_total
+        assigned_fees = 0
+        for i, (b_id, b_qty, b_entry) in enumerate(open_brackets):
+            leg_qty = int(b_qty or 0) + (drift if i == 0 else 0)
+            if leg_qty <= 0:
+                continue
+            last = i == len(open_brackets) - 1
+            if last:
+                leg_fees = round(fees - assigned_fees, 2)
+            else:
+                leg_fees = round(fees * (leg_qty / qty), 2) if qty else 0.0
+                assigned_fees += leg_fees
+            basis   = b_entry if b_entry is not None else buy_price
+            leg_pnl = round(leg_qty * (sell_price - basis) - leg_fees, 2)
+            exit_legs.append((b_id, leg_qty, leg_fees, leg_pnl))
+
+        legs_pnl = round(sum(l[3] for l in exit_legs), 2)
+        if abs(legs_pnl - net_pnl) > 0.05:
+            # Not forced to match: a gap means the position's cost basis and its
+            # entry legs genuinely disagree, and hiding that would make the books
+            # look consistent when they are not.
+            _angel_log.warning(
+                "square_off %s user=%s: per-bracket P&L %.2f != position P&L %.2f "
+                "(cost-basis drift across %d brackets)",
+                symbol, user_id, legs_pnl, net_pnl, len(exit_legs))
+
+        for b_id, leg_qty, leg_fees, leg_pnl in exit_legs:
+            _execute(conn, """
+                INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
+                    quantity, price, status, mode, fill_price, fees, pnl, exit_reason,
+                    created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'SELL', 'SQUARE_OFF', ?, ?, 'EXECUTED', ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, b_id, symbol, pos_dict.get("name"), leg_qty, sell_price,
+                  position_mode, sell_price, leg_fees, leg_pnl, trigger, now, now))
+
+        # Cancel the pending SL/TARGET legs of EVERY bracket that just exited —
+        # not only the position's own, or the others keep resting forever.
+        exited_brackets = [l[0] for l in exit_legs if l[0]]
+        if exited_brackets:
+            placeholders = ",".join("?" for _ in exited_brackets)
             if position_mode == "LIVE":
-                pending_gtts = _fetchall(conn, """
+                pending_gtts = _fetchall(conn, f"""
                     SELECT gtt_rule_id FROM orders
-                    WHERE bracket_id = ? AND status = 'PENDING' AND gtt_rule_id IS NOT NULL
-                """, (bracket_id,))
+                    WHERE bracket_id IN ({placeholders})
+                      AND status = 'PENDING' AND gtt_rule_id IS NOT NULL
+                """, tuple(exited_brackets))
 
                 from trading.gtt_manager import cancel_gtt
                 for row in pending_gtts:
                     if row[0]:
                         cancel_gtt(int(row[0]))
 
-            _execute(conn, """
+            _execute(conn, f"""
                 UPDATE orders SET status = 'CANCELLED', gtt_status = CASE
                     WHEN gtt_rule_id IS NOT NULL THEN 'CANCELLED' ELSE gtt_status END,
                     updated_at = ?
-                WHERE bracket_id = ? AND status = 'PENDING'
-            """, (now, bracket_id))
+                WHERE bracket_id IN ({placeholders}) AND status = 'PENDING'
+            """, (now, *exited_brackets))
 
         # Update user balance
         is_win = 1 if net_pnl > 0 else 0
@@ -981,7 +1137,7 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
         # tracking is not disrupted. So a second mandate on the same symbol is
         # folded into the same row and its bracket_id is discarded. Settling by
         # bracket_id alone therefore closed only the first mandate and orphaned
-        # the rest at status='EXECUTED' forever, with no position behind them.
+        # the rest at status='OPEN' forever, with no position behind them.
         #
         # Real case (user 2, BAJAJFINSV.NS): mandate 1 (56 @ 1765) created the
         # position; mandate 2 (11 @ 1764.6) merged in; on 2026-07-31 the target
@@ -995,7 +1151,7 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
         try:
             cur = _execute(conn,
                 """SELECT id, bracket_id, qty FROM authorized_trades
-                    WHERE user_id = ? AND symbol = ? AND status = 'EXECUTED'
+                    WHERE user_id = ? AND symbol = ? AND status = 'OPEN'
                     ORDER BY id""",
                 (user_id, symbol))
             mandates = cur.fetchall()
@@ -1009,14 +1165,14 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
                     share = ((m_qty or 0) / total_qty) if total_qty else (1.0 / len(mandates))
                     # cmp is set to the EXIT price, not left at entry. The
                     # autopilot page renders cmp as the live market price, and
-                    # price_monitor only refreshes it while status='EXECUTED';
+                    # price_monitor only refreshes it while status='OPEN';
                     # once settled nothing touches it again, so a closed mandate
                     # would display its entry price forever and show a P&L of
                     # +₹0 next to a realised profit.
                     _execute(conn,
                         """UPDATE authorized_trades
                            SET status = ?, actual_pnl = ?, cmp = ?, updated_at = NOW()
-                           WHERE id = ? AND status = 'EXECUTED'""",
+                           WHERE id = ? AND status = 'OPEN'""",
                         (mandate_status, round(net_pnl * share, 2), sell_price, m_id))
                 conn.commit()
                 if len(mandates) > 1:

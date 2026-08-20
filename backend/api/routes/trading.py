@@ -14,13 +14,15 @@ from api.schemas import (
     AuthOut, UserCreateOut, UserOut, ExecuteSignalOut,
     PaginatedPositionsOut, PaginatedOrdersOut,
     SquareOffOut, SquareOffAllOut,
-    PortfolioSummaryOut, RiskSettingsOut, RiskSettingsUpdateOut, TodayPnlOut,
+    PortfolioSummaryOut, PortfolioValueHistoryOut,
+    RiskSettingsOut, RiskSettingsUpdateOut, TodayPnlOut,
     StatusOut,
 )
 from trading.trading_engine import (
     create_user, get_user, get_user_by_username, _safe_user,
-    execute_signal, get_positions, get_orders,
+    execute_signal, get_positions, get_orders, get_trades,
     square_off, square_off_all, get_portfolio_summary,
+    get_portfolio_value_history,
     PartialCapacityError, RiskCheckFailed,
 )
 from trading.risk_manager import (
@@ -364,6 +366,31 @@ async def api_get_orders(
             "total": total, "page": page, "size": size, "count": total}
 
 
+@router.get("/trades/{user_id}")
+async def api_get_trades(user_id: int, limit: int = 200, user=Depends(get_current_user)):
+    """
+    Trade history — one row per bracket, not per order leg.
+
+    `/orders/{user_id}` remains the leg-level audit view. This is the one the
+    history screen should read: a bracket is 3-4 order rows, so the leg view
+    showed a single trade as three, two of which were resting instructions that
+    had never executed.
+    """
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    trades = get_trades(user_id, limit)
+
+    # Same current-price overlay the order rows get, so the history screen can
+    # show an open trade against where the stock trades now.
+    if trades:
+        from database.db import get_latest_close_map
+        close_map = get_latest_close_map(sorted({t["symbol"] for t in trades if t.get("symbol")}))
+        for t in trades:
+            t["current_price"] = close_map.get(t.get("symbol"))
+
+    return {"user_id": user_id, "data": trades, "total": len(trades)}
+
+
 @router.post("/square-off/{user_id}/{symbol}", response_model=SquareOffOut)
 async def api_square_off(user_id: int, symbol: str, req: SquareOffRequest = None, user=Depends(get_current_user)):
     """Sell an entire position."""
@@ -400,6 +427,26 @@ async def api_portfolio_summary(user_id: int, user=Depends(get_current_user)):
         update_position_prices(user_id)
         summary = get_portfolio_summary(user_id)
         return summary
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/portfolio/{user_id}/history", response_model=PortfolioValueHistoryOut)
+async def api_portfolio_value_history(
+    user_id: int, range: str = "90D", user=Depends(get_current_user)
+):
+    """Portfolio value per trading day over 30D / 90D / 1Y.
+
+    Its own route rather than a field on the summary: the summary is fetched by
+    every dashboard on every load, and this walks a year of order history and
+    price bars for one chart on one page.
+    """
+    if user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if range not in ("30D", "90D", "1Y"):
+        raise HTTPException(status_code=400, detail="range must be one of 30D, 90D, 1Y")
+    try:
+        return get_portfolio_value_history(user_id, range)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

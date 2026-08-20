@@ -2,15 +2,18 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useAuth } from '../AuthContext';
-import { useGetPortfolioSummaryQuery, useGetTodayPnlQuery } from '../services/tradeMindApiService';
+import {
+  useGetPortfolioSummaryQuery, useGetPortfolioHistoryQuery, useGetTodayPnlQuery,
+} from '../services/tradeMindApiService';
 import {
   Card, SignalBadge, Delta, Skeleton, SymbolCell,
   DataTable, priceColumns, type DataTableColumn,
 } from '../components/ui';
 import { AreaChart, Donut } from '../components/Charts';
 import { AddPositionModal } from '../components/AddPositionModal';
+import { sectorColors } from '../utils/sectorColors';
 
-import type { Holding, AllocSlice } from '../types';
+import type { Holding } from '../types';
 
 function inrCompact(n: number) {
   const a = Math.abs(n);
@@ -27,21 +30,41 @@ export default function PortfolioPage() {
 
   const { data: portData, isLoading: loading, isFetching, isError } = useGetPortfolioSummaryQuery(user?.id ?? 0, { skip: !user });
   const { data: todayPnlData } = useGetTodayPnlQuery(user?.id ?? 0, { skip: !user });
+  // Its own request, not a field on the summary: it is the only thing on the
+  // page that changes when the range buttons are clicked, and re-fetching the
+  // whole portfolio to redraw one chart would blank the cards and the table.
+  const { data: histData, isFetching: histFetching } =
+    useGetPortfolioHistoryQuery({ userId: user?.id ?? 0, range }, { skip: !user });
   const raw = portData as any;
 
   // Sorting moved into DataTable.
   const holdings: Holding[] = raw?.positions ?? [];
 
-  const alloc:   AllocSlice[] = raw?.allocation ?? [];
-  const series:  number[]     = raw?.pnl_history?.[range] ?? [];
-  const pnlPct:  number       = raw?.total_pnl_pct ?? 0;   // served by the API, not divided here
-  const sectors: number       = new Set((holdings ?? []).map(h => h?.sector)).size;
+  const alloc = raw?.allocation ?? [];
+  const series: number[] = histData?.series ?? [];
+  const pnlPct:  number  = raw?.total_pnl_pct ?? 0;   // served by the API, not divided here
+  const sectors: number  = new Set((holdings ?? []).map(h => h?.sector)).size;
 
-  const rangeLabels: Record<string, string[]> = {
-    '30D': ['30d ago', '20d', '10d', 'Today'],
-    '90D': ['90d ago', '60d', '30d', 'Today'],
-    '1Y':  ['1Y ago',  '9mo', '6mo', '3mo', 'Now'],
-  };
+  // The real trading dates the points were sampled on. The axis hides these —
+  // they surface in the tooltip, so hovering a point says which day it is.
+  // Previously four fixed strings ("30d ago", "20d", …) were spread across
+  // thirty points, so every tooltip but the first named the wrong day.
+  const chartLabels = useMemo(
+    () => (histData?.dates ?? []).map(d =>
+      new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })),
+    [histData?.dates],
+  );
+
+  // Colour is assigned here, not served: it is presentation, and the palette
+  // has to be resolved against the other slices in the same donut.
+  const allocSlices = useMemo(() => {
+    const colors = sectorColors((alloc ?? []).map((a: any) => a?.sector));
+    return (alloc ?? []).map((a: any, i: number) => ({
+      sector: a?.sector ?? 'Unclassified',
+      val: a?.val ?? 0,
+      color: colors[i],
+    }));
+  }, [alloc]);
 
   const holdingCols = useMemo<DataTableColumn<Holding>[]>(() => [
     { id: 'symbol', header: 'Symbol',
@@ -168,14 +191,27 @@ export default function PortfolioPage() {
           }
         >
           <div className="dp" style={{ paddingTop: 10 }}>
-            {loading ? <Skeleton h={230} /> : <AreaChart data={series} color="var(--accent)" h={230} labels={rangeLabels[range]} currency />}
+            {loading || (histFetching && !series.length)
+              ? <Skeleton h={230} />
+              : series.length
+                ? <AreaChart data={series} color="var(--accent)" h={230} labels={chartLabels} currency />
+                : <div className="grid place-items-center text-[13px] text-ink-3" style={{ height: 230 }}>
+                    No value history yet.
+                  </div>}
           </div>
         </Card>
 
         <Card title="Allocation" sub="By sector"
           icon={<svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M12 3a9 9 0 0 1 9 9h-9z" opacity=".4" fill="currentColor" stroke="none"/></svg>}>
           <div className="dp">
-            {loading ? <Skeleton h={180} /> : <Donut data={alloc} centerTop="Total" centerBottom={inrCompact(raw?.total_value ?? 0)} size={240} />}
+            {loading
+              ? <Skeleton h={180} />
+              : allocSlices.length
+                ? <Donut data={allocSlices} centerTop="Holdings"
+                         centerBottom={inrCompact(allocSlices.reduce((a: any, s: { val: any; }) => a + (s?.val ?? 0), 0))} size={240} />
+                : <div className="grid place-items-center text-[13px] text-ink-3" style={{ height: 180 }}>
+                    No open positions to allocate.
+                  </div>}
           </div>
         </Card>
       </div>

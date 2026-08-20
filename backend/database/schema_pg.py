@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS authorized_trades (
     cmp         DOUBLE PRECISION,
     actual_pnl  DOUBLE PRECISION,
     status      TEXT DEFAULT 'PENDING'
-                    CHECK (status IN ('PENDING','EXECUTING','EXECUTED','COMPLETED','STOPPED','CANCELLED')),
+                    CHECK (status IN ('PENDING','EXECUTING','OPEN','COMPLETED','STOPPED','CANCELLED')),
     bracket_id  TEXT,
     sl_gtt_id   TEXT,
     target_gtt_id TEXT,
@@ -521,6 +521,35 @@ ALTER TABLE model_training_stats DROP CONSTRAINT IF EXISTS chk_mts_status;
 ALTER TABLE model_training_stats ADD CONSTRAINT chk_mts_status CHECK (status IN ('ok','no_data','below_threshold')) NOT VALID;
 """
 
+# Migration: orders.status was unconstrained TEXT, and the vocabulary drifted.
+#
+# `authorized_trades.status` has always had a CHECK; `orders.status` never did,
+# so broker wording leaked straight into the column — 7 PAPER rows hold
+# 'COMPLETE' (no D) because an Angel One status was stored verbatim instead of
+# being mapped at the boundary. trading_engine then grew a defensive
+# _FILLED_STATUSES tuple to accept every variant, i.e. the code compensating for
+# what the schema should have prevented.
+#
+# Normalise the whole filled-family to EXECUTED, then constrain. Order matters:
+# drop first, rewrite the data, then add the constraint back.
+# exit_reason: square_off() has always taken a `trigger` argument
+# ('STOP_LOSS' | 'TARGET' | 'MANUAL') and then thrown it away — the SQUARE_OFF
+# row records the price but never why the trade closed. Reconstructing it after
+# the fact means comparing the exit price to levels that may since have changed,
+# so record it at write time instead.
+SQL_ORDERS_EXIT_REASON = [
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS exit_reason TEXT",
+]
+
+SQL_ORDERS_STATUS_MIGRATE = [
+    "ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check",
+    "UPDATE orders SET status = 'EXECUTED' "
+    "WHERE status IN ('COMPLETE', 'COMPLETED', 'FILLED')",
+    "ALTER TABLE orders ADD CONSTRAINT orders_status_check "
+    "CHECK (status IN ('PENDING','PLACED','EXECUTED','CANCELLED','REJECTED'))",
+]
+
+
 # Migration: authorized_trades gains a link to the AI signal it was authorised
 # against, and a CANCELLED status.
 #
@@ -550,8 +579,19 @@ SQL_AUTHORIZED_TRADES_ALTER = [
     # caller set EXECUTED, _execute_mandate then looked for PENDING, matched
     # nothing, reported "already claimed", and the caller reverted to PENDING.
     # Turning autopilot ON fired nothing at all.
+    # 'EXECUTED' meant two different things depending on which table you read.
+    # On `orders` it means "this leg filled" — terminal for that leg. On a
+    # mandate it meant "acted on, and the trade is now LIVE" — not terminal at
+    # all; it becomes COMPLETED on target or STOPPED on stop. The UI had to
+    # translate it to "Running" for display, which is how the same trade came to
+    # read EXECUTED on one page and Running on another.
+    #
+    # OPEN says what the state is. Renamed here so the stored value matches the
+    # thing it describes, and so a stray write of 'EXECUTED' to this table now
+    # fails the CHECK loudly instead of silently meaning the wrong thing.
+    "UPDATE authorized_trades SET status = 'OPEN' WHERE status = 'EXECUTED'",
     "ALTER TABLE authorized_trades ADD CONSTRAINT authorized_trades_status_check "
-    "CHECK (status IN ('PENDING','EXECUTING','EXECUTED','COMPLETED','STOPPED','CANCELLED'))",
+    "CHECK (status IN ('PENDING','EXECUTING','OPEN','COMPLETED','STOPPED','CANCELLED'))",
     # fill_price: what the entry actually filled at, which is not `entry`.
     # `entry` is the price the user authorised and must stay untouched — the
     # drift check in refresh_pending_mandates_job compares against it, and it is
@@ -1078,6 +1118,14 @@ def init_timescale(conn) -> None:
                 logger.warning(f"ALTER TABLE model_training_stats: {e}")
 
     # authorized_trades: signal link + CANCELLED status (idempotent)
+    for stmt in SQL_ORDERS_EXIT_REASON + SQL_ORDERS_STATUS_MIGRATE:
+        try:
+            cur.execute(stmt)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"orders status migration skipped: {e}")
+
     for stmt in SQL_AUTHORIZED_TRADES_ALTER:
         try:
             cur.execute(stmt)

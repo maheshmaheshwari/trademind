@@ -4,28 +4,33 @@ import { Download, RefreshCw, BrainCircuit } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../components/ui';
 import {
-  useGetPositionsQuery, useGetOrdersQuery, useSquareOffMutation,
+  useGetPositionsQuery, useGetTradesQuery, useSquareOffMutation,
   useGetGTTOrdersQuery, useSyncGTTMutation, useGetUserSignalHistoryQuery,
   useAuthorizeTradeAutoMutation, useGetAuthorizedTradesQuery,
 } from '../services/tradeMindApiService';
 import { Card, SymbolCell, SignalBadge, DataTable, priceColumns, type DataTableColumn } from '../components/ui';
 
-import type { OpenPosition, Trade, GTTOrder } from '../types';
+import type { OpenPosition, TradeRow, GTTOrder } from '../types';
 
 function inr(n: number, dec = 2) {
   return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
 }
-function inrCompact(n: number) {
-  const a = Math.abs(n);
-  if (a >= 1e7) return '₹' + (n / 1e7).toFixed(2) + ' Cr';
-  if (a >= 1e5) return '₹' + (n / 1e5).toFixed(2) + ' L';
-  return '₹' + n.toLocaleString('en-IN');
-}
 
 type Tab = 'open' | 'history' | 'gtt' | 'ai_signals';
 type DateRange = 'All' | '7D' | '30D' | '90D';
-type SideFlt = 'All' | 'BUY' | 'SELL';
+type SideFlt = 'All' | 'Open' | 'Closed';   // a TRADE is open or closed; BUY/SELL described a leg
 const PER_PAGE = 18;
+
+/** Trade state -> [label, text, background]. Same words the autopilot screen
+ *  shows, so one trade cannot read "EXECUTED" on one page and "Running" on another. */
+function tradeStatusMeta(status?: string): [string, string, string] {
+  switch (status) {
+    case 'OPEN':       return ['Running',    'var(--accent-2)', 'var(--accent-soft)'];
+    case 'TARGET_HIT': return ['Target hit', 'var(--green)',    'var(--green-soft)'];
+    case 'STOPPED':    return ['Stopped',    'var(--red)',      'var(--red-soft)'];
+    default:           return ['Closed',     'var(--text-2)',   'var(--surface-3)'];
+  }
+}
 
 function Pill({ color, bg, children }: { color: string; bg: string; children: React.ReactNode }) {
   return (
@@ -46,7 +51,7 @@ export default function TradesPage() {
   const navigate = useNavigate();
 
   const { data: posRes,    isLoading: loadPos, isFetching: fetchPos, isError: errPos  } = useGetPositionsQuery({ userId: user?.id ?? 0, size: 100 }, { skip: !user });
-  const { data: ordRes,    isLoading: loadOrd, isFetching: fetchOrd, isError: errOrd  } = useGetOrdersQuery({ userId: user?.id ?? 0, size: 200 }, { skip: !user });
+  const { data: trdRes,    isLoading: loadTrd, isFetching: fetchTrd, isError: errTrd } = useGetTradesQuery({ userId: user?.id ?? 0 }, { skip: !user });
   const { data: gttRes,    isLoading: loadGtt, isFetching: fetchGtt  } = useGetGTTOrdersQuery(user?.id ?? 0, { skip: !user });
   const { data: sigHist,   isLoading: loadSig, isFetching: fetchSig  } = useGetUserSignalHistoryQuery({ userId: user?.id ?? 0 }, { skip: !user });
   const [squareOff]                               = useSquareOffMutation();
@@ -56,16 +61,19 @@ export default function TradesPage() {
   const [autopilotingSymbols, setAutopilotingSymbols] = useState<Set<string>>(new Set());
   const autopilotSymbolsRef = useRef<Set<string>>(new Set());
 
-  // Symbols already managed by autopilot (PENDING or EXECUTED)
+  // Symbols already managed by autopilot (PENDING or OPEN)
   const autopilotSymbolSet = new Set(
     ((authTradesRes as any)?.data ?? [])
-      .filter((t: any) => t?.status === 'PENDING' || t?.status === 'EXECUTED')
+      .filter((t: any) => t?.status === 'PENDING' || t?.status === 'OPEN')
       .map((t: any) => t?.symbol ?? '')
   );
 
-  const loading   = loadPos || loadOrd || loadGtt;
+  const loading   = loadPos || loadTrd || loadGtt;
   const positions: OpenPosition[] = (posRes as any)?.data ?? [];
-  const trades:    Trade[]        = (ordRes as any)?.data  ?? [];
+  // History reads TRADES (one row per bracket). Reading `orders` here showed a
+  // single trade as 3 rows, two of which were resting instructions that never
+  // executed — 14 of user 2's 25 'trades' had never happened.
+  const tradeRows: TradeRow[]     = (trdRes as any)?.data  ?? [];
   const gttOrders: GTTOrder[]     = (gttRes as any)?.data  ?? [];
 
   // Audit H12 — per-symbol in-flight guard, set synchronously (independent
@@ -124,11 +132,17 @@ export default function TradesPage() {
   }
 
   const today = new Date();
-  const histFiltered = ([...(trades ?? [])])
+  const histFiltered = ([...(tradeRows ?? [])])
     .filter(t => {
-      const days = (today.getTime() - new Date(t?.created_at ?? '').getTime()) / 86400000;
+      const stamp = t?.exit_at ?? t?.entry_at ?? '';
+      const days = (today.getTime() - new Date(stamp).getTime()) / 86400000;
       const rangeOk = dateRange === 'All' || (dateRange === '7D' && days <= 7) || (dateRange === '30D' && days <= 30) || (dateRange === '90D' && days <= 90);
-      return rangeOk && (sideFlt === 'All' || t?.order_type === sideFlt);
+      // A trade is open or closed — "BUY/SELL" was a property of a leg, so the
+      // side filter now selects by whether the trade is still running.
+      const sideOk = sideFlt === 'All'
+        || (sideFlt === 'Open'   && t?.status === 'OPEN')
+        || (sideFlt === 'Closed' && t?.status !== 'OPEN');
+      return rangeOk && sideOk;
     });  // sorting moved into DataTable
 
 
@@ -200,39 +214,41 @@ export default function TradesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [autopilotSymbolSet, autopilotingSymbols]);
 
-  const histCols = useMemo<DataTableColumn<Trade>[]>(() => [
-    { id: 'created_at', header: 'Date',
-      accessor: t => new Date(t?.created_at ?? '').getTime(),
+  const histCols = useMemo<DataTableColumn<TradeRow>[]>(() => [
+    { id: 'entry_at', header: 'Date',
+      accessor: t => new Date(t?.exit_at ?? t?.entry_at ?? '').getTime(),
       cell: t => (
         <span className="text-[12.5px] text-ink-3 font-mono">
-          {new Date(t?.created_at ?? '').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+          {new Date(t?.entry_at ?? '').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
         </span>
       ) },
     { id: 'symbol', header: 'Symbol', sortable: false,
-      cell: t => <SymbolCell symbol={t?.symbol ?? ''} name={t?.name ?? ''} sector={t?.sector ?? ''} showSector={false} /> },
-    { id: 'order_type', header: 'Type', sortable: false,
-      cell: t => <Pill color={t?.order_type === 'BUY' ? 'var(--green)' : 'var(--red)'} bg={t?.order_type === 'BUY' ? 'var(--green-soft)' : 'var(--red-soft)'}>{t?.order_type}</Pill> },
+      cell: t => <SymbolCell symbol={t?.symbol ?? ''} name={t?.name ?? ''} sector="" showSector={false} /> },
     { id: 'quantity', header: 'Qty', align: 'right', mono: true, cell: t => t?.quantity },
-    // These are per-LEG rows, so the levels come from the row's bracket (the
-    // route overlays them) rather than from the leg itself — a SELL leg's own
-    // price is a trigger, not an entry.
-    ...priceColumns<Trade>({
+    // The Sell column finally has real data to show: a closed trade reports what
+    // it actually sold for, an open one shows the target as a projection.
+    ...priceColumns<TradeRow>({
       entry:    t => t?.entry_price,
       current:  t => t?.current_price,
-      sold:     t => (t?.sold ? t?.sell_price : null),
+      sold:     t => t?.exit_price,
       target:   t => t?.target_price,
       stopLoss: t => t?.stop_loss,
     }),
-    { id: 'value', header: 'Value', align: 'right', mono: true,
-      cell: t => <span className="text-ink-2">{inrCompact(t?.value ?? 0)}</span> },
-    { id: 'pnl', header: 'P&L', align: 'right', mono: true,
-      cell: t => (
-        <span className="font-semibold" style={{ color: (t?.pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-          {((t?.pnl ?? 0) >= 0 ? '+' : '') + Number(t?.pnl ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-        </span>
-      ) },
+    { id: 'realized_pnl', header: 'Realized P&L', align: 'right', mono: true,
+      cell: t => t?.realized_pnl == null
+        ? <span className="text-ink-3">—</span>
+        : (
+          <span className="font-semibold" style={{ color: t.realized_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+            {(t.realized_pnl >= 0 ? '+' : '') + Number(t.realized_pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          </span>
+        ) },
+    // Trade state, in the same vocabulary the autopilot screen uses — the two
+    // pages described the same trade with different words before this.
     { id: 'status', header: 'Status', align: 'right', sortable: false,
-      cell: t => <Pill color="var(--green)" bg="var(--green-soft)">{t?.status}</Pill> },
+      cell: t => {
+        const [label, c, bg] = tradeStatusMeta(t?.status);
+        return <Pill color={c} bg={bg}>{label}</Pill>;
+      } },
   ], []);
 
   const gttCols = useMemo<DataTableColumn<GTTOrder>[]>(() => [
@@ -314,11 +330,20 @@ export default function TradesPage() {
       ) },
   ], []);
   const signalHist = (sigHist as any)?.data ?? [];
-  const counts     = { open: openPos.length, history: trades.length, gtt: gttOrders.length, ai_signals: signalHist.length };
+  const counts     = { open: openPos.length, history: tradeRows.length, gtt: gttOrders.length, ai_signals: signalHist.length };
 
   function exportCSV() {
-    const head = 'Date,Symbol,Side,Qty,Price,Value,Realized P&L\n';
-    const body = histFiltered.map(t => `${t?.created_at ? new Date(t.created_at).toISOString().slice(0, 10) : ''},${t?.symbol ?? ''},${t?.order_type ?? ''},${t?.quantity ?? 0},${t?.price ?? 0},${t?.value ?? 0},${t?.pnl ?? 0}`).join('\n');
+    // Exports TRADES. This used to export order legs, so a CSV of "25 trades"
+    // contained 14 rows for orders that never executed.
+    const head = 'Entry Date,Exit Date,Symbol,Qty,Entry,Exit,Stop Loss,Target,Exit Reason,Realized P&L,Status\n';
+    const body = histFiltered.map(t => [
+      t?.entry_at ? new Date(t.entry_at).toISOString().slice(0, 10) : '',
+      t?.exit_at  ? new Date(t.exit_at).toISOString().slice(0, 10)  : '',
+      t?.symbol ?? '', t?.quantity ?? 0,
+      t?.entry_price ?? '', t?.exit_price ?? '',
+      t?.stop_loss ?? '', t?.target_price ?? '',
+      t?.exit_reason ?? '', t?.realized_pnl ?? '', t?.status ?? '',
+    ].join(',')).join('\n');
     const blob = new Blob([head + body], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a'); a.href = url; a.download = 'trademind-trades.csv'; a.click();
@@ -336,9 +361,9 @@ export default function TradesPage() {
     <div className="flex flex-col dgap animate-page-in">
 
       {/* Audit Low item — was indistinguishable from "no data" */}
-      {(errPos || errOrd) && (
+      {(errPos || errTrd) && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-[11px] bg-[var(--red-soft)] text-[var(--red)] text-[13px] font-semibold">
-          Couldn't load your {errPos && errOrd ? 'positions and orders' : errPos ? 'positions' : 'orders'}. Check your connection and try again.
+          Couldn't load your {errPos && errTrd ? 'positions and trades' : errPos ? 'positions' : 'trades'}. Check your connection and try again.
         </div>
       )}
 
@@ -394,9 +419,9 @@ export default function TradesPage() {
                 </div>
               </div>
               <div className="flex flex-col gap-[5px]">
-                <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">Side</span>
+                <span className="text-[11px] font-semibold text-ink-3 tracking-[.03em] uppercase">State</span>
                 <div className="inline-flex bg-surface-2 border border-line rounded-[10px] p-[3px] gap-[2px]">
-                  {(['All', 'BUY', 'SELL'] as SideFlt[]).map(r => (
+                  {(['All', 'Open', 'Closed'] as SideFlt[]).map(r => (
                     <button key={r} className={segBtn(sideFlt === r)} onClick={() => { setSideFlt(r); }}>{r}</button>
                   ))}
                 </div>
@@ -407,12 +432,12 @@ export default function TradesPage() {
           <DataTable
             columns={histCols}
             data={histFiltered}
-            isLoading={loading}
-            isFetching={fetchOrd}
+            isLoading={loadTrd}
+            isFetching={fetchTrd}
             skeletonRows={9}
-            initialSort={{ id: 'created_at', desc: true }}
+            initialSort={{ id: 'entry_at', desc: true }}
             pagination={{ perPage: PER_PAGE }}
-            getRowId={t => String(t?.id ?? '')}
+            getRowId={t => t?.bracket_id ?? ''}
             emptyMessage="No trades in this range."
           />
         </Card>

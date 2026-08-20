@@ -1196,7 +1196,7 @@ def reconcile_autopilot_job():
                 SELECT a.id, a.user_id, a.symbol, a.qty, a.entry, a.target,
                        (a.updated_at AT TIME ZONE 'Asia/Kolkata')::date
                   FROM authorized_trades a
-                 WHERE a.status = 'EXECUTED'
+                 WHERE a.status = 'OPEN'
                    AND NOT EXISTS (SELECT 1 FROM positions p
                                     WHERE p.user_id = a.user_id AND p.symbol = a.symbol)
                  ORDER BY a.id

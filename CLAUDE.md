@@ -42,7 +42,8 @@ trademind/
 │   ├── model_archives/
 │   │   ├── training_snapshots/ — Per-symbol training output (v2/v3) written by model_training.py, read by scripts/retrain_failed_models.py
 │   │   └── previous_models/    — Pre-retrain backups, written by scripts/retrain_walk_forward.py
-│   ├── data/                  — angel_tokens.json, retrain_results.csv (signals live in the trade_signals DB table, not JSON)
+│   ├── data/                  — angel_tokens.json (config). retrain_results.csv still exists
+│   │                            on disk (369 KB) but is NO LONGER read by the API — see below
 │   ├── tests/                  — pytest suite, runs against the TEST Timescale Cloud instance only
 │   ├── migrate_sqlite_to_pg.py — One-shot SQLite → TimescaleDB migration
 │   ├── nifty500.db            — SQLite fallback (226MB, kept for reference)
@@ -211,11 +212,18 @@ them.
 ## ML Models
 
 - **File**: `analysis/model_training.py` — v4
-- **Models per stock**: XGBoost, XGB_HiReg, LightGBM, LGB_HiReg, RandomForest, GradBoost + Ensemble
+- **Models per stock**: XGBoost, XGB_HiReg, LightGBM, LGB_HiReg, RandomForest, GradBoost, CatBoost + Ensemble
 - **Horizons**: 5d (1W), 10d (2W), 20d (1M), 40d (2M), 60d (3M), 120d (6M)
 - **Target**: Raw return ≥ threshold (1.5% / 2.5% / 3.5% / 5% / 7% / 10%)
 - **Features**: 96 total — returns, MA distances, Bollinger, momentum, volatility, volume, candlestick, 52-week hi/lo, price percentile, gap, calendar, alpha vs market, sentiment
-- **Output**: `models/best_{symbol}_v3.pkl` — artifact with model, threshold, features, metrics
+- **Output**: `final_models/best_{symbol}.pkl` — artifact with model, threshold, features,
+  metrics. This directory is **authoritative for the API at runtime** (~527 files; `server.py`
+  loads from here, and `sync_models()` populates it on the Space).
+  Two other directories look similar and are not it:
+  `model_archives/training_snapshots/best_{symbol}_v3.pkl` (per-symbol training output, read by
+  `scripts/retrain_failed_models.py`) and `models/best_{symbol}_v2.pkl` (a local **scratch** dir
+  written by `model_training.py:1688` deliberately so a run cannot clobber the live set — not
+  deployed, not loaded).
 
 Retrain a single stock (`.env` is loaded automatically):
 ```bash
@@ -243,6 +251,10 @@ ANGEL_TOTP_SECRET=...
 JWT_SECRET=...
 PORT=8000
 LOG_LEVEL=INFO
+
+# Present in .env but READ BY NOTHING — see the Google sign-in note below.
+# The backend does not use it; do NOT add it to SECRET_KEYS.
+GOOGLE_CLIENT_ID=...
 ```
 
 ---
@@ -284,6 +296,24 @@ Optional: `HF_MODELS_REPO` (defaults to `{whoami}/trademind-models`),
 `SPACE_ID` is platform-set — `scheduler/jobs.py` keys off it to hand the Friday
 retrain to GitHub Actions.
 
+**Google sign-in is the one case where the `SECRET_KEYS` rule does _not_ apply,
+and it is worth stating so nobody "fixes" it by adding the variable.**
+`POST /auth/google` is implemented and live (`api/routes/auth_routes.py:183`),
+but it authenticates by sending the caller's Google **access token** to Google's
+`oauth2/v3/userinfo` endpoint — a flow that needs no client ID server-side.
+`grep -rn GOOGLE_CLIENT_ID --include=*.py` returns nothing: **no backend code
+reads it.** The `GOOGLE_CLIENT_ID` sitting in `backend/.env` is dead config, left
+over from `docs/11_google_oauth_implementation_plan.md`, which specified an
+id_token flow (`verify_oauth2_token`, which _does_ take the client ID) that is
+not what shipped. Adding it to `SECRET_KEYS` would push a secret the Space never
+reads and would wrongly imply the backend depends on it.
+
+The real production dependency is the frontend's `VITE_GOOGLE_CLIENT_ID`
+(`frontend/src/main.tsx:9`) — a **build-time** Vite variable baked into the
+bundle, so it belongs in the Vercel build env, not in the Space's secret store.
+If it is missing at build time, `GoogleOAuthProvider` gets `''` and the Google
+button fails in the browser while the backend looks perfectly healthy.
+
 The GitHub Actions workflows do **not** read the Space's store —
 `weekly-retrain.yml` and `deploy-backend.yml` have their own repository secrets.
 A rotated credential must be updated in both places.
@@ -296,28 +326,45 @@ A rotated credential must be updated in both places.
 
 ## API Base URL
 
-Backend listens on `http://localhost:8000`. Frontend calls it via `src/api.ts`.
+Backend listens on `http://localhost:8000`. Frontend calls it via
+`src/services/tradeMindApiService.ts`.
 
 Key routes:
-- `GET /api/signals` — latest trade signals
+- `GET /api/signals/latest` · `/api/signals/all` · `/api/signals/actionable` — trade signals
 - `GET /api/stocks` — stock list with prices
 - `GET /api/portfolio` — portfolios
-- `POST /api/trades/execute` — place paper/live trade
-- `GET /api/market` — market overview
+- `POST /api/trading/execute-signal` — place paper/live trade
+- `GET /api/market/overview` — market overview
 - `GET /api/market/holidays` — NSE trading calendar (+ next holiday, today's status)
 - `GET /api/market/data-freshness` — price dates verified against that calendar
-- `POST /auth/login` / `POST /auth/register`
+- `POST /api/trading/login` / `POST /api/trading/register`
+- `POST /auth/google` — Google sign-in (see the Google note above)
+
+> This list is maintained by hand and has drifted before — 5 of 9 entries were wrong.
+> Regenerate it rather than editing it:
+> ```bash
+> python -c "from api.server import app; [print(sorted(r.methods-{'HEAD','OPTIONS'})[0], r.path) for r in app.routes if getattr(r,'methods',None)]"
+> ```
+> The app currently exposes **96** routes; the nine below are only the ones worth memorising.
 
 ---
 
 ## Coding Conventions
 
-- **All persisted/application data MUST live in the database (TimescaleDB), never in JSON/CSV files on disk.** This is a hard rule. Signals are in `trade_signals`, prices in `prices`, etc. — anything a route serves or the app reads back must come from a DB table. Do NOT introduce file-backed data stores (e.g. `data/*.json`, `data/*.csv`) for app data, and do NOT add API endpoints that read/write such files. Reasons: the HF Space has ephemeral disk and never receives `data/**` (see `deploy_space.py` IGNORE_PATTERNS), so any JSON/CSV is invisible in production; and there is no durability, concurrency safety, or multi-instance consistency. Known legacy violations to migrate when touched, not extend: `retrain_results.csv` (model-training stats) and any `strategy_backtest.json`. `data/angel_tokens.json` is config (instrument-token map), not app data — that one's fine.
+- **All persisted/application data MUST live in the database (TimescaleDB), never in JSON/CSV files on disk.** This is a hard rule. Signals are in `trade_signals`, prices in `prices`, etc. — anything a route serves or the app reads back must come from a DB table. Do NOT introduce file-backed data stores (e.g. `data/*.json`, `data/*.csv`) for app data, and do NOT add API endpoints that read/write such files. Reasons: the HF Space has ephemeral disk and never receives `data/**` (see `deploy_space.py` IGNORE_PATTERNS), so any JSON/CSV is invisible in production; and there is no durability, concurrency safety, or multi-instance consistency. Known legacy violations to migrate when touched, not extend: any `strategy_backtest.json`. (`retrain_results.csv` **has been migrated** — `/api/backtest/summary` now reads `model_training_stats` from the DB. The CSV still sits in `backend/data/` and is still referenced by `scripts/model_store.py`; decide whether it is still produced for archival, and if not, delete both.) `data/angel_tokens.json` is config (instrument-token map), not app data — that one's fine.
 - Python: all DB queries use `?` placeholders — `db.py`'s `_execute()` auto-translates to `%s` for PG
 - Never use `pd.read_sql_query` with a psycopg2 connection — use `_query_to_df()` in model_training.py instead
 - All collectors import `get_connection` from `database.db` — never open DB connections directly
-- Frontend API calls go through `src/api.ts` — never hardcode `localhost:8000` in components
-- **Always use `release_connection(conn)` — never `conn.close()`**. `conn.close()` destroys the pool slot permanently; `release_connection` returns it to the `ThreadedConnectionPool` (maxconn=30).
+- Frontend API calls go through **`src/services/tradeMindApiService.ts`** (RTK Query) — never
+  hardcode `localhost:8000` in components. `src/api.ts` is the legacy axios layer and is being
+  retired: 16 modules import the RTK service, **1** still imports `api.ts` (`pages/AuthPage.tsx`).
+  Do not add new consumers of `api.ts`.
+- **Never call `conn.close()` on a connection from `get_connection()` — use
+  `release_connection(conn)`.** `conn.close()` destroys the pool slot permanently;
+  `release_connection` returns it to the `ThreadedConnectionPool` (**maxconn=10**, `db.py:61`).
+  **Exception:** a connection you opened yourself, outside the pool, *must* be closed —
+  `api/server.py:553` does this correctly on a dedicated non-pooled connection. The rule is
+  about pool ownership, not about the method.
 - **Never use `conn.execute()` — always use `_execute(conn, sql, params)`**. psycopg2 connections have no `.execute()` method; that's SQLite syntax.
 - **`insert_prices_batch` uses `DO UPDATE` for daily rows** (`time IS NULL`) so EOD data always overwrites incomplete intraday candles. Intraday rows still use `DO NOTHING`.
 
@@ -340,7 +387,17 @@ Apply both in every React component. No exceptions.
 // ❌  {(value ?? 0).toLocaleString('en-IN')}
 ```
 
-Already applied to: DashboardPage, MarketPage, WatchlistPage, TradesPage, AutopilotPage, PortfolioPage, BacktestPage.
+**Mandatory repo-wide**, not a per-page opt-in. Pattern 1 currently has **zero** violations.
+Pattern 2 has three genuine ones — `components/AddPositionModal.tsx:170`,
+`pages/StockPage.tsx:760`, `pages/AutopilotPage.tsx:119` — all of the bare
+`(x ?? 0).toLocaleString(…)` form.
+
+Not every `?? 0` is a violation: `Number(x ?? 0)` / `Math.round(x ?? 0)` /
+`Math.abs(x ?? 0)` are fine, because the coalesce is feeding a function that genuinely
+needs a number rather than masking a null before a method call. There are six of those and
+they should be left alone.
+
+A lint rule would make this paragraph unnecessary and is the real fix.
 
 ---
 
@@ -369,7 +426,7 @@ APP_ENV=test python -c "from database.db import get_connection; print(get_connec
 
 - `conftest.py` sets `APP_ENV=test` at import time, bootstraps the schema once per session, truncates `prices`/`technical_indicators`/`trade_signals`/`news_sentiment` before every test, and provides an `api_client` fixture (`TestClient(app)`, deliberately not used as a context manager so `api/server.py`'s `startup_event` — and the real APScheduler — never runs).
 - `tests/fixtures/*.json` mirror real external API response shapes (Angel One `getCandleData`/`ltpData`, yfinance `Ticker.news`) and real live API-layer responses (`/api/signals/all`, `/api/stocks`, etc.) — each fixture's `_mirrors` key states exactly which file/function's contract it represents, so it's traceable when that code changes.
-- `tests/test_api_routes.py` — seeds the test DB the same way production data actually arrives (the same insert helpers/SQL the app uses), then hits the real route through `api_client` and asserts on the response. All signal routes (`/api/signals/all`, `/api/backtest/summary`, `/api/stocks`) are DB-backed — they read the `trade_signals` table, and `scripts/generate_trades.py` writes ONLY to that table (no JSON snapshots). The one remaining file-backed input is `retrain_results.csv` (model-training stats in `/api/backtest/summary`); its test monkeypatches the route module's `DATA_DIR` to a tmp dir so it never touches the real `backend/data/`.
+- `tests/test_api_routes.py` — seeds the test DB the same way production data actually arrives (the same insert helpers/SQL the app uses), then hits the real route through `api_client` and asserts on the response. All signal routes (`/api/signals/all`, `/api/backtest/summary`, `/api/stocks`) are DB-backed — they read the `trade_signals` table, and `scripts/generate_trades.py` writes ONLY to that table (no JSON snapshots). **There are no file-backed inputs left.** `/api/backtest/summary` reads model-training stats from the DB via `get_latest_model_training_stats()` (`api/routes/backtest.py:48`); there is no `DATA_DIR` in that route, and `tests/test_api_routes.py:12` records that `retrain_results.csv` is retired.
 - `tests/test_scheduler_jobs.py` — DB-only jobs (`calculate_indicators_job`, `cleanup_old_data_job`, `verify_data_integrity_job`) run directly against seeded test-DB data.
 - `tests/test_external_api_contracts.py` — feeds the Angel One/yfinance fixtures into the actual parsing functions (`scripts/update_stocks_angel.py:fetch_candles`, `collectors/yfinance_news_collector.py:collect_stock`, etc.) with a fake API object standing in for `SmartConnect`/`yf.Ticker`, and checks the resulting DB rows — this is what would catch an Angel One/yfinance response-shape change before it breaks a live job.
 
@@ -381,7 +438,7 @@ console script does not add the cwd (`python -m pytest` does). **Remove that
 line and collection dies with `ModuleNotFoundError: No module named
 'database'` before a single test runs.**
 
-Expect the full suite to take **~60 minutes** — 264 tests at roughly 4 per
+Expect the full suite to take **~60 minutes** — ~280 tests at roughly 4 per
 minute, every one round-tripping to the Timescale Cloud test instance, with
 per-test truncation and network latency dominating (CPU sits at ~2%). It is
 slow, not hung: `TestSquareOff` alone takes ~3 minutes for 6 tests. Practical
@@ -406,7 +463,7 @@ Two modes — use **dev** during development, **prod** for stable runs.
 
 ### Development (auto-restart on file change)
 ```bash
-cd /Users/maheshmaheshwari/Documents/trademind/backend
+cd backend   # from the repo root
 bash dev.sh
 ```
 `dev.sh` uses `watchfiles` to watch `api/`, `analysis/`, `trading/`, `database/`, `collectors/`, `scheduler/`.  
@@ -414,7 +471,7 @@ Any `.py` change in those dirs kills and restarts uvicorn automatically — **no
 
 ### Production (stable, no reload)
 ```bash
-cd /Users/maheshmaheshwari/Documents/trademind/backend
+cd backend   # from the repo root
 source venv/bin/activate
 python -m uvicorn api.server:app --host 0.0.0.0 --port 8000 --workers 4
 ```
@@ -434,7 +491,7 @@ lsof -ti :8000 | xargs kill -9
 All commands are run from `backend/`. Credentials are read from `.env` automatically.
 
 ```bash
-cd /Users/maheshmaheshwari/Documents/trademind/backend
+cd backend   # from the repo root
 source venv/bin/activate
 
 # DB schema init (idempotent)

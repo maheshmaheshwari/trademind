@@ -1,7 +1,7 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
 import tradeMindBaseQuery from './tradeMindBaseQuery';
 import type {
-  Stock, OpenPosition, Trade, GTTOrder,
+  Stock, OpenPosition, Trade, TradeRow, GTTOrder,
   WatchlistItem, Notification,
 } from '../types';
 
@@ -40,6 +40,22 @@ export interface PortfolioSummary {
   losses: number;
   win_rate: number;
   positions: import('../types').OpenPosition[];
+  allocation: AllocationSlice[];
+}
+
+/** One sector's share of the open book, largest first. */
+export interface AllocationSlice {
+  sector: string;
+  val: number;
+  pct: number;
+  holdings: number;
+}
+
+/** Portfolio value per sampled trading day — `dates[i]` labels `series[i]`. */
+export interface PortfolioValueHistory {
+  range: string;
+  dates: string[];
+  series: number[];
 }
 
 export interface RiskSettings {
@@ -225,7 +241,9 @@ export interface AuthorizedTrade {
   max_loss: number;
   cmp: number | null;
   actual_pnl: number | null;
-  status: 'PENDING' | 'EXECUTED' | 'COMPLETED' | 'STOPPED';
+  // OPEN = the trade is live. On an ORDER leg 'EXECUTED' means "this leg
+  // filled"; on a mandate it meant "live", which is why the two pages disagreed.
+  status: 'PENDING' | 'EXECUTING' | 'OPEN' | 'COMPLETED' | 'STOPPED' | 'CANCELLED';
   bracket_id?: string | null;
   created_at: string;
   updated_at: string;
@@ -353,6 +371,10 @@ export const tradeMindApiService = createApi({
       query: (userId) => ({ url: `/api/trading/portfolio/${userId}` }),
       providesTags: ['Portfolio'],
     }),
+    getPortfolioHistory: builder.query<PortfolioValueHistory, { userId: number; range: string }>({
+      query: ({ userId, range }) => ({ url: `/api/trading/portfolio/${userId}/history`, params: { range } }),
+      providesTags: ['Portfolio'],
+    }),
     getTodayPnl: builder.query<{ today_pnl: number; today_pnl_pct: number }, number>({
       query: (userId) => ({ url: `/api/trading/pnl/today/${userId}` }),
       keepUnusedDataFor: 60,
@@ -373,6 +395,12 @@ export const tradeMindApiService = createApi({
         params: { size, ...(limit ? { limit } : {}), ...(globalFilter ? { globalFilter } : {}) },
       }),
       providesTags: ['Orders'],
+    }),
+    // One row per TRADE (bracket). getOrders stays as the leg-level audit view.
+    getTrades: builder.query<{ data: TradeRow[]; total: number }, { userId: number; limit?: number }>({
+      query: ({ userId, limit = 200 }) => ({ url: `/api/trading/trades/${userId}`, params: { limit } }),
+      providesTags: ['Orders'],
+      keepUnusedDataFor: 60,
     }),
     squareOff: builder.mutation<{ status: string; realized_pnl: number }, { userId: number; symbol: string }>({
       query: ({ userId, symbol }) => ({ url: `/api/trading/square-off/${userId}/${encodeURIComponent(symbol)}`, method: 'POST', data: {} }),
@@ -607,10 +635,10 @@ export const {
   useGetSessionsQuery, useRevokeSessionMutation, useRevokeAllSessionsMutation,
   useGetMarketStatusQuery,
   // Portfolio
-  useGetPortfolioSummaryQuery, useGetTodayPnlQuery,
+  useGetPortfolioSummaryQuery, useGetPortfolioHistoryQuery, useGetTodayPnlQuery,
   // Positions & Orders
   useAddPositionMutation,
-  useGetPositionsQuery, useGetOrdersQuery,
+  useGetPositionsQuery, useGetOrdersQuery, useGetTradesQuery,
   useSquareOffMutation, useSquareOffAllMutation, useExecuteSignalMutation,
   // Signals
   useGetLatestSignalsQuery, useGetActionableSignalsQuery,

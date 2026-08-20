@@ -750,12 +750,27 @@ def execute_signal(
 # ==========================================
 
 def get_positions(user_id: int) -> List[Dict]:
-    """Get all open positions for a user with current P&L."""
+    """Get all open positions for a user with current P&L.
+
+    `sector` is joined on rather than stored: it is reference data about the
+    symbol, not about the holding. Every consumer needs it — the holdings table
+    labels each row with it and the allocation donut groups by it — so it is
+    attached here instead of at each call site.
+    """
     conn = get_connection()
     try:
         rows = _fetchall(conn, "SELECT * FROM positions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,))
         cols = _col_names(conn, "positions")
-        return [dict(zip(cols, r)) for r in rows]
+        positions = [dict(zip(cols, r)) for r in rows]
+        if positions:
+            symbols = sorted({p["symbol"] for p in positions})
+            ph = ",".join("?" for _ in symbols)
+            sectors = dict(_fetchall(conn,
+                f"SELECT symbol, sector FROM nifty_constituents WHERE symbol IN ({ph})",
+                tuple(symbols)))
+            for p in positions:
+                p["sector"] = sectors.get(p["symbol"]) or "Unclassified"
+        return positions
     finally:
         release_connection(conn)
 
@@ -830,6 +845,87 @@ def get_bracket_levels(bracket_ids: List[str]) -> Dict[str, Dict]:
             lv["sold"] = True
 
     return levels
+
+
+def get_trades(user_id: int, limit: int = 200) -> List[Dict]:
+    """
+    One row per TRADE, not per order leg.
+
+    `orders` stores legs — a bracket is ENTRY + STOP_LOSS + TARGET, plus a
+    SQUARE_OFF once it closes. Nothing in the schema represents the trade those
+    legs belong to; `bracket_id` is only a correlation string. So "Trade History"
+    was rendering raw legs, which meant one ITI.NS trade appeared as three rows,
+    two of which (a PENDING stop and a PENDING target) had never happened at all.
+
+    This collapses each bracket into the thing a trader means by "a trade":
+    bought this many at this price, protected here, targeting there, and either
+    still open or closed at a known price for a known reason.
+
+    Status is the TRADE's state, deliberately using the same vocabulary the
+    autopilot screen shows, so the two pages can no longer disagree:
+      OPEN | TARGET_HIT | STOPPED | CLOSED
+    """
+    conn = get_connection()
+    try:
+        rows = _fetchall(conn, """
+            SELECT bracket_id, symbol, name, mode, signal, order_purpose, status,
+                   quantity, price, trigger_price, fill_price, pnl, exit_reason,
+                   created_at
+            FROM orders
+            WHERE user_id = ? AND bracket_id IS NOT NULL
+            ORDER BY created_at ASC
+        """, (user_id,))
+    finally:
+        release_connection(conn)
+
+    trades: Dict[str, Dict] = {}
+    for (bracket_id, symbol, name, mode, signal, purpose, status, qty, price,
+         trigger_price, fill_price, pnl, exit_reason, created_at) in rows:
+        t = trades.setdefault(bracket_id, {
+            "bracket_id": bracket_id, "symbol": symbol, "name": name,
+            "mode": mode, "signal": signal, "quantity": qty,
+            "entry_price": None, "entry_at": None,
+            "target_price": None, "stop_loss": None,
+            "exit_price": None, "exit_at": None, "exit_reason": None,
+            "realized_pnl": None, "status": "OPEN",
+        })
+        if purpose == "ENTRY" and status == "EXECUTED":
+            t["entry_price"] = fill_price if fill_price is not None else price
+            t["entry_at"]    = created_at
+            t["quantity"]    = qty
+        elif purpose == "STOP_LOSS":
+            t["stop_loss"] = trigger_price if trigger_price is not None else price
+        elif purpose == "TARGET":
+            t["target_price"] = trigger_price if trigger_price is not None else price
+        elif purpose == "SQUARE_OFF" and status == "EXECUTED":
+            t["exit_price"]   = fill_price if fill_price is not None else price
+            t["exit_at"]      = created_at
+            t["realized_pnl"] = pnl
+            t["exit_reason"]  = exit_reason
+
+    out = []
+    for t in trades.values():
+        if t["entry_price"] is None:
+            # A bracket whose entry never filled is not a trade that happened.
+            continue
+        if t["exit_price"] is not None:
+            reason = t["exit_reason"]
+            if not reason:
+                # Legacy rows predate exit_reason (square_off used to discard the
+                # trigger). Infer from where it closed relative to the levels.
+                if t["target_price"] and t["exit_price"] >= t["target_price"]:
+                    reason = "TARGET"
+                elif t["stop_loss"] and t["exit_price"] <= t["stop_loss"]:
+                    reason = "STOP_LOSS"
+                else:
+                    reason = "MANUAL"
+                t["exit_reason"] = reason
+            t["status"] = {"TARGET": "TARGET_HIT",
+                           "STOP_LOSS": "STOPPED"}.get(reason, "CLOSED")
+        out.append(t)
+
+    out.sort(key=lambda r: (r["exit_at"] or r["entry_at"]), reverse=True)
+    return out[:limit]
 
 
 def enrich_orders(rows: List[Dict]) -> List[Dict]:
@@ -912,34 +1008,109 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
         bracket_id = pos_dict.get("bracket_id")
         position_mode = pos_dict.get("mode", "PAPER")
 
-        # Create SELL order
-        _execute(conn, """
-            INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
-                quantity, price, status, mode, fill_price, fees, pnl, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'SELL', 'SQUARE_OFF', ?, ?, 'EXECUTED', ?, ?, ?, ?, ?, ?)
-        """, (user_id, bracket_id, symbol, pos_dict.get("name"), qty, sell_price,
-              position_mode, sell_price, fees, net_pnl, now, now))
+        # ---- Exit legs, one per bracket ----------------------------------
+        #
+        # `positions` is UNIQUE(user_id, symbol), so a position merges every buy
+        # of that symbol and can span several brackets. This used to write ONE
+        # SQUARE_OFF row against the position's own bracket_id, which left every
+        # other contributing bracket with an entry and no exit — permanently
+        # reporting as still-open in the trade view even though the shares were
+        # sold. Real case (user 2, BAJAJFINSV.NS): bracket 4b3f33 got a 68-share
+        # exit against its 56-share entry, and bracket d1fdf7's 11 shares got no
+        # exit row at all.
+        #
+        # The position-level totals below (sell_value, invested, net_pnl) stay
+        # authoritative and still drive the balance — only the record of *which
+        # bracket sold what* becomes per-bracket.
+        open_brackets = _fetchall(conn, """
+            SELECT o.bracket_id,
+                   SUM(CASE WHEN o.order_purpose = 'ENTRY' AND o.status = 'EXECUTED'
+                            THEN o.quantity ELSE 0 END)                        AS entry_qty,
+                   MAX(CASE WHEN o.order_purpose = 'ENTRY' AND o.status = 'EXECUTED'
+                            THEN COALESCE(o.fill_price, o.price) END)          AS entry_price
+            FROM orders o
+            WHERE o.user_id = ? AND o.symbol = ? AND o.bracket_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM orders s
+                  WHERE s.bracket_id = o.bracket_id
+                    AND s.order_purpose = 'SQUARE_OFF' AND s.status = 'EXECUTED')
+            GROUP BY o.bracket_id
+            HAVING SUM(CASE WHEN o.order_purpose = 'ENTRY' AND o.status = 'EXECUTED'
+                            THEN o.quantity ELSE 0 END) > 0
+            ORDER BY MIN(o.created_at)
+        """, (user_id, symbol))
 
-        # Cancel pending SL and TARGET orders for this bracket
-        if bracket_id:
-            # If LIVE mode, cancel GTT rules on Angel One first
+        # Defensive: a position with no identifiable open bracket still has to be
+        # recorded, so fall back to the old single-row behaviour.
+        if not open_brackets:
+            open_brackets = [(bracket_id, qty, buy_price)]
+
+        entry_total = sum(int(b[1] or 0) for b in open_brackets) or qty
+
+        # Each bracket exits exactly what it entered; any drift between the
+        # position and the sum of its entries goes to the FIRST (earliest)
+        # bracket. Proportional apportionment would be worse here: with a
+        # position of 68 against entries of 56+11, splitting by ratio hands the
+        # 11-share bracket a 12-share exit — selling more than it ever bought.
+        exit_legs = []
+        drift = qty - entry_total
+        assigned_fees = 0
+        for i, (b_id, b_qty, b_entry) in enumerate(open_brackets):
+            leg_qty = int(b_qty or 0) + (drift if i == 0 else 0)
+            if leg_qty <= 0:
+                continue
+            last = i == len(open_brackets) - 1
+            if last:
+                leg_fees = round(fees - assigned_fees, 2)
+            else:
+                leg_fees = round(fees * (leg_qty / qty), 2) if qty else 0.0
+                assigned_fees += leg_fees
+            basis   = b_entry if b_entry is not None else buy_price
+            leg_pnl = round(leg_qty * (sell_price - basis) - leg_fees, 2)
+            exit_legs.append((b_id, leg_qty, leg_fees, leg_pnl))
+
+        legs_pnl = round(sum(l[3] for l in exit_legs), 2)
+        if abs(legs_pnl - net_pnl) > 0.05:
+            # Not forced to match: a gap means the position's cost basis and its
+            # entry legs genuinely disagree, and hiding that would make the books
+            # look consistent when they are not.
+            _angel_log.warning(
+                "square_off %s user=%s: per-bracket P&L %.2f != position P&L %.2f "
+                "(cost-basis drift across %d brackets)",
+                symbol, user_id, legs_pnl, net_pnl, len(exit_legs))
+
+        for b_id, leg_qty, leg_fees, leg_pnl in exit_legs:
+            _execute(conn, """
+                INSERT INTO orders (user_id, bracket_id, symbol, name, order_type, order_purpose,
+                    quantity, price, status, mode, fill_price, fees, pnl, exit_reason,
+                    created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'SELL', 'SQUARE_OFF', ?, ?, 'EXECUTED', ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, b_id, symbol, pos_dict.get("name"), leg_qty, sell_price,
+                  position_mode, sell_price, leg_fees, leg_pnl, trigger, now, now))
+
+        # Cancel the pending SL/TARGET legs of EVERY bracket that just exited —
+        # not only the position's own, or the others keep resting forever.
+        exited_brackets = [l[0] for l in exit_legs if l[0]]
+        if exited_brackets:
+            placeholders = ",".join("?" for _ in exited_brackets)
             if position_mode == "LIVE":
-                pending_gtts = _fetchall(conn, """
+                pending_gtts = _fetchall(conn, f"""
                     SELECT gtt_rule_id FROM orders
-                    WHERE bracket_id = ? AND status = 'PENDING' AND gtt_rule_id IS NOT NULL
-                """, (bracket_id,))
+                    WHERE bracket_id IN ({placeholders})
+                      AND status = 'PENDING' AND gtt_rule_id IS NOT NULL
+                """, tuple(exited_brackets))
 
                 from trading.gtt_manager import cancel_gtt
                 for row in pending_gtts:
                     if row[0]:
                         cancel_gtt(int(row[0]))
 
-            _execute(conn, """
+            _execute(conn, f"""
                 UPDATE orders SET status = 'CANCELLED', gtt_status = CASE
                     WHEN gtt_rule_id IS NOT NULL THEN 'CANCELLED' ELSE gtt_status END,
                     updated_at = ?
-                WHERE bracket_id = ? AND status = 'PENDING'
-            """, (now, bracket_id))
+                WHERE bracket_id IN ({placeholders}) AND status = 'PENDING'
+            """, (now, *exited_brackets))
 
         # Update user balance
         is_win = 1 if net_pnl > 0 else 0
@@ -966,7 +1137,7 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
         # tracking is not disrupted. So a second mandate on the same symbol is
         # folded into the same row and its bracket_id is discarded. Settling by
         # bracket_id alone therefore closed only the first mandate and orphaned
-        # the rest at status='EXECUTED' forever, with no position behind them.
+        # the rest at status='OPEN' forever, with no position behind them.
         #
         # Real case (user 2, BAJAJFINSV.NS): mandate 1 (56 @ 1765) created the
         # position; mandate 2 (11 @ 1764.6) merged in; on 2026-07-31 the target
@@ -980,7 +1151,7 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
         try:
             cur = _execute(conn,
                 """SELECT id, bracket_id, qty FROM authorized_trades
-                    WHERE user_id = ? AND symbol = ? AND status = 'EXECUTED'
+                    WHERE user_id = ? AND symbol = ? AND status = 'OPEN'
                     ORDER BY id""",
                 (user_id, symbol))
             mandates = cur.fetchall()
@@ -994,14 +1165,14 @@ def square_off(user_id: int, symbol: str, sell_price: float = None, trigger: str
                     share = ((m_qty or 0) / total_qty) if total_qty else (1.0 / len(mandates))
                     # cmp is set to the EXIT price, not left at entry. The
                     # autopilot page renders cmp as the live market price, and
-                    # price_monitor only refreshes it while status='EXECUTED';
+                    # price_monitor only refreshes it while status='OPEN';
                     # once settled nothing touches it again, so a closed mandate
                     # would display its entry price forever and show a P&L of
                     # +₹0 next to a realised profit.
                     _execute(conn,
                         """UPDATE authorized_trades
                            SET status = ?, actual_pnl = ?, cmp = ?, updated_at = NOW()
-                           WHERE id = ? AND status = 'EXECUTED'""",
+                           WHERE id = ? AND status = 'OPEN'""",
                         (mandate_status, round(net_pnl * share, 2), sell_price, m_id))
                 conn.commit()
                 if len(mandates) > 1:
@@ -1122,4 +1293,219 @@ def get_portfolio_summary(user_id: int) -> Dict:
         "losses": losses,
         "win_rate": win_rate,
         "positions": positions,
+        # Sector mix of the open book. Served here rather than derived in the
+        # browser because `positions` carries no sector — it lives in
+        # nifty_constituents, which the client has no reason to fetch.
+        "allocation": get_portfolio_allocation(user_id),
     }
+
+
+# ---------------------------------------------------------------------------
+# Portfolio composition & value history
+# ---------------------------------------------------------------------------
+
+def get_portfolio_allocation(user_id: int, conn=None) -> List[Dict]:
+    """Open positions grouped by sector, largest first.
+
+    `positions` carries no sector of its own — sector is reference data, so it
+    is joined from `nifty_constituents` rather than copied onto every row. A
+    symbol missing from that table (or holding a NULL sector) is reported as
+    "Unclassified" instead of being dropped: a slice silently missing from the
+    donut makes the percentages lie.
+
+    Grouped on current_value, i.e. what the holding is worth NOW, so the donut
+    matches the "Current Value" card above it rather than cost basis.
+    """
+    own_conn = conn is None
+    if own_conn:
+        conn = get_connection()
+    try:
+        rows = _fetchall(conn, """
+            SELECT COALESCE(NULLIF(n.sector, ''), 'Unclassified') AS sector,
+                   SUM(COALESCE(p.current_value, p.invested_amount, 0))     AS val,
+                   COUNT(*)                                                 AS holdings
+            FROM positions p
+            LEFT JOIN nifty_constituents n ON n.symbol = p.symbol
+            WHERE p.user_id = ?
+            GROUP BY 1
+            ORDER BY 2 DESC
+        """, (user_id,))
+    finally:
+        if own_conn:
+            release_connection(conn)
+
+    total = sum(float(r[1] or 0) for r in rows)
+    return [
+        {
+            "sector": r[0],
+            "val": round(float(r[1] or 0), 2),
+            "pct": round(float(r[1] or 0) / total * 100, 2) if total else 0.0,
+            "holdings": int(r[2]),
+        }
+        for r in rows
+    ]
+
+
+# How many points each range is drawn with, and how far back it reaches.
+# 1Y samples weekly — 250 daily points on a 230px chart is noise, and it is the
+# shape the range is being asked about.
+_HISTORY_RANGES: Dict[str, Tuple[int, int]] = {
+    #        days back, sample every N trading days
+    "30D": (30,  1),
+    "90D": (90,  1),
+    "1Y":  (365, 5),
+}
+
+# Order rows that actually moved cash. Statuses are not uniform across the
+# table's history — the paper engine writes 'EXECUTED', older/seeded rows use
+# 'COMPLETE' — so both count as filled. PENDING/CANCELLED never moved anything.
+_FILLED_STATUSES = ("EXECUTED", "COMPLETE", "COMPLETED", "FILLED")
+
+
+def get_portfolio_value_history(user_id: int, range_key: str = "90D") -> Dict:
+    """Total portfolio value (cash + holdings at market) per trading day.
+
+    Reconstructed backwards from the state we know is correct — today's cash
+    balance and today's open positions — by un-applying each filled order in
+    reverse chronological order:
+
+        an ENTRY  took  qty*fill + fees  out of cash and put qty shares in
+        a SQUARE_OFF put qty*fill - fees back into cash and took qty shares out
+
+    Replaying forwards from a guessed opening balance would drift, because the
+    starting balance is not recorded anywhere; walking backwards from the
+    current row is anchored to a number the ledger already agrees on.
+
+    Each sampled day is then valued with that day's close for every symbol held
+    on it (last close on or before the day, so a holiday or a missing bar
+    carries the previous price forward rather than valuing the stock at zero).
+    """
+    days_back, step = _HISTORY_RANGES.get(range_key, _HISTORY_RANGES["90D"])
+    start = (datetime.now() - timedelta(days=days_back)).date()
+
+    conn = get_connection()
+    try:
+        user = _fetchone(conn, "SELECT virtual_balance FROM users WHERE id = ?", (user_id,))
+        if not user:
+            raise ValueError("User not found")
+        cash = float(user[0] or 0)
+
+        holdings: Dict[str, float] = {}
+        live_value = 0.0
+        for sym, qty, cur_val in _fetchall(conn,
+                "SELECT symbol, quantity, COALESCE(current_value, invested_amount, 0) "
+                "FROM positions WHERE user_id = ?", (user_id,)):
+            holdings[sym] = holdings.get(sym, 0) + float(qty or 0)
+            live_value += float(cur_val or 0)
+
+        placeholders = ",".join("?" for _ in _FILLED_STATUSES)
+        events = _fetchall(conn, f"""
+            SELECT created_at, symbol, order_purpose, quantity,
+                   COALESCE(fill_price, price), COALESCE(fees, 0)
+            FROM orders
+            WHERE user_id = ?
+              AND order_purpose IN ('ENTRY', 'SQUARE_OFF')
+              AND status IN ({placeholders})
+            ORDER BY created_at DESC
+        """, (user_id, *_FILLED_STATUSES))
+
+        # Every symbol that appears anywhere in the window — currently held or
+        # since sold. A position closed 20 days ago still has to be valued on
+        # the days before it closed.
+        symbols = sorted(set(holdings) | {e[1] for e in events})
+        closes: Dict[str, List[Tuple] ] = {}
+        trading_days: List = []
+        if symbols:
+            sym_ph = ",".join("?" for _ in symbols)
+            price_rows = _fetchall(conn, f"""
+                SELECT date, symbol, close
+                FROM prices
+                WHERE interval = '1d' AND date >= ? AND symbol IN ({sym_ph})
+                ORDER BY date
+            """, (start, *symbols))
+            seen_days = set()
+            for d, sym, close in price_rows:
+                d = d.date() if isinstance(d, datetime) else d
+                closes.setdefault(sym, []).append((d, float(close or 0)))
+                seen_days.add(d)
+            trading_days = sorted(seen_days)
+    finally:
+        release_connection(conn)
+
+    if not trading_days:
+        # An account that has never traded still has a portfolio — it is all
+        # cash. Fall back to the exchange calendar (the single source of truth
+        # for "was the market open"), so a new user sees a flat line at their
+        # balance rather than an empty panel that reads as a failed request.
+        from analysis.trading_calendar import trading_days_between, today_ist
+        trading_days = trading_days_between(start, today_ist())
+        if not trading_days:
+            return {"range": range_key, "dates": [], "series": []}
+
+    # Sliced from the newest end so the most recent close is always the last
+    # point — a chart whose right edge is four days stale reads as a flat week.
+    sampled = trading_days[::-1][::step][::-1]
+
+    # Last close on or before each sampled day, per symbol — forward-filled.
+    price_at: Dict[str, Dict] = {}
+    for sym, series in closes.items():
+        by_day, idx, last = {}, 0, None
+        for day in sampled:
+            while idx < len(series) and series[idx][0] <= day:
+                last = series[idx][1]
+                idx += 1
+            by_day[day] = last
+        price_at[sym] = by_day
+
+    # Today's true state, before the walk backwards starts mutating it. `prices`
+    # only has a bar once the EOD collection runs, so outside that window the
+    # newest trading day is a day or two old — and a trade placed since then
+    # would be invisible on a chart that stops there.
+    today = datetime.now().date()
+    current_point = (today, round(cash + live_value, 2))
+
+    dates, values = [], []
+    ev = 0
+    for day in reversed(sampled):
+        # Undo everything that happened after this day, so `cash`/`holdings`
+        # describe the close of `day`.
+        while ev < len(events):
+            ts = events[ev][0]
+            ts_date = ts.date() if isinstance(ts, datetime) else ts
+            if ts_date <= day:
+                break
+            _, sym, purpose, qty, fill, fees = events[ev]
+            qty, fill, fees = float(qty or 0), float(fill or 0), float(fees or 0)
+            if purpose == "ENTRY":
+                cash += qty * fill + fees
+                holdings[sym] = holdings.get(sym, 0) - qty
+            else:  # SQUARE_OFF
+                cash -= qty * fill - fees
+                holdings[sym] = holdings.get(sym, 0) + qty
+            ev += 1
+
+        if ev == 0 and holdings:
+            # Newest point, and nothing has traded since it: the open positions
+            # still carry a live price that is fresher than any stored close
+            # (prices lags by a day or two outside market hours). Using it makes
+            # the right edge of the chart equal the "Current Value" card, which
+            # is computed the same way; a close-derived last point would sit a
+            # few thousand rupees below it for no visible reason.
+            market = live_value
+        else:
+            market = 0.0
+            for sym, qty in holdings.items():
+                if qty <= 0:
+                    continue
+                px = price_at.get(sym, {}).get(day)
+                if px is not None:
+                    market += qty * px
+        dates.append(day.isoformat())
+        values.append(round(cash + market, 2))
+
+    dates.reverse()
+    values.reverse()
+    if current_point[0] > sampled[-1]:
+        dates.append(current_point[0].isoformat())
+        values.append(current_point[1])
+    return {"range": range_key, "dates": dates, "series": values}

@@ -75,6 +75,27 @@ export interface Trade {
   status: string;
 }
 
+/** One TRADE — a whole bracket collapsed, not an order leg.
+ *  Served by /api/trading/trades/{user_id}. See trading_engine.get_trades. */
+export interface TradeRow {
+  bracket_id: string;
+  symbol: string;
+  name: string | null;
+  mode: 'PAPER' | 'LIVE';
+  signal: string | null;
+  quantity: number;
+  entry_price: number | null;
+  entry_at: string | null;
+  target_price: number | null;
+  stop_loss: number | null;
+  exit_price: number | null;      // null while the trade is open
+  exit_at: string | null;
+  exit_reason: 'TARGET' | 'STOP_LOSS' | 'MANUAL' | null;
+  realized_pnl: number | null;
+  current_price?: number | null;
+  status: 'OPEN' | 'TARGET_HIT' | 'STOPPED' | 'CLOSED';
+}
+
 export interface GTTOrder {
   id: number;
   symbol: string;

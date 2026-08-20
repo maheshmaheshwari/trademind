@@ -35,7 +35,7 @@ type TradeStatus = AuthorizedTrade['status'];
 
 function statusMeta(st: TradeStatus) {
   switch (st) {
-    case 'EXECUTED':  return { label: 'Running',    color: 'var(--accent-2)',  bg: 'var(--accent-soft)',  Icon: Activity };
+    case 'OPEN':      return { label: 'Running',    color: 'var(--accent-2)',  bg: 'var(--accent-soft)',  Icon: Activity };
     case 'PENDING':   return { label: 'Pending',    color: 'var(--gold)',      bg: 'var(--gold-soft)',    Icon: Clock };
     case 'COMPLETED': return { label: 'Target hit', color: 'var(--green)',     bg: 'var(--green-soft)',   Icon: CheckCircle };
     case 'STOPPED':   return { label: 'Stopped',    color: 'var(--red)',       bg: 'var(--red-soft)',     Icon: AlertCircle };
@@ -45,7 +45,7 @@ function statusMeta(st: TradeStatus) {
 
 const STATUS_FILTERS = ['All', 'Running', 'Pending', 'Target hit', 'Stopped'] as const;
 const STATUS_MAP: Record<string, TradeStatus | undefined> = {
-  Running: 'EXECUTED', Pending: 'PENDING', 'Target hit': 'COMPLETED', Stopped: 'STOPPED',
+  Running: 'OPEN', Pending: 'PENDING', 'Target hit': 'COMPLETED', Stopped: 'STOPPED',
 };
 
 // ── Mini stat card ───────────────────────────────────────────────────────────
@@ -253,9 +253,15 @@ export default function AutopilotPage() {
     // a buy limit fills at the market when the market is cheaper. A mandate
     // that has been squared off reports its realised price via actual_pnl
     // rather than a stored sell price, so Sell stays the projected target here.
+    //
+    // `cmp` is shown for closed mandates too — it is the stock's price now, and
+    // it is what tells you whether exiting was the right call. This used to be
+    // blanked for anything but OPEN/PENDING because the stored value froze
+    // at close time; the API now re-reads the latest close for those rows, so
+    // there is a real current price to show.
     ...priceColumns<AuthorizedTrade>({
       entry:    t => costBasis(t),
-      current:  t => (t?.status === 'EXECUTED' || t?.status === 'PENDING') ? t?.cmp : null,
+      current:  t => t?.cmp,
       target:   t => t?.target,
       stopLoss: t => t?.sl,
     }),
@@ -288,7 +294,7 @@ export default function AutopilotPage() {
       } },
     { id: 'action', header: 'Action', align: 'right', sortable: false,
       cell: t => {
-        const canRevoke = t?.status === 'EXECUTED' || t?.status === 'PENDING';
+        const canRevoke = t?.status === 'OPEN' || t?.status === 'PENDING';
         return canRevoke ? (
           <button
             onClick={(e) => handleRevoke(t, e)}
@@ -303,7 +309,7 @@ export default function AutopilotPage() {
 
   const livePnl = (t: AuthorizedTrade) => {
     const basis = costBasis(t);
-    return t?.status === 'EXECUTED' && t?.cmp != null && basis != null
+    return t?.status === 'OPEN' && t?.cmp != null && basis != null
       ? (t.cmp - basis) * (t?.qty ?? 0)
       : t?.actual_pnl ?? null;
   };

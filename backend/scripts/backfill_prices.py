@@ -195,7 +195,10 @@ def backfill_prices(token_map: Dict, target_days: List[date_type],
     # Angel wants IST wall-clock strings. Pad the window by a day on each side:
     # the API is inclusive-ish at the edges and a wider window costs nothing,
     # while rows outside `want` are filtered out before insert anyway.
-    from_str = (start - timedelta(days=1)).strftime("%Y-%m-%d 09:15")
+    # 00:00, not 09:15: a daily candle is stamped at midnight and a 09:15
+    # from-time drops it. The one-day pad already masked this, but relying on
+    # the pad rather than the correct time is how it bites the next caller.
+    from_str = (start - timedelta(days=1)).strftime("%Y-%m-%d 00:00")
     to_str = (end + timedelta(days=1)).strftime("%Y-%m-%d 15:30")
 
     api = angel_login()

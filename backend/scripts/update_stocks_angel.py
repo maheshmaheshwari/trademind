@@ -151,7 +151,12 @@ def fetch_candles(
         (symbol_ns, exchange, date, time, open, high, low, close, volume, interval)
     """
     if from_date is None:
-        from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d 09:15")
+        # 00:00 rather than 09:15 — a daily candle is stamped at midnight, so a
+        # 09:15 from-time drops the oldest day of the window (verified against
+        # the live API, 2026-08-20). Harmless here because the rolling window
+        # overlaps day to day, but it silently truncated every historical
+        # backfill chunk; see build_chunks in collectors/backfill_prices_angel.py.
+        from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d 00:00")
     if to_date is None:
         to_date = datetime.now().strftime("%Y-%m-%d 15:30")
 

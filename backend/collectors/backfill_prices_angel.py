@@ -42,6 +42,41 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+class ChunkFetchError(RuntimeError):
+    """A date chunk exhausted its retries — the period's data was NOT fetched.
+
+    This exists because the failure was previously indistinguishable from
+    success. get_candles() returned `[]` both when a period genuinely holds no
+    data (a holiday stretch, a not-yet-listed symbol) and when every retry had
+    failed; backfill_symbol() then hit
+
+        if not candles:
+            continue          # silently skips the chunk
+
+    so a rate-limited year was dropped, the symbol still returned rows from its
+    other chunks, and it was recorded as a SUCCESS — never entering
+    failed_stocks.json and never retried.
+
+    That is not hypothetical. Eight symbols — BBTC, BDL, GRAPHITE, GRASIM,
+    HOMEFIRST, INDIGO, ITC, JBMA — are missing the whole of 2024 in prod:
+    1,992 rows, 60% of all missing price data. Their gaps run 2023-12-29 →
+    2025-01-01 on every one of them, which is exactly build_chunks()' second
+    chunk (2024-01-01 → 2024-12-30) starting from 2023-01-01. Chunks 1 and 3
+    landed; chunk 2 was thrown away in silence.
+
+    Worse than absent: technical_indicators mirrors the hole, so any model
+    trained across it read 2023-12-29 followed by 2025-01-01 and computed
+    returns, momentum and moving averages across a seam that does not exist.
+    """
+
+    def __init__(self, from_date: str, to_date: str, retries: int):
+        self.from_date, self.to_date = from_date, to_date
+        super().__init__(
+            f"chunk {from_date} → {to_date} failed after {retries} retries "
+            f"— data for this period was NOT fetched"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -107,6 +142,11 @@ class AngelSession:
 
         Returns list of candles, [] for no data, None for auth error
         (caller should re-login on None).
+
+        Raises ChunkFetchError when the retries are EXHAUSTED. This used to
+        `return []` — the same value meaning "this period genuinely has no
+        data" — and the caller could not tell the two apart, so it skipped the
+        chunk and reported the symbol as a success. See ChunkFetchError.
         """
         if not self._logged_in:
             return None
@@ -158,8 +198,7 @@ class AngelSession:
                 logger.warning(f"Chunk error (attempt {attempt+1}/{MAX_RETRIES}): {e} — retrying in {wait}s")
                 time.sleep(wait)
 
-        logger.error(f"Chunk failed after {MAX_RETRIES} retries: {from_date[:10]} → {to_date[:10]}")
-        return []
+        raise ChunkFetchError(from_date[:10], to_date[:10], MAX_RETRIES)
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +214,17 @@ def build_chunks(from_year: int, from_month: int) -> List[Tuple[str, str]]:
     while cursor < end:
         chunk_end = min(cursor + timedelta(days=364), end)
         chunks.append((
-            cursor.strftime("%Y-%m-%d 09:15"),
+            # 00:00, NOT 09:15. Angel One stamps a DAILY candle at midnight
+            # ("2024-01-01T00:00:00+05:30"), so a 09:15 from-time is already
+            # past it and the exchange drops that day from the response —
+            # verified against the live API 2026-08-20:
+            #   from "2024-01-01 09:15" -> 4 candles, first 2024-01-02
+            #   from "2024-01-01 00:00" -> 5 candles, first 2024-01-01
+            # This silently cost the FIRST TRADING DAY OF EVERY CHUNK. In prod
+            # that is 2024-01-01 (422 of 436 symbols missing) and 2024-12-31
+            # (456 of 471) — the two chunk starts old enough that no later
+            # daily EOD run refilled them.
+            cursor.strftime("%Y-%m-%d 00:00"),
             chunk_end.strftime("%Y-%m-%d 15:30"),
         ))
         cursor = chunk_end + timedelta(days=1)
@@ -187,24 +236,38 @@ def build_chunks(from_year: int, from_month: int) -> List[Tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 def backfill_symbol(session: AngelSession, symbol: str, token_info: dict,
-                    chunks: List[Tuple[str, str]]) -> Tuple[int, bool]:
+                    chunks: List[Tuple[str, str]]) -> Tuple[int, bool, List[Tuple[str, str]]]:
     """
     Download all chunks for one symbol and batch-insert into DB.
-    Returns (rows_inserted, needs_relogin).
+    Returns (rows_inserted, needs_relogin, failed_chunks).
+
+    `failed_chunks` is the third element for a reason: a chunk whose retries
+    were exhausted must not be confused with one that legitimately holds no
+    data. Keep the chunks that did succeed — partial data is better than none —
+    but hand the failures back so the caller can mark the symbol for retry
+    rather than counting it a success. See ChunkFetchError.
     """
     symbol_ns = f"{symbol}.NS"
     token     = token_info["token"]
     exchange  = token_info.get("exchange", "NSE")
     total_inserted = 0
+    failed_chunks: List[Tuple[str, str]] = []
 
     for from_dt, to_dt in chunks:
-        candles = session.get_candles(token, exchange, from_dt, to_dt)
+        try:
+            candles = session.get_candles(token, exchange, from_dt, to_dt)
+        except ChunkFetchError as exc:
+            logger.error("%s: %s", symbol, exc)
+            failed_chunks.append((exc.from_date, exc.to_date))
+            time.sleep(SLEEP_BETWEEN_CHUNKS)
+            continue
 
         # None = auth error, caller must re-login
         if candles is None:
-            return total_inserted, True
+            return total_inserted, True, failed_chunks
 
         if not candles:
+            # Genuinely empty now that exhausted retries raise instead.
             time.sleep(SLEEP_BETWEEN_CHUNKS)
             continue
 
@@ -245,7 +308,7 @@ def backfill_symbol(session: AngelSession, symbol: str, token_info: dict,
 
         time.sleep(SLEEP_BETWEEN_CHUNKS)
 
-    return total_inserted, False
+    return total_inserted, False, failed_chunks
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +373,7 @@ def backfill_all(from_year: int = FROM_YEAR, from_month: int = FROM_MONTH,
                 break
 
         try:
-            rows, needs_relogin = backfill_symbol(session, symbol, token_info, chunks)
+            rows, needs_relogin, bad_chunks = backfill_symbol(session, symbol, token_info, chunks)
 
             # Session expired mid-symbol — re-login and retry once
             if needs_relogin:
@@ -318,7 +381,8 @@ def backfill_all(from_year: int = FROM_YEAR, from_month: int = FROM_MONTH,
                 session.logout()
                 time.sleep(3)
                 if session.login():
-                    rows, needs_relogin = backfill_symbol(session, symbol, token_info, chunks)
+                    rows, needs_relogin, bad_chunks = backfill_symbol(
+                        session, symbol, token_info, chunks)
                     if needs_relogin:
                         logger.error(f"{symbol}: still auth error after re-login — skipping")
                         failed.append(symbol)
@@ -329,6 +393,16 @@ def backfill_all(from_year: int = FROM_YEAR, from_month: int = FROM_MONTH,
                     break
 
             total_rows += rows
+
+            # A symbol that lost even one chunk is NOT done, however many rows
+            # its other chunks contributed. Recording it here is what puts it in
+            # failed_stocks.json for --retry-failed; without this the 2024 hole
+            # was invisible for months.
+            if bad_chunks:
+                ranges = ", ".join(f"{a}→{b}" for a, b in bad_chunks)
+                logger.error("%s: INCOMPLETE — %d chunk(s) never fetched: %s",
+                             symbol, len(bad_chunks), ranges)
+                failed.append(symbol)
 
         except Exception as e:
             logger.error(f"{symbol}: unexpected error — {e}")

@@ -1,0 +1,215 @@
+# Repair a gap in EOD prices + technical indicators for a range of trading days.
+#
+# WHY THIS EXISTS
+#
+# The daily `eod_data` scheduler job only ever collects "today". When it misses
+# a day the recovery queue re-runs the job — but the job still collects today,
+# and its coverage gate still measures today, so a replay can never repair a
+# past date. Before this workflow the only repair path was a laptop.
+#
+# It was needed on 2026-08-20. Between the 17th and 18th, `prices_id_seq` and
+# `technical_indicators_id_seq` were dropped from prod out-of-band (a
+# DROP SEQUENCE ... CASCADE also strips the column default it owns), leaving
+# both tables as `id BIGINT NOT NULL` with no default. Every insert then failed
+# with
+#
+#     null value in column "id" of relation "_hyper_10_1125_chunk"
+#     violates not-null constraint
+#
+# and because insert_prices_batch / insert_indicators both catch, log and
+# return 0/False rather than raising, the EOD chain reported success while
+# writing nothing. Two trading days were lost before the coverage gate's
+# "prices 0/500" made it visible. Both tables still carry the tell-tale
+# `tmp_*` / `*_new_*` shadow indexes of the table rebuild that did it.
+#
+# The "Ensure schema" step below is not boilerplate: init_database() calls
+# repair_serial_defaults(), which restores a missing BIGSERIAL default. Running
+# it here means this workflow fixes that class of breakage before it tries to
+# write, rather than failing 500 times in a row.
+#
+# RATE LIMITING — the reason this is manual, and the reason for the pacing input
+#
+# Angel One throttles getCandleData well below its nominal 3 req/sec. Measured
+# 2026-08-20 from a laptop DURING market hours, two back-to-back calls were
+# enough to earn "Access denied because of exceeding access rate", and a
+# 500-symbol run spent ~65s per symbol grinding through retries. The cause was
+# contention: the local dev backend and the HF Space both run price_monitor /
+# gtt_sync / autopilot_sync every 5 minutes on the SAME Angel account, and those
+# crons are hour="9-15".
+#
+# So: prefer to run this AFTER 15:30 IST (10:00 UTC), when the intraday crons
+# have stopped and the backfill has Angel to itself. During market hours, raise
+# rate_limit_secs to 2.0+ and expect it to be slow.
+#
+# The script backs off per-symbol (5s/15s/45s) and widens its steady-state gap
+# rather than dropping a throttled symbol, so a throttled window makes the run
+# slower, not emptier.
+#
+# IDEMPOTENT
+#
+# A symbol whose target days are all present in `prices` costs no API call at
+# all, so re-running after a partial run only fetches what is still missing.
+# Use force=true to overwrite days that are already there.
+#
+# Indicators are written per target day with signal/signal_strength left NULL —
+# those are ML output for the CURRENT bar (scripts/generate_trades.py), and
+# backfilling them would fabricate a recommendation that was never made. That
+# is also why an existing indicator row is skipped unless force=true:
+# insert_indicators upserts every column, so rewriting a row that already
+# carries a signal would null it out.
+#
+# Secrets required:
+#   PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD   — the target database
+#   ANGEL_API_KEY ANGEL_CLIENT_ID ANGEL_TOTP_SECRET
+#   ANGEL_MPIN (or ANGEL_PASSWORD)               — the only price source
+#   HF_TOKEN MODEL_KEY                           — backend/data/ is gitignored,
+#     so load_token_map() pulls angel_tokens.json from the model store. No model
+#     sync is needed: calculate_all() is pure pandas/ta and loads no .pkl.
+name: Backfill prices + indicators
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_date:
+        description: 'Start date YYYY-MM-DD (inclusive). Leave blank to use --days.'
+        type: string
+        required: false
+      to_date:
+        description: 'End date YYYY-MM-DD (inclusive). Trimmed to the last closed trading day.'
+        type: string
+        required: false
+      days:
+        description: 'Used only when from/to are blank: last N calendar days ending today'
+        type: string
+        default: '7'
+      symbols:
+        description: 'Optional space-separated symbols without .NS, e.g. "RELIANCE TCS"'
+        type: string
+        required: false
+      rate_limit_secs:
+        description: 'Seconds between Angel requests. 1.2 after close; 2.0+ during market hours.'
+        type: string
+        default: '1.2'
+      mode:
+        description: 'What to backfill'
+        type: choice
+        options: [both, prices-only, indicators-only]
+        default: both
+      force:
+        description: 'Re-fetch/recompute days that are already present'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Report what would happen, write nothing'
+        type: boolean
+        default: false
+
+# Two concurrent runs would compete for the same Angel rate limit and make each
+# other slower — exactly the failure this workflow exists to work around.
+concurrency:
+  group: backfill-prices
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    # 500 symbols x 2 phases. ~25 min unthrottled; a heavily throttled run is
+    # far slower, and a timeout here just means re-running to pick up the rest.
+    timeout-minutes: 240
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PGHOST: ${{ secrets.PGHOST }}
+      PGPORT: ${{ secrets.PGPORT }}
+      PGDATABASE: ${{ secrets.PGDATABASE }}
+      PGUSER: ${{ secrets.PGUSER }}
+      PGPASSWORD: ${{ secrets.PGPASSWORD }}
+      ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+      ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
+      ANGEL_MPIN: ${{ secrets.ANGEL_MPIN }}
+      ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
+      ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      MODEL_KEY: ${{ secrets.MODEL_KEY }}
+      HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # CPU torch first, as everywhere else: requirements.txt pins torch and the
+      # default index would drag in the multi-GB CUDA wheel. Nothing here runs a
+      # model, but the pin still has to resolve.
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      # Also runs repair_serial_defaults() — see the header. Do this BEFORE the
+      # backfill, or a database with a missing BIGSERIAL default will accept the
+      # whole run and persist none of it.
+      - name: Ensure schema (also repairs missing BIGSERIAL defaults)
+        run: python -c "from database.db import init_database; init_database()"
+
+      - name: Build arguments
+        id: args
+        run: |
+          set -euo pipefail
+          ARGS=""
+          if [ -n "${{ inputs.from_date }}" ] || [ -n "${{ inputs.to_date }}" ]; then
+            if [ -z "${{ inputs.from_date }}" ] || [ -z "${{ inputs.to_date }}" ]; then
+              echo "::error::from_date and to_date must be given together"
+              exit 1
+            fi
+            ARGS="--from ${{ inputs.from_date }} --to ${{ inputs.to_date }}"
+          else
+            ARGS="--days ${{ inputs.days }}"
+          fi
+          [ -n "${{ inputs.symbols }}" ] && ARGS="$ARGS --symbols ${{ inputs.symbols }}"
+          ARGS="$ARGS --rate-limit-secs ${{ inputs.rate_limit_secs }}"
+          case "${{ inputs.mode }}" in
+            prices-only)     ARGS="$ARGS --prices-only" ;;
+            indicators-only) ARGS="$ARGS --indicators-only" ;;
+          esac
+          [ "${{ inputs.force }}" = "true" ]   && ARGS="$ARGS --force"
+          [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+          echo "Running: python scripts/backfill_prices.py $ARGS"
+
+      - name: Backfill prices and indicators
+        run: python scripts/backfill_prices.py ${{ steps.args.outputs.args }}
+
+      # The script exits non-zero when any symbol failed, which fails the step
+      # above. Report coverage regardless, so a partial run still shows what it
+      # achieved and whether a re-run is worth it.
+      - name: Coverage summary
+        if: always()
+        run: |
+          python - <<'PY'
+          from database.db import get_connection, release_connection, _execute
+          conn = get_connection()
+          try:
+              cur = _execute(conn, """
+                  SELECT p.date::date AS d, COUNT(*) AS px,
+                         (SELECT COUNT(*) FROM technical_indicators t WHERE t.date = p.date) AS ind
+                    FROM prices p
+                   WHERE p.interval = '1d' AND p.date >= CURRENT_DATE - 14
+                   GROUP BY p.date ORDER BY p.date
+              """, ())
+              print(f"{'date':<14}{'prices':>10}{'indicators':>14}")
+              for d, px, ind in cur.fetchall():
+                  print(f"{str(d)[:10]:<14}{px:>10,}{ind:>14,}")
+          finally:
+              release_connection(conn)
+          PY
+
+      - name: Next step
+        if: always()
+        run: |
+          echo "Signals are NOT regenerated here. Once coverage looks right, run"
+          echo "the 'Refresh trade signals' workflow (scripts/generate_trades.py)."

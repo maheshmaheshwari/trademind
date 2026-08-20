@@ -136,15 +136,24 @@ def fetch_candles(
     token: str,
     exchange: str,
     days: int = 5,
+    from_date: str = None,
+    to_date: str = None,
 ) -> List[tuple]:
     """
     Fetch daily candles from Angel One for a single stock.
 
+    By default the window is the last `days` days ending now. Pass explicit
+    `from_date`/`to_date` ("YYYY-MM-DD HH:MM") to fetch an arbitrary historical
+    window instead — scripts/backfill_prices.py uses this to target specific
+    trading days rather than "the last N days from now".
+
     Returns list of DB-ready tuples:
         (symbol_ns, exchange, date, time, open, high, low, close, volume, interval)
     """
-    from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d 09:15")
-    to_date = datetime.now().strftime("%Y-%m-%d 15:30")
+    if from_date is None:
+        from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d 09:15")
+    if to_date is None:
+        to_date = datetime.now().strftime("%Y-%m-%d 15:30")
 
     params = {
         "exchange": exchange,
@@ -247,7 +256,11 @@ def main(days: int = None):
                 # Keep throttled symbols separately — they are retryable, and a
                 # dropped symbol costs a full day of prices for that stock.
                 if _is_rate_limited(str(e)):
-                    rate_limited.append((symbol, info))
+                    # Carry this symbol's own gap. It used to be re-read from
+                    # `days_missing` at retry time, which by then held whatever
+                    # the *last* symbol in the main loop needed — so a retried
+                    # symbol fetched an arbitrary window.
+                    rate_limited.append((symbol, info, days_missing))
                 logger.warning(f"[{idx}/{total}] {symbol} FAILED: {e}")
                 time.sleep(RATE_LIMIT_SECS)
                 continue
@@ -284,10 +297,10 @@ def main(days: int = None):
         time.sleep(wait)
 
         recovered = 0
-        for r_idx, (symbol, info) in enumerate(rate_limited, 1):
+        for r_idx, (symbol, info, sym_days) in enumerate(rate_limited, 1):
             try:
                 rows = fetch_candles(smart_api, symbol=symbol, token=info["token"],
-                                     exchange="NSE", days=days_missing)
+                                     exchange="NSE", days=sym_days)
                 if rows:
                     inserted = insert_prices_batch(rows, sync=False)
                     total_rows += inserted

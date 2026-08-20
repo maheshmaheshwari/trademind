@@ -103,6 +103,10 @@ on:
         description: 'Report what would happen, write nothing'
         type: boolean
         default: false
+      fail_under:
+        description: 'Fail the run if any day ends below this share of active constituents (default 0.90)'
+        type: string
+        default: '0.90'
 
 # Two concurrent runs would compete for the same Angel rate limit and make each
 # other slower — exactly the failure this workflow exists to work around.
@@ -178,14 +182,21 @@ jobs:
           esac
           [ "${{ inputs.force }}" = "true" ]   && ARGS="$ARGS --force"
           [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          ARGS="$ARGS --fail-under ${{ inputs.fail_under }}"
           echo "args=$ARGS" >> "$GITHUB_OUTPUT"
           echo "Running: python scripts/backfill_prices.py $ARGS"
 
+      # The script exits non-zero only when a target day ends BELOW --fail-under
+      # coverage, not merely because some symbols failed. It used to fail on any
+      # symbol failure: run 32342127959 went red having written 232 price rows
+      # and 1,459 indicator rows, because 7 of 500 symbols exhausted their Angel
+      # retries — every day still finished at 99% coverage. A red run that wrote
+      # 1,691 good rows is indistinguishable from one that died immediately,
+      # which teaches you to ignore red.
       - name: Backfill prices and indicators
         run: python scripts/backfill_prices.py ${{ steps.args.outputs.args }}
 
-      # The script exits non-zero when any symbol failed, which fails the step
-      # above. Report coverage regardless, so a partial run still shows what it
+      # Report coverage regardless, so a genuinely failed run still shows what it
       # achieved and whether a re-run is worth it.
       - name: Coverage summary
         if: always()

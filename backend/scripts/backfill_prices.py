@@ -374,30 +374,83 @@ def _safe_float(v):
 # Coverage report
 # ──────────────────────────────────────────────────────────────────────────────
 
-def report_coverage(target_days: List[date_type]) -> None:
-    start, end = target_days[0], target_days[-1]
+def _pct(x: float) -> str:
+    """Percentage that keeps the decimal only when it matters.
+
+    `f"{x:.0%}"` renders a --fail-under of 0.995 as "100%", which reads as
+    "demanding every symbol" when it is not — misleading in the one message a
+    failing run prints.
+    """
+    v = x * 100
+    return f"{v:.0f}%" if abs(v - round(v)) < 0.05 else f"{v:.1f}%"
+
+
+def active_coverage(target_days: List[date_type]) -> Dict[str, Tuple[int, int, int]]:
+    """day -> (active_with_price, active_with_indicator, active_universe_size).
+
+    Measured against `nifty_constituents WHERE is_active`, NOT a raw COUNT(*)
+    on `prices`. A bare count is not comparable to 500 in either direction:
+
+      * `prices` also holds the index tickers (^NSEI, ^BSESN, ^INDIAVIX,
+        ^CRSLDX) and de-indexed symbols whose history is kept for backtests,
+        so a raw count reads *above* the universe — 503 on 2026-08-12.
+      * and it says nothing about WHICH constituents are missing.
+
+    This is the same definition `_eod_coverage()` in scheduler/jobs.py gates on,
+    so a number reported here means the same thing the EOD chain will decide on.
+    """
+    out: Dict[str, Tuple[int, int, int]] = {}
     conn = get_connection()
     try:
-        cur = _execute(conn, """
-            SELECT c.d,
-                   (SELECT COUNT(*) FROM prices p
-                     WHERE p.interval='1d' AND p.date = c.d) AS px,
-                   (SELECT COUNT(*) FROM technical_indicators t
-                     WHERE t.date = c.d) AS ind
-              FROM (SELECT generate_series(?::date, ?::date, '1 day')::date AS d) c
-             ORDER BY c.d
-        """, (start.isoformat(), end.isoformat()))
-        want = {d.isoformat() for d in target_days}
-        print(f"\n{'='*60}")
-        print("📈 Coverage after backfill")
-        print(f"{'date':<14}{'prices':>10}{'indicators':>14}")
-        for d, px, ind in cur.fetchall():
-            ds = str(d)[:10]
-            if ds not in want:
-                continue
-            print(f"{ds:<14}{px:>10,}{ind:>14,}")
-    except Exception as exc:
-        logger.warning("Coverage report unavailable: %s", exc)
+        cur = _execute(conn, "SELECT COUNT(*) FROM nifty_constituents WHERE is_active", ())
+        universe = cur.fetchone()[0] or 0
+        for d in target_days:
+            ds = d.isoformat()
+            cur = _execute(conn, """
+                SELECT
+                  (SELECT COUNT(*) FROM nifty_constituents c WHERE c.is_active
+                     AND EXISTS (SELECT 1 FROM prices p WHERE p.symbol=c.symbol
+                                   AND p.interval='1d' AND p.date=?)),
+                  (SELECT COUNT(*) FROM nifty_constituents c WHERE c.is_active
+                     AND EXISTS (SELECT 1 FROM technical_indicators t
+                                   WHERE t.symbol=c.symbol AND t.date=?))
+            """, (ds, ds))
+            px, ind = cur.fetchone()
+            out[ds] = (px, ind, universe)
+        return out
+    finally:
+        release_connection(conn)
+
+
+def report_coverage(cov: Dict[str, Tuple[int, int, int]]) -> None:
+    print(f"\n{'='*66}")
+    print("📈 Coverage after backfill  (active Nifty 500 constituents only)")
+    print(f"{'date':<13}{'prices':>14}{'indicators':>16}")
+    for ds, (px, ind, universe) in sorted(cov.items()):
+        pp = f"{px}/{universe} ({px/universe*100:.0f}%)" if universe else str(px)
+        ip = f"{ind}/{universe} ({ind/universe*100:.0f}%)" if universe else str(ind)
+        print(f"{ds:<13}{pp:>14}{ip:>16}")
+
+
+def missing_symbols(target_days: List[date_type], limit: int = 25) -> Dict[str, List[str]]:
+    """day -> active constituents with no price bar. Names the gap rather than
+    leaving a bare count to be guessed at."""
+    out: Dict[str, List[str]] = {}
+    conn = get_connection()
+    try:
+        for d in target_days:
+            ds = d.isoformat()
+            cur = _execute(conn, """
+                SELECT c.symbol FROM nifty_constituents c
+                 WHERE c.is_active AND NOT EXISTS (
+                       SELECT 1 FROM prices p WHERE p.symbol=c.symbol
+                         AND p.interval='1d' AND p.date=?)
+                 ORDER BY 1
+            """, (ds,))
+            names = [r[0] for r in cur.fetchall()]
+            if names:
+                out[ds] = names[:limit]
+        return out
     finally:
         release_connection(conn)
 
@@ -425,6 +478,11 @@ def main(argv=None) -> int:
     ap.add_argument("--rate-limit-secs", type=float, default=DEFAULT_RATE_LIMIT_SECS,
                     help=f"seconds between Angel requests (default {DEFAULT_RATE_LIMIT_SECS})")
     ap.add_argument("--dry-run", action="store_true", help="report what would happen, change nothing")
+    ap.add_argument("--fail-under", type=float, default=0.90,
+                    help="exit non-zero if any target day ends below this share of active "
+                         "constituents having a price bar (default 0.90, matching the EOD "
+                         "coverage gate). Individual symbol failures above this do not fail "
+                         "the run — they are reported as warnings.")
     args = ap.parse_args(argv)
 
     if args.prices_only and args.indicators_only:
@@ -470,12 +528,54 @@ def main(argv=None) -> int:
               f"{', '.join(ind_result['failed'][:15])}"
               + (" ..." if len(ind_result["failed"]) > 15 else ""))
 
-    if not args.dry_run:
-        report_coverage(target_days)
-        print("\n   Signals are NOT regenerated by this script — run "
-              "`python scripts/generate_trades.py` once coverage looks right.")
+    if args.dry_run:
+        return 0
 
-    return 1 if (price_result["failed"] or ind_result["failed"]) else 0
+    # ── Exit status: judge the DATA, not the incident count ──────────────────
+    #
+    # This used to be `return 1 if any symbol failed`. On 2026-08-20 that marked
+    # a run red that had written 232 price rows and 1,459 indicator rows, purely
+    # because 7 of 500 symbols exhausted their retries against Angel One's rate
+    # limiter — leaving every day in the range at 494-503 of 500, comfortably
+    # over the gate the EOD chain actually cares about.
+    #
+    # A red run that wrote 1,691 good rows is worse than useless: it looks
+    # identical to one that died on the first line, so red stops meaning
+    # anything and a genuine failure goes unread. Fail on coverage instead.
+    cov = active_coverage(target_days)
+    report_coverage(cov)
+
+    gaps = missing_symbols(target_days)
+    if gaps:
+        print("\n   Active constituents still missing a price bar:")
+        for ds, names in sorted(gaps.items()):
+            print(f"     {ds}: {len(names)} — {', '.join(names)}")
+        print("   These are retryable — re-run this script (it skips everything "
+              "already stored). Angel throttles far less outside 09:15-15:30 IST.")
+
+    worst_day, worst_ratio = None, 1.0
+    for ds, (px, _ind, universe) in cov.items():
+        if universe:
+            r = px / universe
+            if r < worst_ratio:
+                worst_day, worst_ratio = ds, r
+
+    print(f"\n   Lowest price coverage: {worst_ratio:.1%}"
+          + (f" on {worst_day}" if worst_day else "")
+          + f"  (threshold {_pct(args.fail_under)})")
+    print("   Signals are NOT regenerated by this script — run "
+          "`python scripts/generate_trades.py` once coverage looks right.")
+
+    if worst_ratio < args.fail_under:
+        print(f"\n❌ FAILING: {_pct(worst_ratio)} coverage is below the "
+              f"{_pct(args.fail_under)} threshold — the data is not usable yet.")
+        return 1
+
+    if price_result["failed"] or ind_result["failed"]:
+        print(f"\n⚠️  Completed with {len(price_result['failed'])} price and "
+              f"{len(ind_result['failed'])} indicator symbol failures, but every "
+              f"day clears {_pct(args.fail_under)} coverage — treating as success.")
+    return 0
 
 
 if __name__ == "__main__":

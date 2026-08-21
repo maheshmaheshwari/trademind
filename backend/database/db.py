@@ -425,6 +425,60 @@ def insert_indicators(
             release_connection(db_conn)
 
 
+_INDICATOR_COLS = [
+    "rsi_14", "macd", "macd_signal", "macd_hist",
+    "bb_upper", "bb_middle", "bb_lower",
+    "sma_20", "sma_50", "sma_200", "ema_9", "ema_21",
+    "atr_14", "adx_14", "stoch_k", "stoch_d", "obv",
+    "support_1", "support_2", "support_3",
+    "resistance_1", "resistance_2", "resistance_3",
+    "signal", "signal_strength",
+]
+
+
+def insert_indicators_batch(rows: List[Tuple], conn: Optional[Any] = None) -> int:
+    """Upsert many indicator rows in one round-trip per page.
+
+    Each tuple is (symbol, date, *_INDICATOR_COLS) — the same column order
+    insert_indicators writes, so the two stay interchangeable.
+
+    Exists because the per-row version is unusable at scale. Measured against
+    Timescale Cloud, insert_indicators() costs **266 ms per row** — fine for the
+    1,992 rows of a one-year gap (9 minutes), impossible for a full-history
+    rebuild: 500 symbols x 4,122 market days is 2,061,000 rows, or **152 hours**
+    of round-trips. No amount of GitHub-Actions sharding fixes that (the ceiling
+    is 6h per job, so it would need 26 shards for the inserts alone), and
+    sharding the PRICE phase by symbol is worse than useless — Angel One's rate
+    limit is per account, so parallel shards contend for one quota and throttle
+    each other.
+
+    execute_batch pages these at 2000 statements per round-trip.
+    """
+    if not rows:
+        return 0
+    own = conn is None
+    db_conn = conn or get_connection()
+    try:
+        base_sql = (
+            "INSERT INTO technical_indicators (symbol, date, "
+            + ", ".join(_INDICATOR_COLS) + ") VALUES ("
+            + ", ".join(["?"] * (len(_INDICATOR_COLS) + 2)) + ")"
+        )
+        sql = _on_conflict_replace(base_sql, ["symbol", "date"], _INDICATOR_COLS)
+        _executemany(db_conn, sql, rows)
+        if own:
+            db_conn.commit()
+        return len(rows)
+    except Exception as e:
+        if own:
+            db_conn.rollback()
+        logger.error(f"insert_indicators_batch ({len(rows)} rows): {e}")
+        raise
+    finally:
+        if own:
+            release_connection(db_conn)
+
+
 def insert_news(
     headline: str,
     source: Optional[str] = None,

@@ -54,7 +54,7 @@ from database.db import (  # noqa: E402
     get_connection,
     get_all_prices_df,
     init_database,
-    insert_indicators,
+    insert_indicators_batch,
     insert_prices_batch,
     release_connection,
 )
@@ -77,6 +77,17 @@ RATE_LIMIT_GAP_GROWTH = 1.5            # multiply the steady-state gap after a t
 RATE_LIMIT_GAP_CEILING = 3.0           # …but never slower than this
 
 _RATE_LIMIT_MARKERS = ("exceeding access rate", "access denied", "too many requests")
+
+# The indicator columns written, in the order insert_indicators_batch expects
+# (signal / signal_strength are appended as NULL by the caller).
+_IND_COLS = (
+    "rsi_14", "macd", "macd_signal", "macd_hist",
+    "bb_upper", "bb_middle", "bb_lower",
+    "sma_20", "sma_50", "sma_200", "ema_9", "ema_21",
+    "atr_14", "adx_14", "stoch_k", "stoch_d", "obv",
+    "support_1", "support_2", "support_3",
+    "resistance_1", "resistance_2", "resistance_3",
+)
 
 # Warm-up the indicator window needs BEFORE the earliest target day: sma_200
 # needs 200 trading bars, ~290 calendar days; 400 gives slack for holidays.
@@ -339,26 +350,19 @@ def backfill_indicators(symbols: List[str], target_days: List[date_type],
                 df = calculate_all(pd.DataFrame(prices))
                 df["_d"] = df["date"].astype(str).str[:10]
 
-                rows_for_symbol = 0
-                for _, row in df[df["_d"].isin(missing)].iterrows():
-                    ok = insert_indicators(ns, row["_d"], {
-                        k: _safe_float(row.get(k)) for k in (
-                            "rsi_14", "macd", "macd_signal", "macd_hist",
-                            "bb_upper", "bb_middle", "bb_lower",
-                            "sma_20", "sma_50", "sma_200", "ema_9", "ema_21",
-                            "atr_14", "adx_14", "stoch_k", "stoch_d", "obv",
-                            "support_1", "support_2", "support_3",
-                            "resistance_1", "resistance_2", "resistance_3",
-                        )
-                    }, conn=conn)
-                    # insert_indicators logs and returns False rather than
-                    # raising. On Postgres a failed statement aborts the whole
-                    # transaction, so every later insert on this connection
-                    # would fail too — bail out and reset instead of writing
-                    # into a dead transaction.
-                    if not ok:
-                        raise RuntimeError(f"insert_indicators rejected {ns} {row['_d']}")
-                    rows_for_symbol += 1
+                # One batched round-trip per symbol, not one per row. The
+                # per-row path measures 266 ms against Timescale Cloud, which is
+                # 9 minutes for a one-year gap and 152 HOURS for a full-history
+                # rebuild — see insert_indicators_batch in database/db.py.
+                batch = [
+                    (ns, row["_d"], *[_safe_float(row.get(k)) for k in _IND_COLS],
+                     None, None)          # signal, signal_strength stay NULL
+                    for _, row in df[df["_d"].isin(missing)].iterrows()
+                ]
+                # insert_indicators_batch RAISES rather than returning a falsy
+                # value: on Postgres a failed statement aborts the transaction,
+                # so continuing would write into a dead one.
+                rows_for_symbol = insert_indicators_batch(batch, conn=conn)
 
                 conn.commit()
                 written += rows_for_symbol

@@ -78,8 +78,16 @@ RATE_LIMIT_GAP_CEILING = 3.0           # …but never slower than this
 
 _RATE_LIMIT_MARKERS = ("exceeding access rate", "access denied", "too many requests")
 
-# sma_200 needs 200 bars; ask for plenty of slack around the target window.
-INDICATOR_LOOKBACK_DAYS = 500
+# Warm-up the indicator window needs BEFORE the earliest target day: sma_200
+# needs 200 trading bars, ~290 calendar days; 400 gives slack for holidays.
+#
+# This must be measured back from the EARLIEST TARGET DAY, never from today.
+# A fixed "500 days of history" is fine for a recent backfill and silently
+# useless for an old one: backfilling 2024-01-01..2024-12-31 on 2026-08-21,
+# get_all_prices_df(days=500) starts at 2025-04-08, so every target day fell
+# outside the frame, `df[df["_d"].isin(missing)]` was empty, and the pass wrote
+# 0 indicator rows for 1,992 freshly-backfilled price rows without failing.
+INDICATOR_WARMUP_DAYS = 400
 
 
 def _is_rate_limited(err: str) -> bool:
@@ -307,13 +315,21 @@ def backfill_indicators(symbols: List[str], target_days: List[date_type],
             print(f"   ... and {len(todo) - 20} more")
         return {"symbols": 0, "rows": 0, "failed": []}
 
+    # get_all_prices_df counts back from NOW, so the window has to span
+    # today → (earliest target day − warm-up).
+    lookback_days = (date_type.today() - start).days + INDICATOR_WARMUP_DAYS
+    logger.info("Indicator price window: %d days back (to ~%s), covering targets from %s",
+                lookback_days,
+                (date_type.today() - timedelta(days=lookback_days)).isoformat(),
+                start.isoformat())
+
     written = 0
     failed: List[str] = []
     conn = get_connection()
     try:
         for idx, (ns, missing) in enumerate(todo, 1):
             try:
-                prices = get_all_prices_df(ns, days=INDICATOR_LOOKBACK_DAYS)
+                prices = get_all_prices_df(ns, days=lookback_days)
                 if not prices or len(prices) < 14:
                     logger.warning("[%d/%d] %s skipped — only %d price rows",
                                    idx, len(todo), ns, len(prices) if prices else 0)
@@ -388,7 +404,8 @@ def _pct(x: float) -> str:
     return f"{v:.0f}%" if abs(v - round(v)) < 0.05 else f"{v:.1f}%"
 
 
-def active_coverage(target_days: List[date_type]) -> Dict[str, Tuple[int, int, int]]:
+def active_coverage(target_days: List[date_type],
+                    only: Set[str] = None) -> Dict[str, Tuple[int, int, int]]:
     """day -> (active_with_price, active_with_indicator, active_universe_size).
 
     Measured against `nifty_constituents WHERE is_active`, NOT a raw COUNT(*)
@@ -405,19 +422,34 @@ def active_coverage(target_days: List[date_type]) -> Dict[str, Tuple[int, int, i
     out: Dict[str, Tuple[int, int, int]] = {}
     conn = get_connection()
     try:
-        cur = _execute(conn, "SELECT COUNT(*) FROM nifty_constituents WHERE is_active", ())
-        universe = cur.fetchone()[0] or 0
+        # Scope to --symbols when given. Judging a targeted run against all 500
+        # constituents always "fails": backfilling 8 symbols for 2024 reported
+        # 4.4% coverage and exit 1, having written every row it was asked to.
+        if only:
+            universe = len(only)
+        else:
+            cur = _execute(conn, "SELECT COUNT(*) FROM nifty_constituents WHERE is_active", ())
+            universe = cur.fetchone()[0] or 0
+        # The numerator must be scoped the same way as the denominator. Scoping
+        # only the denominator produced "467/8 (5838%)" — every constituent with
+        # a bar that day over a universe of 8 — and, because the ratio then never
+        # fell below 1.0, a run could not fail its own coverage check.
+        scope_sql, scope_args = "", ()
+        if only:
+            scope_sql = " AND c.symbol = ANY(%s)"
+            scope_args = (sorted(only),)
+
         for d in target_days:
             ds = d.isoformat()
-            cur = _execute(conn, """
+            cur = _execute(conn, f"""
                 SELECT
-                  (SELECT COUNT(*) FROM nifty_constituents c WHERE c.is_active
+                  (SELECT COUNT(*) FROM nifty_constituents c WHERE c.is_active{scope_sql}
                      AND EXISTS (SELECT 1 FROM prices p WHERE p.symbol=c.symbol
                                    AND p.interval='1d' AND p.date=?)),
-                  (SELECT COUNT(*) FROM nifty_constituents c WHERE c.is_active
+                  (SELECT COUNT(*) FROM nifty_constituents c WHERE c.is_active{scope_sql}
                      AND EXISTS (SELECT 1 FROM technical_indicators t
                                    WHERE t.symbol=c.symbol AND t.date=?))
-            """, (ds, ds))
+            """, (*scope_args, ds, *scope_args, ds))
             px, ind = cur.fetchone()
             out[ds] = (px, ind, universe)
         return out
@@ -435,7 +467,8 @@ def report_coverage(cov: Dict[str, Tuple[int, int, int]]) -> None:
         print(f"{ds:<13}{pp:>14}{ip:>16}")
 
 
-def missing_symbols(target_days: List[date_type], limit: int = 25) -> Dict[str, List[str]]:
+def missing_symbols(target_days: List[date_type], limit: int = 25,
+                    only: Set[str] = None) -> Dict[str, List[str]]:
     """day -> active constituents with no price bar. Names the gap rather than
     leaving a bare count to be guessed at."""
     out: Dict[str, List[str]] = {}
@@ -451,6 +484,8 @@ def missing_symbols(target_days: List[date_type], limit: int = 25) -> Dict[str, 
                  ORDER BY 1
             """, (ds,))
             names = [r[0] for r in cur.fetchall()]
+            if only:
+                names = [n for n in names if n in only]
             if names:
                 out[ds] = names[:limit]
         return out
@@ -545,10 +580,11 @@ def main(argv=None) -> int:
     # A red run that wrote 1,691 good rows is worse than useless: it looks
     # identical to one that died on the first line, so red stops meaning
     # anything and a genuine failure goes unread. Fail on coverage instead.
-    cov = active_coverage(target_days)
+    scope = {f"{k}.NS" for k in token_map} if args.symbols else None
+    cov = active_coverage(target_days, only=scope)
     report_coverage(cov)
 
-    gaps = missing_symbols(target_days)
+    gaps = missing_symbols(target_days, only=scope)
     if gaps:
         print("\n   Active constituents still missing a price bar:")
         for ds, names in sorted(gaps.items()):

@@ -290,6 +290,15 @@ def backfill_prices(token_map: Dict, target_days: List[date_type],
                 else:
                     logger.info("[%d/%d] %-15s no candles for the target day(s)",
                                 idx, len(todo), symbol)
+            elif rows is not None:
+                # rows == [] : Angel returned nothing for the window, which for a
+                # historical year means the symbol was not listed yet. This used
+                # to log NOTHING at all — neither branch above runs on an empty
+                # list — so a not-yet-listed symbol was indistinguishable in the
+                # log from one not yet reached. On a 2010 run that is the
+                # majority of the universe, which made the log unreadable.
+                logger.info("[%d/%d] %-15s not listed / no data in this window",
+                            idx, len(todo), symbol)
 
             if idx % 50 == 0:
                 print(f"  ⏳ {idx}/{len(todo)} — {total_rows} rows, {len(failed)} failed")
@@ -459,6 +468,30 @@ def active_coverage(target_days: List[date_type],
         else:
             cur = _execute(conn, "SELECT COUNT(*) FROM nifty_constituents WHERE is_active", ())
             universe = cur.fetchone()[0] or 0
+
+        # …and for a HISTORICAL range, "all active constituents" is the wrong
+        # denominator too. Most of today's Nifty 500 did not exist in 2010, so a
+        # flawless 2010 backfill scores 53.4% and exits 1 — every year of a
+        # 2010-2022 rebuild would go red having done everything obtainable.
+        # Measured on the real 2010 run: 267/500 = 53.4% against all
+        # constituents, 267/286 = 93.4% against the symbols that actually have
+        # 2010 data, rising to 100% by December as the year's listings accrue.
+        #
+        # So the denominator is the symbols with ANY bar in the target window:
+        # "did we get every day for every stock that existed then?" — the only
+        # question a backfill can answer. Falls back to the universe when the
+        # window is empty, so a genuinely failed fetch still reads 0%.
+        start_iso, end_iso = target_days[0].isoformat(), target_days[-1].isoformat()
+        scope_sql_u, scope_args_u = "", ()
+        if only:
+            scope_sql_u, scope_args_u = " AND symbol = ANY(%s)", (sorted(only),)
+        cur = _execute(conn, f"""
+            SELECT COUNT(DISTINCT symbol) FROM prices
+             WHERE interval='1d' AND date >= ? AND date <= ?{scope_sql_u}
+        """, (start_iso, end_iso, *scope_args_u))
+        listed = cur.fetchone()[0] or 0
+        if listed:
+            universe = min(universe, listed) if only else listed
         # The numerator must be scoped the same way as the denominator. Scoping
         # only the denominator produced "467/8 (5838%)" — every constituent with
         # a bar that day over a universe of 8 — and, because the ratio then never
@@ -553,6 +586,11 @@ def main(argv=None) -> int:
     ap.add_argument("--rate-limit-secs", type=float, default=DEFAULT_RATE_LIMIT_SECS,
                     help=f"seconds between Angel requests (default {DEFAULT_RATE_LIMIT_SECS})")
     ap.add_argument("--dry-run", action="store_true", help="report what would happen, change nothing")
+    ap.add_argument("--no-schema-init", action="store_true",
+                    help="skip init_database(). REQUIRED for concurrent shards: init_database "
+                         "issues DDL (CREATE EXTENSION/TABLE/INDEX, ALTER TABLE) and shards "
+                         "running it at once make PostgreSQL raise 'tuple concurrently "
+                         "updated'. The caller must have run it once beforehand.")
     ap.add_argument("--fail-under", type=float, default=0.90,
                     help="exit non-zero if any target day ends below this share of active "
                          "constituents having a price bar (default 0.90, matching the EOD "
@@ -563,7 +601,14 @@ def main(argv=None) -> int:
     if args.prices_only and args.indicators_only:
         raise SystemExit("--prices-only and --indicators-only are mutually exclusive")
 
-    init_database()
+    # DDL is not shard-safe. Four indicator shards each calling init_database()
+    # concurrently raced on the catalog and killed one of them outright:
+    #   psycopg2.errors.InternalError_: tuple concurrently updated
+    #     at CREATE EXTENSION IF NOT EXISTS timescaledb
+    # (run 32467643119, indicators (2010, 1)). The workflow runs the schema step
+    # once in `plan` and passes --no-schema-init to every shard.
+    if not args.no_schema_init:
+        init_database()
     target_days = resolve_target_days(args)
 
     from scripts.update_stocks_angel import load_token_map

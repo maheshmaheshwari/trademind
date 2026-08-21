@@ -295,7 +295,9 @@ jobs:
           else
             RANGE="${{ needs.plan.outputs.date_args }}"
           fi
-          ARGS="$RANGE --prices-only"
+          # --no-schema-init: `plan` already ran init_database(). Without it every
+          # job re-runs DDL and concurrent jobs raise "tuple concurrently updated".
+          ARGS="$RANGE --prices-only --no-schema-init"
           ARGS="$ARGS --rate-limit-secs ${{ inputs.rate_limit_secs }} --fail-under ${{ inputs.fail_under }}"
           [ -n "${{ inputs.symbols }}" ] && ARGS="$ARGS --symbols ${{ inputs.symbols }}"
           [ "${{ inputs.force }}" = "true" ]   && ARGS="$ARGS --force"
@@ -339,7 +341,10 @@ jobs:
           else
             RANGE="${{ needs.plan.outputs.date_args }}"
           fi
-          ARGS="$RANGE --indicators-only --shards ${{ inputs.indicator_shards }} --shard ${{ matrix.shard }}"
+          # --no-schema-init: see the price job. This is the one that actually bit —
+          # four shards racing CREATE EXTENSION killed shard 1 of run 32467643119.
+          ARGS="$RANGE --indicators-only --no-schema-init"
+          ARGS="$ARGS --shards ${{ inputs.indicator_shards }} --shard ${{ matrix.shard }}"
           ARGS="$ARGS --fail-under ${{ inputs.fail_under }}"
           [ -n "${{ inputs.symbols }}" ] && ARGS="$ARGS --symbols ${{ inputs.symbols }}"
           [ "${{ inputs.force }}" = "true" ]   && ARGS="$ARGS --force"

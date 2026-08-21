@@ -30,7 +30,8 @@ from typing import Dict, List, Optional
 
 import pytz
 
-from database.db import get_holiday_map, get_holiday_years, get_price_dates
+from database.db import (get_holiday_map, get_holiday_years, get_price_dates,
+                         get_special_sessions)
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +72,19 @@ def holiday_name(d) -> Optional[str]:
 
 
 def is_trading_day(d) -> bool:
-    """True when the NSE equity segment trades on `d` (weekday, not a holiday)."""
+    """True when the NSE equity segment trades on `d`.
+
+    A weekday that is not a listed holiday — OR a recorded special session.
+    The exchange does open outside the ordinary pattern: Muhurat (Diwali)
+    evenings, the Feb-1 Union Budget session, and NSE's special live / DR-site
+    Saturdays. 19 such dates carry 2,993 real price bars, and without this
+    branch every one of them was called a non-trading day, which made
+    verify_price_dates() report correct bars as `unexpected_dates`
+    ("the source misdated a candle").
+    """
     d = _as_date(d)
+    if d in get_special_sessions():
+        return True
     return d.weekday() < 5 and d not in get_holiday_map()
 
 

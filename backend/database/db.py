@@ -1748,6 +1748,10 @@ def get_market_holidays(start: Optional[str] = None, end: Optional[str] = None,
         release_connection(conn)
 
 
+_special_cache = None
+_special_cache_at = 0.0
+
+
 def get_holiday_map(segment: str = "CM", exchange: str = "NSE") -> Dict[Any, str]:
     """date → description for every stored holiday. Cached in-process.
 
@@ -1760,9 +1764,14 @@ def get_holiday_map(segment: str = "CM", exchange: str = "NSE") -> Dict[Any, str
     if _holiday_cache is None or (time.time() - _holiday_cache_at) > _HOLIDAY_CACHE_TTL_SEC:
         conn = get_connection()
         try:
+            # session_type='closed' ONLY. A 'special_session' row records a day
+            # the exchange DID trade (Muhurat, Budget, NSE special Saturdays);
+            # including it here would make is_trading_day() call a day with real
+            # price bars a non-trading day. See get_special_sessions().
             cur = _execute(conn,
                 "SELECT holiday_date, description FROM market_holidays "
-                "WHERE exchange = ? AND segment = ?", (exchange, segment))
+                "WHERE exchange = ? AND segment = ? "
+                "  AND COALESCE(session_type, 'closed') = 'closed'", (exchange, segment))
             _holiday_cache = {r[0]: (r[1] or "Holiday") for r in cur.fetchall()}
             _holiday_cache_at = time.time()
         finally:
@@ -1770,10 +1779,45 @@ def get_holiday_map(segment: str = "CM", exchange: str = "NSE") -> Dict[Any, str
     return _holiday_cache
 
 
+def get_special_sessions(segment: str = "CM", exchange: str = "NSE") -> set:
+    """Dates the exchange traded despite the calendar saying otherwise.
+
+    Muhurat (Diwali) sessions, the Feb-1 Union Budget session and NSE's special
+    live / DR-site Saturdays. These are real trading days that fall on a weekend
+    or on a listed holiday, so neither the weekday test nor the holiday table can
+    recognise them — 19 of them carry 2,993 price bars.
+
+    Cached alongside the holiday map and invalidated by clear_holiday_cache().
+    """
+    global _special_cache, _special_cache_at
+    if _special_cache is None or (time.time() - _special_cache_at) > _HOLIDAY_CACHE_TTL_SEC:
+        conn = get_connection()
+        try:
+            cur = _execute(conn,
+                "SELECT holiday_date FROM market_holidays "
+                "WHERE exchange = ? AND segment = ? AND session_type = 'special_session'",
+                (exchange, segment))
+            _special_cache = {r[0] for r in cur.fetchall()}
+            _special_cache_at = time.time()
+        except Exception:
+            # Column not yet migrated — no special sessions is the safe answer,
+            # and it restores exactly the pre-migration behaviour.
+            _special_cache, _special_cache_at = set(), time.time()
+        finally:
+            release_connection(conn)
+    return _special_cache
+
+
 def clear_holiday_cache() -> None:
-    """Drop the in-process holiday cache — call after changing the table."""
-    global _holiday_cache
+    """Drop the in-process holiday caches — call after changing the table.
+
+    Clears the special-session cache too: they come from the same table, and
+    leaving one stale after a write is how a calendar change appears to have
+    had no effect.
+    """
+    global _holiday_cache, _special_cache
     _holiday_cache = None
+    _special_cache = None
 
 
 def get_holiday_years(segment: str = "CM", exchange: str = "NSE") -> List[int]:

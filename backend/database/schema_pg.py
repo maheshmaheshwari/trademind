@@ -243,6 +243,30 @@ CREATE TABLE IF NOT EXISTS market_holidays (
 CREATE INDEX IF NOT EXISTS idx_market_holidays_date ON market_holidays (holiday_date);
 """
 
+# market_holidays answers "when is the market SHUT". It has no way to say "the
+# market opens on this Sunday", and the NSE feed never states it — so Muhurat
+# (Diwali) sessions, the Feb-1 Union Budget session and NSE's special live /
+# DR-site Saturdays were invisible to the calendar. 19 such dates carry 2,993
+# genuine price bars, and trading_calendar.is_trading_day() called every one of
+# them a non-trading day: a weekend is excluded unconditionally, and a weekday
+# Muhurat date would be excluded the moment the NSE holiday list (which marks it
+# "Diwali-Laxmi Pujan*") were imported verbatim.
+#
+# The consequence is not cosmetic. verify_price_dates() reports those dates as
+# `unexpected_dates` — "the source misdated a candle" — when the bars are
+# correct, and that feeds GET /api/market/data-freshness and the weekly
+# verify_data_integrity_job.
+#
+# session_type separates the two meanings:
+#   'closed'          — the exchange did not trade (the default, every existing row)
+#   'special_session' — the exchange DID trade, whatever the weekday says
+SQL_MARKET_HOLIDAYS_ALTER = [
+    "ALTER TABLE market_holidays ADD COLUMN IF NOT EXISTS session_type TEXT NOT NULL DEFAULT 'closed'",
+    "ALTER TABLE market_holidays DROP CONSTRAINT IF EXISTS chk_mh_session_type",
+    "ALTER TABLE market_holidays ADD CONSTRAINT chk_mh_session_type "
+    "CHECK (session_type IN ('closed','special_session'))",
+]
+
 SQL_NOTIFICATIONS = """
 CREATE TABLE IF NOT EXISTS notifications (
     id         BIGSERIAL PRIMARY KEY,
@@ -1219,6 +1243,15 @@ def init_timescale(conn) -> None:
             except Exception as e:
                 conn.rollback()
                 logger.warning(f"ALTER TABLE nifty_constituents: {e}")
+
+    # market_holidays: session_type ('closed' | 'special_session') — idempotent
+    for stmt in SQL_MARKET_HOLIDAYS_ALTER:
+        try:
+            cur.execute(stmt)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"market_holidays session_type migration: {e}")
 
     # Widen trade_signals UNIQUE constraint to include model_horizon (per-horizon signals)
     for stmt in SQL_TRADE_SIGNALS_MIGRATE:

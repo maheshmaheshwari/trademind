@@ -215,9 +215,29 @@ jobs:
           fi
           echo "years=$YEARS" >> "$GITHUB_OUTPUT"
 
-          IS=$(seq 0 $(( ${{ inputs.indicator_shards }} - 1 )) | jq -R . | jq -sc .)
+          NYEARS=$(echo "$YEARS" | jq 'length')
+          ISH=${{ inputs.indicator_shards }}
+
+          # GitHub caps a matrix at 256 jobs. years x shards silently exceeding
+          # it fails the RUN, not a job, so catch it here with a message that
+          # says what to change.
+          TOTAL=$(( NYEARS * ISH ))
+          if [ "$TOTAL" -gt 256 ]; then
+            echo "::error::$NYEARS years x $ISH indicator shards = $TOTAL jobs, over GitHub's 256 matrix cap. Lower indicator_shards to $(( 256 / NYEARS )) or split the year range."
+            exit 1
+          fi
+
+          # market_holidays starts at 2010. Before that every weekday counts as
+          # a trading day, so ~10 exchange holidays a year are invisible and the
+          # run will report them as gaps it can never fill.
+          if [ "${{ inputs.from_year }}" != "" ] && [ "${{ inputs.from_year }}" -lt 2010 ]; then
+            echo "::warning::from_year ${{ inputs.from_year }} is before the holiday calendar starts (2010). Years before 2010 have no holiday rows, so every weekday counts as a trading day and ~10 phantom gaps per year will be reported. Only 7 symbols have pre-2015 history."
+          fi
+
+          IS=$(seq 0 $(( ISH - 1 )) | jq -R . | jq -sc .)
           echo "indicator_shards=$IS" >> "$GITHUB_OUTPUT"
-          echo "Indicator shards: $IS   (prices are not sharded — see the header)"
+          echo "Indicator shards: $IS   ($TOTAL indicator jobs, cap 256)"
+          echo "Prices are not sharded — one job per year, see the header."
 
       # DDL in ONE place. init_database() issues CREATE TABLE / ALTER TABLE /
       # CREATE INDEX, and shards running that concurrently against the same

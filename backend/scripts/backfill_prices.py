@@ -126,8 +126,16 @@ def resolve_target_days(args) -> List[date_type]:
         # Year mode. --from-year alone means exactly that year, which is what
         # makes a per-year shard a single input rather than a date arithmetic
         # exercise in the workflow.
-        fy = int(args.from_year or args.to_year)
-        ty = int(args.to_year or args.from_year)
+        try:
+            fy = int(args.from_year or args.to_year)
+            ty = int(args.to_year or args.from_year)
+        except ValueError:
+            raise SystemExit(
+                f"--from-year/--to-year must be 4-digit years, got "
+                f"{args.from_year!r}/{args.to_year!r}"
+            )
+        if not (1990 <= fy <= 2100 and 1990 <= ty <= 2100):
+            raise SystemExit(f"--from-year/--to-year out of range: {fy}..{ty}")
         if fy > ty:
             raise SystemExit(f"--from-year {fy} is after --to-year {ty}")
         start = date_type(fy, 1, 1)
@@ -625,7 +633,14 @@ def main(argv=None) -> int:
     # A red run that wrote 1,691 good rows is worse than useless: it looks
     # identical to one that died on the first line, so red stops meaning
     # anything and a genuine failure goes unread. Fail on coverage instead.
-    scope = {f"{k}.NS" for k in token_map} if args.symbols else None
+    # ALWAYS the symbols this run is responsible for — never a conditional on
+    # --symbols. token_map has already been narrowed by --symbols AND by
+    # --shard/--shards, and a shard is exactly the case that breaks:
+    # `--shards 4 --shard 0` sets no args.symbols, so this used to fall back to
+    # None and judge 125 shard symbols against all 500 constituents — ~25%
+    # coverage, exit 1, on every shard of a run that did everything asked of it.
+    # For an unsharded full run token_map IS the universe, so this is a no-op.
+    scope = {f"{k}.NS" for k in token_map}
     cov = active_coverage(target_days, only=scope)
     report_coverage(cov)
 

@@ -122,7 +122,17 @@ def resolve_target_days(args) -> List[date_type]:
         trading_days_between,
     )
 
-    if args.date:
+    if args.from_year or args.to_year:
+        # Year mode. --from-year alone means exactly that year, which is what
+        # makes a per-year shard a single input rather than a date arithmetic
+        # exercise in the workflow.
+        fy = int(args.from_year or args.to_year)
+        ty = int(args.to_year or args.from_year)
+        if fy > ty:
+            raise SystemExit(f"--from-year {fy} is after --to-year {ty}")
+        start = date_type(fy, 1, 1)
+        end = date_type(ty, 12, 31)
+    elif args.date:
         start = end = datetime.strptime(args.date, "%Y-%m-%d").date()
     elif args.from_date or args.to_date:
         if not (args.from_date and args.to_date):
@@ -134,11 +144,18 @@ def resolve_target_days(args) -> List[date_type]:
         start = end - timedelta(days=args.days)
 
     if start > end:
-        raise SystemExit(f"--from {start} is after --to {end}")
+        raise SystemExit(f"start {start} is after end {end}")
 
-    # Never target a day the market hasn't finished yet: before the 15:35 IST
-    # EOD window there is no complete daily candle, and asking for one is how
-    # a run "succeeds" with zero rows.
+    # Hard stop at YESTERDAY. Today belongs to the 15:35 EOD scheduler, and a
+    # backfill that reaches into it either races that job or, run before the
+    # close, stores a partial candle as if it were the day's bar.
+    yesterday = today_ist() - timedelta(days=1)
+    if end > yesterday:
+        logger.info("Trimming end %s → %s (today is the EOD scheduler's, not ours)",
+                    end, yesterday)
+        end = yesterday
+
+    # …and never past the last day that actually has a complete EOD candle.
     cutoff = last_expected_trading_day()
     if end > cutoff:
         logger.info("Trimming end %s → %s (no complete EOD candle after that yet)", end, cutoff)
@@ -512,6 +529,14 @@ def main(argv=None) -> int:
                    help="fallback: last N calendar days ending today (default 7)")
 
     ap.add_argument("--symbols", nargs="+", help="only these symbols (without .NS)")
+    ap.add_argument("--from-year", dest="from_year",
+                    help="backfill a whole year, e.g. 2024. Alone it means exactly that "
+                         "year; with --to-year it is the range start.")
+    ap.add_argument("--to-year", dest="to_year", help="range end year (inclusive)")
+    ap.add_argument("--shards", type=int, default=1,
+                    help="split the symbol universe into N deterministic shards")
+    ap.add_argument("--shard", type=int, default=0,
+                    help="which shard this run handles, 0-based (needs --shards)")
     ap.add_argument("--force", action="store_true",
                     help="re-fetch/recompute days that are already present")
     ap.add_argument("--prices-only", action="store_true", help="skip the indicator pass")
@@ -540,6 +565,22 @@ def main(argv=None) -> int:
         token_map = {k: v for k, v in token_map.items() if k.upper() in wanted}
         if not token_map:
             raise SystemExit(f"None of {sorted(wanted)} are in the Angel token map")
+
+    if args.shards > 1:
+        if not 0 <= args.shard < args.shards:
+            raise SystemExit(f"--shard must be 0..{args.shards - 1}, got {args.shard}")
+        # Sorted then strided, so shard membership depends only on (symbol set,
+        # shards) — never on dict order or run time. A re-run of shard 3 covers
+        # exactly the symbols shard 3 covered before, which is what makes a
+        # failed shard independently retryable.
+        ordered = sorted(token_map)
+        mine = {k for i, k in enumerate(ordered) if i % args.shards == args.shard}
+        token_map = {k: v for k, v in token_map.items() if k in mine}
+        print(f"🔀 Shard {args.shard + 1}/{args.shards}: {len(token_map)} of "
+              f"{len(ordered)} symbols")
+        if not token_map:
+            print("   nothing in this shard — done.")
+            return 0
 
     price_result = {"rows": 0, "failed": [], "skipped": 0, "touched": {}}
     if not args.indicators_only:

@@ -1,91 +1,122 @@
-# Repair a gap in EOD prices + technical indicators for a range of trading days.
+# Repair gaps in EOD prices + technical indicators, over a year range, a date
+# range, or a single day — sharded so a multi-year run cannot hit the job timeout.
 #
 # WHY THIS EXISTS
 #
-# The daily `eod_data` scheduler job only ever collects "today". When it misses
-# a day the recovery queue re-runs the job — but the job still collects today,
-# and its coverage gate still measures today, so a replay can never repair a
-# past date. Before this workflow the only repair path was a laptop.
+# The daily `eod_data` job only ever collects "today". When it misses a day the
+# recovery queue re-runs the job, but the job still collects today and its
+# coverage gate still measures today, so a replay can never repair a past date.
 #
-# It was needed on 2026-08-20. Between the 17th and 18th, `prices_id_seq` and
-# `technical_indicators_id_seq` were dropped from prod out-of-band (a
-# DROP SEQUENCE ... CASCADE also strips the column default it owns), leaving
-# both tables as `id BIGINT NOT NULL` with no default. Every insert then failed
-# with
+# It has been needed twice. On 2026-08-20 `prices_id_seq` and
+# `technical_indicators_id_seq` were dropped out-of-band, leaving both tables
+# `id BIGINT NOT NULL` with no default; every insert failed and — because
+# insert_prices_batch and insert_indicators catch and return 0/False rather than
+# raising — the EOD chain reported success while writing nothing. And a coverage
+# audit found eight symbols (ITC, GRASIM, INDIGO, BBTC, BDL, GRAPHITE,
+# HOMEFIRST, JBMA) missing the WHOLE of 2024: 1,992 stock-days lost when a
+# rate-limited fetch chunk was silently skipped.
 #
-#     null value in column "id" of relation "_hyper_10_1125_chunk"
-#     violates not-null constraint
+# The "Ensure schema" step is not boilerplate — init_database() calls
+# repair_serial_defaults(), which restores a missing BIGSERIAL default before
+# this workflow tries to write.
 #
-# and because insert_prices_batch / insert_indicators both catch, log and
-# return 0/False rather than raising, the EOD chain reported success while
-# writing nothing. Two trading days were lost before the coverage gate's
-# "prices 0/500" made it visible. Both tables still carry the tell-tale
-# `tmp_*` / `*_new_*` shadow indexes of the table rebuild that did it.
+# ─────────────────────────────────────────────────────────────────────────────
+# SHARDING — the two phases are deliberately shaped differently
 #
-# The "Ensure schema" step below is not boilerplate: init_database() calls
-# repair_serial_defaults(), which restores a missing BIGSERIAL default. Running
-# it here means this workflow fixes that class of breakage before it tries to
-# write, rather than failing 500 times in a row.
+#   prices       ONE job per year, no symbol shards. Each symbol is a single
+#                Angel One range fetch, so a year costs ~500 calls — about 17
+#                minutes at 2s, nowhere near the timeout. Symbol shards were
+#                tried and removed: they buy nothing here and Angel rate-limits
+#                per ACCOUNT, not per runner, so parallel fetchers contend for
+#                one quota instead of multiplying it. Measured 2026-08-20:
+#                ~2s/symbol off-hours against 44s/symbol mid-session under
+#                contention — a 20x swing. `price_years_at_once` defaults to 1
+#                for the same reason: two years fetching at once is two
+#                fetchers on one quota.
 #
-# RATE LIMITING — the reason this is manual, and the reason for the pacing input
+#   indicators   sharded by year AND symbol, running 4 at a time. This phase
+#                makes NO API calls — pure pandas over prices already in the DB
+#                — so shards genuinely parallelise, and this is where the time
+#                on a long range actually goes.
 #
-# Angel One throttles getCandleData well below its nominal 3 req/sec. Measured
-# 2026-08-20 from a laptop DURING market hours, two back-to-back calls were
-# enough to earn "Access denied because of exceeding access rate", and a
-# 500-symbol run spent ~65s per symbol grinding through retries. The cause was
-# contention: the local dev backend and the HF Space both run price_monitor /
-# gtt_sync / autopilot_sync every 5 minutes on the SAME Angel account, and those
-# crons are hour="9-15".
+# The real lever on the price phase is WHEN it runs. Outside 09:15-15:30 IST
+# the Space's 5-minute intraday jobs are not competing for the same quota.
 #
-# So: prefer to run this AFTER 15:30 IST (10:00 UTC), when the intraday crons
-# have stopped and the backfill has Angel to itself. During market hours, raise
-# rate_limit_secs to 2.0+ and expect it to be slow.
+# ─────────────────────────────────────────────────────────────────────────────
+# COST OF A FULL REBUILD
 #
-# The script backs off per-symbol (5s/15s/45s) and widens its steady-state gap
-# rather than dropping a throttled symbol, so a throttled window makes the run
-# slower, not emptier.
+# 500 symbols x 4,122 market days = 2,061,000 indicator rows. Batched writes
+# (insert_indicators_batch, execute_batch at 2000/page) put that at ~3.5h
+# unsharded — measured 6.1 ms/row against Timescale Cloud, versus 266 ms/row
+# for the per-row path it replaced, which would have been 152 HOURS. Sharding
+# the indicator phase by year divides that further.
 #
+# ─────────────────────────────────────────────────────────────────────────────
 # IDEMPOTENT
 #
-# A symbol whose target days are all present in `prices` costs no API call at
-# all, so re-running after a partial run only fetches what is still missing.
-# Use force=true to overwrite days that are already there.
+# A symbol whose target days are all present costs no API call at all, so a
+# re-run after a partial or timed-out run only fetches what is still missing.
+# Shard membership is `sorted(symbols)[i::N]`, so a re-run of shard 3 covers
+# exactly the symbols shard 3 covered before. force=true overrides the skip.
 #
 # Indicators are written per target day with signal/signal_strength left NULL —
 # those are ML output for the CURRENT bar (scripts/generate_trades.py), and
-# backfilling them would fabricate a recommendation that was never made. That
-# is also why an existing indicator row is skipped unless force=true:
-# insert_indicators upserts every column, so rewriting a row that already
-# carries a signal would null it out.
+# backfilling them would fabricate a recommendation that was never made.
 #
-# Secrets required:
-#   PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD   — the target database
-#   ANGEL_API_KEY ANGEL_CLIENT_ID ANGEL_TOTP_SECRET
-#   ANGEL_MPIN (or ANGEL_PASSWORD)               — the only price source
-#   HF_TOKEN MODEL_KEY                           — backend/data/ is gitignored,
-#     so load_token_map() pulls angel_tokens.json from the model store. No model
-#     sync is needed: calculate_all() is pure pandas/ta and loads no .pkl.
+# Every run stops at YESTERDAY. Today belongs to the 15:35 IST EOD scheduler;
+# reaching into it either races that job or, before the close, stores a partial
+# candle as if it were the day's bar.
+#
+# Secrets: PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD
+#          ANGEL_API_KEY ANGEL_CLIENT_ID ANGEL_TOTP_SECRET ANGEL_MPIN|ANGEL_PASSWORD
+#          HF_TOKEN MODEL_KEY  (backend/data/ is gitignored, so the token map is
+#          pulled from the model store; no model sync is needed — calculate_all
+#          is pure pandas and loads no .pkl)
 name: Backfill prices + indicators
 
 on:
   workflow_dispatch:
     inputs:
+      from_year:
+        description: 'Start year, e.g. 2023. Alone = that year only. Overrides the date fields.'
+        type: string
+        required: false
+      to_year:
+        description: 'End year (inclusive). Blank with from_year = single year.'
+        type: string
+        required: false
       from_date:
-        description: 'Start date YYYY-MM-DD (inclusive). Leave blank to use --days.'
+        description: 'Date mode: start YYYY-MM-DD (ignored if from_year is set)'
         type: string
         required: false
       to_date:
-        description: 'End date YYYY-MM-DD (inclusive). Trimmed to the last closed trading day.'
+        description: 'Date mode: end YYYY-MM-DD (ignored if from_year is set)'
+        type: string
+        required: false
+      single_date:
+        description: 'Single day YYYY-MM-DD (ignored if year or from/to is set)'
         type: string
         required: false
       days:
-        description: 'Used only when from/to are blank: last N calendar days ending today'
+        description: 'Fallback when nothing above is set: last N calendar days'
         type: string
         default: '7'
       symbols:
         description: 'Optional space-separated symbols without .NS, e.g. "RELIANCE TCS"'
         type: string
         required: false
+      price_years_at_once:
+        description: 'Year jobs to fetch prices for at once. KEEP AT 1 — Angel rate-limits per account.'
+        type: string
+        default: '1'
+      indicator_shards:
+        description: 'Symbol shards for the INDICATOR phase (1-12). No API calls, safe to raise.'
+        type: string
+        default: '4'
+      indicator_max_parallel:
+        description: 'Indicator shards to run at once'
+        type: string
+        default: '4'
       rate_limit_secs:
         description: 'Seconds between Angel requests. 1.2 after close; 2.0+ during market hours.'
         type: string
@@ -96,7 +127,7 @@ on:
         options: [both, prices-only, indicators-only]
         default: both
       force:
-        description: 'Re-fetch/recompute days that are already present'
+        description: 'Re-fetch/recompute days already present'
         type: boolean
         default: false
       dry_run:
@@ -104,123 +135,249 @@ on:
         type: boolean
         default: false
       fail_under:
-        description: 'Fail the run if any day ends below this share of active constituents (default 0.90)'
+        description: 'Fail a shard if a day ends below this share of its symbols'
         type: string
         default: '0.90'
 
-# Two concurrent runs would compete for the same Angel rate limit and make each
-# other slower — exactly the failure this workflow exists to work around.
+# Two concurrent runs would compete for the same Angel quota and make each other
+# slower — the exact failure this workflow is built to work around.
 concurrency:
   group: backfill-prices
   cancel-in-progress: false
 
-jobs:
-  backfill:
-    runs-on: ubuntu-latest
-    # 500 symbols x 2 phases. ~25 min unthrottled; a heavily throttled run is
-    # far slower, and a timeout here just means re-running to pick up the rest.
-    timeout-minutes: 240
-    defaults:
-      run:
-        working-directory: backend
-    env:
-      PGHOST: ${{ secrets.PGHOST }}
-      PGPORT: ${{ secrets.PGPORT }}
-      PGDATABASE: ${{ secrets.PGDATABASE }}
-      PGUSER: ${{ secrets.PGUSER }}
-      PGPASSWORD: ${{ secrets.PGPASSWORD }}
-      ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
-      ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
-      ANGEL_MPIN: ${{ secrets.ANGEL_MPIN }}
-      ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
-      ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      MODEL_KEY: ${{ secrets.MODEL_KEY }}
-      HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
-    steps:
-      - uses: actions/checkout@v7
+env:
+  PGHOST: ${{ secrets.PGHOST }}
+  PGPORT: ${{ secrets.PGPORT }}
+  PGDATABASE: ${{ secrets.PGDATABASE }}
+  PGUSER: ${{ secrets.PGUSER }}
+  PGPASSWORD: ${{ secrets.PGPASSWORD }}
+  ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+  ANGEL_CLIENT_ID: ${{ secrets.ANGEL_CLIENT_ID }}
+  ANGEL_MPIN: ${{ secrets.ANGEL_MPIN }}
+  ANGEL_PASSWORD: ${{ secrets.ANGEL_PASSWORD }}
+  ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+  MODEL_KEY: ${{ secrets.MODEL_KEY }}
+  HF_MODELS_REPO: ${{ secrets.HF_MODELS_REPO }}
 
+jobs:
+  # ── 1. Work out the year list and the shard matrices ────────────────────────
+  #
+  # Sharding by YEAR is what keeps a multi-year run off the job timeout: no
+  # single job ever spans the whole range, however many years are asked for.
+  # The indicator phase shards by symbol on top of that; prices do not (header).
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      years: ${{ steps.p.outputs.years }}
+      indicator_shards: ${{ steps.p.outputs.indicator_shards }}
+      year_mode: ${{ steps.p.outputs.year_mode }}
+      date_args: ${{ steps.p.outputs.date_args }}
+    steps:
+      - id: p
+        shell: bash
+        run: |
+          set -euo pipefail
+          FY="${{ inputs.from_year }}"; TY="${{ inputs.to_year }}"
+          # Never plan past yesterday — today is the EOD scheduler's.
+          YEST_YEAR=$(date -u -d 'yesterday' +%Y 2>/dev/null || date -u -v-1d +%Y)
+
+          if [ -n "$FY" ] || [ -n "$TY" ]; then
+            [ -z "$FY" ] && FY="$TY"
+            [ -z "$TY" ] && TY="$FY"
+            if [ "$TY" -gt "$YEST_YEAR" ]; then
+              echo "::notice::to_year $TY is in the future — clamping to $YEST_YEAR"
+              TY="$YEST_YEAR"
+            fi
+            if [ "$FY" -gt "$TY" ]; then echo "::error::from_year > to_year"; exit 1; fi
+            YEARS=$(seq "$FY" "$TY" | jq -R . | jq -sc .)
+            echo "year_mode=true"  >> "$GITHUB_OUTPUT"
+            echo "date_args="      >> "$GITHUB_OUTPUT"
+            echo "Years to process: $YEARS"
+          else
+            # Date / single-day / days mode — one pseudo-year so the matrix
+            # shape stays identical and the shard jobs need no branching.
+            if [ -n "${{ inputs.single_date }}" ]; then
+              ARGS="--date ${{ inputs.single_date }}"
+            elif [ -n "${{ inputs.from_date }}" ] || [ -n "${{ inputs.to_date }}" ]; then
+              if [ -z "${{ inputs.from_date }}" ] || [ -z "${{ inputs.to_date }}" ]; then
+                echo "::error::from_date and to_date must be given together"; exit 1
+              fi
+              ARGS="--from ${{ inputs.from_date }} --to ${{ inputs.to_date }}"
+            else
+              ARGS="--days ${{ inputs.days }}"
+            fi
+            YEARS='["-"]'
+            echo "year_mode=false" >> "$GITHUB_OUTPUT"
+            echo "date_args=$ARGS" >> "$GITHUB_OUTPUT"
+            echo "Date mode: $ARGS"
+          fi
+          echo "years=$YEARS" >> "$GITHUB_OUTPUT"
+
+          IS=$(seq 0 $(( ${{ inputs.indicator_shards }} - 1 )) | jq -R . | jq -sc .)
+          echo "indicator_shards=$IS" >> "$GITHUB_OUTPUT"
+          echo "Indicator shards: $IS   (prices are not sharded — see the header)"
+
+      # DDL in ONE place. init_database() issues CREATE TABLE / ALTER TABLE /
+      # CREATE INDEX, and shards running that concurrently against the same
+      # catalog rows makes PostgreSQL raise "tuple concurrently updated".
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies (CPU-only torch)
+        working-directory: backend
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      - name: Ensure schema (single-threaded — shards must NOT do this)
+        working-directory: backend
+        run: python -c "from database.db import init_database; init_database()"
 
-      # CPU torch first, as everywhere else: requirements.txt pins torch and the
-      # default index would drag in the multi-GB CUDA wheel. Nothing here runs a
-      # model, but the pin still has to resolve.
+  # ── 2. Prices — year x symbol shard ─────────────────────────────────────────
+  prices:
+    needs: plan
+    if: inputs.mode != 'indicators-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      # fail-fast: false — one throttled or timed-out year must not cancel the
+      # others. Each year is independently re-runnable (the skip check means a
+      # re-run only fetches what is still missing), so cancelling siblings would
+      # throw away good work to no benefit.
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.price_years_at_once) }}
+      matrix:
+        year: ${{ fromJSON(needs.plan.outputs.years) }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Install dependencies (CPU-only torch)
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
 
-      # Also runs repair_serial_defaults() — see the header. Do this BEFORE the
-      # backfill, or a database with a missing BIGSERIAL default will accept the
-      # whole run and persist none of it.
-      - name: Ensure schema (also repairs missing BIGSERIAL defaults)
-        run: python -c "from database.db import init_database; init_database()"
-
-      - name: Build arguments
-        id: args
+      - name: Backfill prices — ${{ matrix.year }}
         run: |
           set -euo pipefail
-          ARGS=""
-          if [ -n "${{ inputs.from_date }}" ] || [ -n "${{ inputs.to_date }}" ]; then
-            if [ -z "${{ inputs.from_date }}" ] || [ -z "${{ inputs.to_date }}" ]; then
-              echo "::error::from_date and to_date must be given together"
-              exit 1
-            fi
-            ARGS="--from ${{ inputs.from_date }} --to ${{ inputs.to_date }}"
+          if [ "${{ needs.plan.outputs.year_mode }}" = "true" ]; then
+            RANGE="--from-year ${{ matrix.year }} --to-year ${{ matrix.year }}"
           else
-            ARGS="--days ${{ inputs.days }}"
+            RANGE="${{ needs.plan.outputs.date_args }}"
           fi
+          ARGS="$RANGE --prices-only"
+          ARGS="$ARGS --rate-limit-secs ${{ inputs.rate_limit_secs }} --fail-under ${{ inputs.fail_under }}"
           [ -n "${{ inputs.symbols }}" ] && ARGS="$ARGS --symbols ${{ inputs.symbols }}"
-          ARGS="$ARGS --rate-limit-secs ${{ inputs.rate_limit_secs }}"
-          case "${{ inputs.mode }}" in
-            prices-only)     ARGS="$ARGS --prices-only" ;;
-            indicators-only) ARGS="$ARGS --indicators-only" ;;
-          esac
           [ "${{ inputs.force }}" = "true" ]   && ARGS="$ARGS --force"
           [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
-          ARGS="$ARGS --fail-under ${{ inputs.fail_under }}"
-          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
           echo "Running: python scripts/backfill_prices.py $ARGS"
+          python scripts/backfill_prices.py $ARGS
 
-      # The script exits non-zero only when a target day ends BELOW --fail-under
-      # coverage, not merely because some symbols failed. It used to fail on any
-      # symbol failure: run 32342127959 went red having written 232 price rows
-      # and 1,459 indicator rows, because 7 of 500 symbols exhausted their Angel
-      # retries — every day still finished at 99% coverage. A red run that wrote
-      # 1,691 good rows is indistinguishable from one that died immediately,
-      # which teaches you to ignore red.
-      - name: Backfill prices and indicators
-        run: python scripts/backfill_prices.py ${{ steps.args.outputs.args }}
+  # ── 3. Indicators — after ALL price shards, so no day is computed from a
+  #       range another shard is still filling in ────────────────────────────
+  indicators:
+    needs: [plan, prices]
+    if: always() && inputs.mode != 'prices-only' && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.indicator_max_parallel) }}
+      matrix:
+        year: ${{ fromJSON(needs.plan.outputs.years) }}
+        shard: ${{ fromJSON(needs.plan.outputs.indicator_shards) }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
 
-      # Report coverage regardless, so a genuinely failed run still shows what it
-      # achieved and whether a re-run is worth it.
-      - name: Coverage summary
-        if: always()
+      - name: Backfill indicators — ${{ matrix.year }} shard ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.plan.outputs.year_mode }}" = "true" ]; then
+            RANGE="--from-year ${{ matrix.year }} --to-year ${{ matrix.year }}"
+          else
+            RANGE="${{ needs.plan.outputs.date_args }}"
+          fi
+          ARGS="$RANGE --indicators-only --shards ${{ inputs.indicator_shards }} --shard ${{ matrix.shard }}"
+          ARGS="$ARGS --fail-under ${{ inputs.fail_under }}"
+          [ -n "${{ inputs.symbols }}" ] && ARGS="$ARGS --symbols ${{ inputs.symbols }}"
+          [ "${{ inputs.force }}" = "true" ]   && ARGS="$ARGS --force"
+          [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          echo "Running: python scripts/backfill_prices.py $ARGS"
+          python scripts/backfill_prices.py $ARGS
+
+  # ── 4. One coverage report over the whole requested range ───────────────────
+  report:
+    needs: [plan, prices, indicators]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies (CPU-only torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Coverage per year
         run: |
           python - <<'PY'
+          import os
+          from datetime import date
           from database.db import get_connection, release_connection, _execute
+          years = ${{ needs.plan.outputs.years }}
           conn = get_connection()
           try:
-              cur = _execute(conn, """
-                  SELECT p.date::date AS d, COUNT(*) AS px,
-                         (SELECT COUNT(*) FROM technical_indicators t WHERE t.date = p.date) AS ind
-                    FROM prices p
-                   WHERE p.interval = '1d' AND p.date >= CURRENT_DATE - 14
-                   GROUP BY p.date ORDER BY p.date
-              """, ())
-              print(f"{'date':<14}{'prices':>10}{'indicators':>14}")
-              for d, px, ind in cur.fetchall():
-                  print(f"{str(d)[:10]:<14}{px:>10,}{ind:>14,}")
+              cur = _execute(conn, "SELECT COUNT(*) FROM nifty_constituents WHERE is_active", ())
+              universe = cur.fetchone()[0]
+              print(f"{'year':<8}{'days':>7}{'prices':>12}{'indicators':>14}{'universe':>10}")
+              for y in years:
+                  if y == "-":
+                      continue
+                  a, b = f"{y}-01-01", f"{y}-12-31"
+                  cur = _execute(conn, """SELECT COUNT(DISTINCT date), COUNT(*) FROM prices
+                                           WHERE interval='1d' AND date>=? AND date<=?""", (a, b))
+                  d, p = cur.fetchone()
+                  cur = _execute(conn, """SELECT COUNT(*) FROM technical_indicators
+                                           WHERE date>=? AND date<=?""", (a, b))
+                  i = cur.fetchone()[0]
+                  print(f"{y:<8}{d:>7}{p:>12,}{i:>14,}{universe:>10}")
           finally:
               release_connection(conn)
           PY
 
       - name: Next step
-        if: always()
         run: |
-          echo "Signals are NOT regenerated here. Once coverage looks right, run"
-          echo "the 'Refresh trade signals' workflow (scripts/generate_trades.py)."
+          echo "Signals are NOT regenerated here."
+          echo "Once coverage looks right, run the 'Refresh trade signals' workflow."
+          echo "Symbols whose history changed should also be retrained —"
+          echo "weekly-retrain.yml enumerates SELECT DISTINCT symbol FROM prices."
